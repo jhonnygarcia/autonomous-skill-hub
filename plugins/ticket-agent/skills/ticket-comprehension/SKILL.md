@@ -5,8 +5,12 @@ description: Comprende un ticket de Azure DevOps a cabalidad - lee el work item 
 
 # Comprensión de tickets de Azure DevOps
 
-Produce un análisis completo y fiel de un work item. Regla de oro: **lo que no se
-pudo leer se reporta en "Información faltante"; jamás se rellena con suposiciones.**
+Produce un análisis completo y fiel de un work item. Dos reglas de oro:
+
+1. **Lo que no se pudo leer se reporta en "Información faltante"; jamás se rellena
+   con suposiciones.**
+2. **Toda cifra que no salga del work item cita su fuente** — `archivo:línea`, id de
+   commit, o el comando que la produce. Sin fuente verificada, no se escribe.
 
 ## 1. Configuración
 
@@ -20,27 +24,53 @@ Herramientas del MCP azure-devops. Prohibido usar cualquier herramienta `*_write
 
 1. **Work item**: `wit_work_item` action `get` con `expand: "All"` — campos,
    descripción, criterios de aceptación, relaciones, adjuntos.
-2. **Comentarios**: `wit_work_item` action `list_comments`.
+2. **Comentarios**: `wit_work_item` action `list_comments`. Los comentarios
+   corrigen la descripción con frecuencia (alcance que entra o sale, cifras
+   revisadas): donde se contradigan, **gana el comentario más reciente** y el
+   análisis lo dice.
 3. **Relaciones — máximo 1 nivel**: del resultado anterior identifica padre, hijos
    directos, related y PRs/commits vinculados. Delega la lectura a un subagente
    (`Explore` o general-purpose) que devuelva POR CADA uno: id, título, tipo,
    estado, tipo de relación y un resumen de 2-3 líneas de qué aporta al ticket
-   principal. No sigas relaciones de las relaciones.
+   principal. No sigas relaciones de las relaciones. El límite de 1 nivel aplica
+   **solo a `relations`** — no excusa de leer lo que el ticket cita en su texto
+   (paso 6).
 4. **Adjuntos**: descárgalos con `wit_work_item_attachment`. Imágenes: descríbelas
    mirando su contenido. Documentos: resume lo relevante al ticket. Ilegible o no
    descargable → regístralo en "Información faltante" con la causa.
 5. **Wiki**: `search_wiki` con los términos clave del ticket (componentes, pantallas,
    dominio). Máximo 5 búsquedas; incluye solo hallazgos relevantes.
-6. **Reglas del proyecto anfitrión**: lee CLAUDE.md y `.claude/rules/*` si existen,
-   y TODO documento del repo que el ticket referencie explícitamente (p. ej.
-   `docs/...md`). Estas reglas condicionan el análisis, no se reemplazan.
-7. **Código afectado**: subagente `Explore` con los archivos/componentes/clases que
+6. **Referencias citadas en el texto — LECTURA OBLIGATORIA.** Recorre la descripción
+   y los comentarios y extrae toda referencia explícita:
+   - **Work items citados por id** (p. ej. "ADO Bug #3271") → léelos con
+     `wit_work_item` action `get`. Que no estén en `relations` no los exime: son
+     una referencia, no una relación, y el límite del paso 3 no aplica.
+   - **Documentos del repo citados por ruta** (p. ej. `docs/quote-visibility-rules.md`)
+     → ábrelos y léelos.
+
+   No basta con listarlos como "aplicables": hay que leer el contenido. Solo van a
+   "Información faltante" si el intento de lectura **falló**, con la causa; nunca
+   por no haberlo intentado.
+7. **Reglas del proyecto anfitrión**: lee CLAUDE.md y `.claude/rules/*` si existen.
+   Claude Code carga los CLAUDE.md en cascada desde el directorio de trabajo hacia
+   arriba, así que puede haber reglas por encima de la raíz del repo — inclúyelas.
+   Estas reglas condicionan el análisis, no se reemplazan.
+8. **Código afectado**: subagente `Explore` con los archivos/componentes/clases que
    el ticket menciona; devuelve rutas concretas y qué papel juega cada una.
+9. **Estado del trabajo ya empezado** (solo si lo hay): si el ticket está en curso,
+   puedes inspeccionar la rama, sus commits y los documentos de trabajo del repo.
+   Es material valioso, pero es **estado del repo, no contenido del ticket**: va en
+   su propia sección, y cada dato (número de commits, porcentajes de avance,
+   conteos de tests) se verifica con el comando o el `archivo:línea` que lo respalda
+   y se cita. No atribuyas a un documento un porcentaje que pertenece a una de sus
+   partes.
 
 ## 3. Análisis
 
-Con lo recolectado, escribe `docs/tickets/<id>-analysis.md` (crea el directorio si
-falta) con EXACTAMENTE esta estructura:
+**Primer paso obligatorio de esta sección: crear el archivo.** Escribe
+`docs/tickets/<id>-analysis.md` (crea el directorio si falta) con EXACTAMENTE esta
+estructura. Presentar el análisis en el chat sin haber escrito el archivo es un
+fallo de la tarea, no una variante aceptable.
 
 ```markdown
 # Análisis del ticket <id>: <título>
@@ -63,6 +93,14 @@ falta) con EXACTAMENTE esta estructura:
 ## Contexto de relaciones
 (por cada relacionado: id, tipo de relación, resumen de qué aporta)
 
+## Comentarios
+(por cada comentario: fecha, autor y qué cambia respecto de la descripción;
+di explícitamente si corrige el alcance o alguna cifra. "Ninguno" si no hay)
+
+## Referencias citadas
+(por cada work item o documento citado en el texto: qué es y qué aporta,
+leído en el paso 2.6. "Ninguna" si no hay)
+
 ## Adjuntos revisados
 (por cada uno: nombre, qué contiene, qué aporta)
 
@@ -71,6 +109,10 @@ falta) con EXACTAMENTE esta estructura:
 
 ## Código afectado
 (rutas concretas y papel de cada una)
+
+## Estado del trabajo en el repo
+(solo si el ticket ya tiene trabajo empezado: rama, avance y bloqueos, con la
+fuente de cada cifra. Omite la sección entera si no hay trabajo empezado)
 
 ## Riesgos y dependencias
 (técnicos y de negocio detectados)
@@ -90,4 +132,5 @@ falta) con EXACTAMENTE esta estructura:
 
 - Ticket inexistente o sin permisos → informa la causa exacta y detente.
 - MCP no conectado o `ADO_ORG` sin definir → indica los pasos del README del plugin.
-- Relación o adjunto inaccesible → anótalo en "Información faltante" y continúa.
+- Relación, referencia o adjunto inaccesible → anótalo en "Información faltante" con
+  la causa y continúa.
