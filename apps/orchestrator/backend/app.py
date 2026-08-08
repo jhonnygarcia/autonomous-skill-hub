@@ -134,3 +134,91 @@ def delete_ticket(tid: int):
             if r["log_path"]:
                 Path(r["log_path"]).unlink(missing_ok=True)
         c.execute("DELETE FROM tickets WHERE id=?", (tid,))
+
+
+RUN_LOCK = asyncio.Lock()
+
+
+def claude_cmd() -> list[str]:
+    raw = os.environ.get("ORCH_CLAUDE_CMD")
+    if raw:
+        return json.loads(raw)
+    exe = shutil.which("claude")
+    if not exe:
+        raise HTTPException(500, "No se encontró el CLI 'claude' en el PATH")
+    return [exe]
+
+
+def set_run(run_id: int, **fields):
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with db() as c:
+        c.execute(f"UPDATE runs SET {cols} WHERE id=?", (*fields.values(), run_id))
+
+
+def set_ticket(tid: int, **fields):
+    fields["updated_at"] = now()
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with db() as c:
+        c.execute(f"UPDATE tickets SET {cols} WHERE id=?", (*fields.values(), tid))
+
+
+async def execute_run(run_id: int, ticket: dict, instructions: str | None):
+    async with RUN_LOCK:  # ponytail: lock global, por-repo si algún día duele
+        log_path = LOGS_DIR / f"{run_id}.log"
+        set_run(run_id, status="running", log_path=str(log_path), started_at=now())
+        set_ticket(ticket["id"], status="running")
+        prompt = f"/ticket-agent:analyze {ticket['ado_id']}"
+        if instructions:
+            prompt += (
+                "\n\nInstrucciones de ajuste del usuario para re-trabajar el análisis "
+                f"(aplícalas y regenera el archivo): {instructions}"
+            )
+        cmd = claude_cmd() + [
+            "-p", prompt,
+            "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "acceptEdits",
+        ]
+        ok = False
+        try:
+            with open(log_path, "w", encoding="utf-8") as log:
+                log.write(f"$ {' '.join(cmd)}\n\n")
+                log.flush()
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=ticket["repo_path"],
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                assert proc.stdout is not None
+                async for line in proc.stdout:
+                    log.write(line.decode("utf-8", errors="replace"))
+                    log.flush()
+                ok = (await proc.wait()) == 0
+        except Exception as exc:  # el error queda en el log, jamás tumba el server
+            with open(log_path, "a", encoding="utf-8") as log:
+                log.write(f"\n[orchestrator] excepción: {exc}\n")
+        set_run(run_id, status="success" if ok else "error", finished_at=now())
+        set_ticket(ticket["id"], status="analyzed" if ok else "error")
+
+
+@app.post("/tickets/{tid}/run", status_code=202)
+def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    with db() as c:
+        active = c.execute(
+            "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued','running')", (tid,)
+        ).fetchone()
+    if active:
+        raise HTTPException(409, "Este ticket ya tiene una corrida activa")
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO runs(ticket_id, phase, instructions, status) VALUES(?,?,?,'queued')",
+            (tid, "analyze", body.instructions),
+        )
+        run_id = cur.lastrowid
+    set_ticket(tid, status="queued")
+    background.add_task(execute_run, run_id, dict(t), body.instructions)
+    with db() as c:
+        return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
