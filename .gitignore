@@ -1,0 +1,6 @@
+apps/orchestrator/backend/.venv/
+apps/orchestrator/backend/orchestrator.db
+apps/orchestrator/backend/logs/
+apps/orchestrator/frontend/node_modules/
+apps/orchestrator/frontend/dist/
+__pycache__/
