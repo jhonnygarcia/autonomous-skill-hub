@@ -1,0 +1,15 @@
+{
+  "name": "autonomous-skill-hub",
+  "owner": {
+    "name": "Jhonny Garcia",
+    "email": "jhonny.garcia.laime@gmail.com"
+  },
+  "description": "Hub personal: experiencia codificada como plugins de Claude Code (skills, agents, comandos, hooks)",
+  "plugins": [
+    {
+      "name": "ticket-agent",
+      "source": "./plugins/ticket-agent",
+      "description": "Comprende tickets de Azure DevOps a cabalidad y produce análisis estructurados"
+    }
+  ]
+}
