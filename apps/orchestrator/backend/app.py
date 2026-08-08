@@ -68,3 +68,69 @@ def init_db() -> None:
 
 app = FastAPI(title="ticket-orchestrator")
 init_db()
+
+
+class TicketIn(BaseModel):
+    ado_id: int
+    project: str
+
+
+class RunIn(BaseModel):
+    instructions: str | None = None
+
+
+def ticket_row(tid: int) -> sqlite3.Row | None:
+    with db() as c:
+        return c.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+
+
+@app.get("/projects")
+def projects():
+    return [{"name": p["name"], "org": p["org"], "project": p["project"]}
+            for p in load_config()["projects"]]
+
+
+@app.post("/tickets", status_code=201)
+def create_ticket(body: TicketIn):
+    proj = get_project(body.project)
+    if not proj:
+        raise HTTPException(400, f"Proyecto '{body.project}' no está en orchestrator.config.json")
+    ts = now()
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO tickets(ado_id, org, project, repo_path, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (body.ado_id, proj["org"], proj["project"], proj["repoPath"], ts, ts),
+        )
+    return dict(ticket_row(cur.lastrowid))
+
+
+@app.get("/tickets")
+def list_tickets():
+    with db() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM tickets ORDER BY id DESC")]
+
+
+@app.get("/tickets/{tid}")
+def get_ticket(tid: int):
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    with db() as c:
+        runs = [dict(r) for r in c.execute(
+            "SELECT * FROM runs WHERE ticket_id=? ORDER BY id DESC", (tid,))]
+    tail = ""
+    if runs and runs[0]["log_path"] and Path(runs[0]["log_path"]).exists():
+        tail = Path(runs[0]["log_path"]).read_text(encoding="utf-8", errors="replace")[-8000:]
+    return {"ticket": dict(t), "runs": runs, "log_tail": tail}
+
+
+@app.delete("/tickets/{tid}", status_code=204)
+def delete_ticket(tid: int):
+    if not ticket_row(tid):
+        raise HTTPException(404)
+    with db() as c:
+        for r in c.execute("SELECT log_path FROM runs WHERE ticket_id=?", (tid,)):
+            if r["log_path"]:
+                Path(r["log_path"]).unlink(missing_ok=True)
+        c.execute("DELETE FROM tickets WHERE id=?", (tid,))
