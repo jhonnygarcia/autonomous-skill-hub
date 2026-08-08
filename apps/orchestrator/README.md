@@ -8,6 +8,16 @@ suscripción de Claude Code (CLI headless) sobre el repo de cada proyecto.
 - Claude Code CLI logueado (`claude` en el PATH)
 - Cada repo destino con el plugin ticket-agent instalado y configurado
 
+## Suscripción, no API key
+El orquestador corre `claude -p` (CLI headless), que se autentica con la sesión
+de tu suscripción (el `/login` de Claude Code) — no usa `ANTHROPIC_API_KEY` en
+ninguna parte. Además, el runner **elimina** `ANTHROPIC_API_KEY` y
+`ANTHROPIC_AUTH_TOKEN` del entorno del subproceso: aunque existan en tu máquina
+por otros proyectos, las corridas jamás facturarán por API.
+
+Para verificar tu sesión: `claude -p "di OK"` en una terminal sin
+`ANTHROPIC_API_KEY` definida debe responder sin pedir credenciales.
+
 ## Configurar
 Edita `orchestrator.config.json` con tus proyectos: `name`, `org`, `project`
 y `repoPath` (ruta local del clon).

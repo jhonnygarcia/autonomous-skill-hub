@@ -71,6 +71,17 @@ def test_rework_passes_instructions(client, monkeypatch):
     assert detail["runs"][0]["instructions"] == "no consideraste el parent"
 
 
+def test_run_strips_api_key_so_subscription_is_used(client, monkeypatch):
+    _use_fake_claude(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-no-debe-llegar")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tampoco")
+    tid = client.post("/tickets", json={"ado_id": 11, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "analyzed"
+    assert "SAW-API-KEY" not in detail["log_tail"]
+
+
 def test_run_conflict_when_active(client, monkeypatch):
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 10, "project": "Demo"}).json()["id"]

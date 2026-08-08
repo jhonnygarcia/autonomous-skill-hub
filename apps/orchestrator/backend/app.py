@@ -178,6 +178,10 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
             "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
         ]
+        # Garantiza que el CLI use la suscripción logueada, nunca facturación por API:
+        # sin estas variables, la única credencial disponible es la del /login local.
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
         ok = False
         try:
             with open(log_path, "w", encoding="utf-8") as log:
@@ -186,6 +190,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=ticket["repo_path"],
+                    env=env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                 )
