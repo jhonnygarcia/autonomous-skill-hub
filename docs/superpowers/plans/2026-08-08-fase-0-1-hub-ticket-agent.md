@@ -47,7 +47,7 @@ autonomous-skill-hub/
 - Consumes: nada (primera tarea).
 - Produces: marketplace `autonomous-skill-hub` y plugin `ticket-agent` (namespace de comandos `/ticket-agent:*`, de skills `ticket-agent:*`) que Tasks 2-4 rellenan.
 
-- [ ] **Step 1: Crear `.claude-plugin/marketplace.json`**
+- [x] **Step 1: Crear `.claude-plugin/marketplace.json`**
 
 ```json
 {
@@ -67,7 +67,7 @@ autonomous-skill-hub/
 }
 ```
 
-- [ ] **Step 2: Crear `plugins/ticket-agent/.claude-plugin/plugin.json`**
+- [x] **Step 2: Crear `plugins/ticket-agent/.claude-plugin/plugin.json`**
 
 ```json
 {
@@ -84,7 +84,7 @@ autonomous-skill-hub/
 
 Los directorios `skills/` y `commands/` se auto-descubren; no se declaran.
 
-- [ ] **Step 3: Crear `README.md` (raíz del hub)**
+- [x] **Step 3: Crear `README.md` (raíz del hub)**
 
 ```markdown
 # Autonomous Skill Hub
@@ -112,12 +112,12 @@ real como skills, comandos, agents y hooks, instalable en cualquier proyecto.
 5. Diseños en `docs/superpowers/specs/`, planes en `docs/superpowers/plans/`.
 ```
 
-- [ ] **Step 4: Validar**
+- [x] **Step 4: Validar**
 
 Run: `claude plugin validate .`
 Expected: `Validation passed` (sin errores; el plugin aún no tiene skills/comandos y eso es válido).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .claude-plugin plugins README.md
@@ -136,7 +136,7 @@ git commit -m "feat: marketplace autonomous-skill-hub con esqueleto del plugin t
 - Consumes: plugin `ticket-agent` de Task 1.
 - Produces: servidor MCP `azure-devops` (herramientas `wit_work_item`, `wit_work_item_attachment`, `search_wiki`, `search_code`, `wit_query`, etc.) que la skill de Task 3 usa; contrato de configuración `.claude/ticket-agent.json` + env `ADO_ORG` que Task 5 aplica.
 
-- [ ] **Step 1: Crear `plugins/ticket-agent/.mcp.json`**
+- [x] **Step 1: Crear `plugins/ticket-agent/.mcp.json`**
 
 ```json
 {
@@ -163,7 +163,7 @@ git commit -m "feat: marketplace autonomous-skill-hub con esqueleto del plugin t
 
 Notas de diseño (no van en el archivo): `${ADO_ORG}` se expande desde el entorno al arrancar el servidor; `-d` carga solo los dominios que la Fase 1 necesita (evita 60+ herramientas); `azcli` delega credenciales a `az login` — cero secretos en el repo.
 
-- [ ] **Step 2: Crear `plugins/ticket-agent/README.md`**
+- [x] **Step 2: Crear `plugins/ticket-agent/README.md`**
 
 ```markdown
 # ticket-agent
@@ -216,12 +216,12 @@ Nunca se guardan en archivos del repo. La autenticación la resuelve Azure CLI
 (`az login`). Cambiar de cuenta = cambiar `ADO_ORG` + `ticket-agent.json` + sesión de az.
 ```
 
-- [ ] **Step 3: Validar**
+- [x] **Step 3: Validar**
 
 Run: `claude plugin validate .`
 Expected: `Validation passed`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add plugins/ticket-agent
@@ -239,7 +239,7 @@ git commit -m "feat(ticket-agent): MCP azure-devops parametrizado por ADO_ORG y 
 - Consumes: herramientas MCP de Task 2; contrato `.claude/ticket-agent.json` de Task 2.
 - Produces: skill invocable como `ticket-agent:ticket-comprehension` (la invoca el comando de Task 4); archivo de salida `docs/tickets/<id>-analysis.md` (lo verifica Task 5).
 
-- [ ] **Step 1: Crear `plugins/ticket-agent/skills/ticket-comprehension/SKILL.md`**
+- [x] **Step 1: Crear `plugins/ticket-agent/skills/ticket-comprehension/SKILL.md`**
 
 ````markdown
 ---
@@ -337,12 +337,12 @@ falta) con EXACTAMENTE esta estructura:
 - Relación o adjunto inaccesible → anótalo en "Información faltante" y continúa.
 ````
 
-- [ ] **Step 2: Validar**
+- [x] **Step 2: Validar**
 
 Run: `claude plugin validate .`
 Expected: `Validation passed` (frontmatter de la skill correcto).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add plugins/ticket-agent/skills
@@ -360,7 +360,7 @@ git commit -m "feat(ticket-agent): skill ticket-comprehension con metodología d
 - Consumes: skill `ticket-agent:ticket-comprehension` de Task 3.
 - Produces: comando `/ticket-agent:analyze <id>` — el punto de entrada que Task 5 ejecuta.
 
-- [ ] **Step 1: Crear `plugins/ticket-agent/commands/analyze.md`**
+- [x] **Step 1: Crear `plugins/ticket-agent/commands/analyze.md`**
 
 ```markdown
 ---
@@ -378,12 +378,12 @@ de autonomía configurado.
 Si "$ARGUMENTS" está vacío o no es un número de work item, pide el ID y detente.
 ```
 
-- [ ] **Step 2: Validar**
+- [x] **Step 2: Validar**
 
 Run: `claude plugin validate .`
 Expected: `Validation passed`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add plugins/ticket-agent/commands
