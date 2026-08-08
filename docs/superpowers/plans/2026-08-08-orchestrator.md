@@ -49,7 +49,7 @@ apps/orchestrator/
 **Interfaces:**
 - Produces: módulo `app` con `init_db()`, `db()`, `load_config()`, tablas `tickets` y `runs` — Tasks 2-3 los consumen. Env vars de override: `ORCH_DB`, `ORCH_LOGS`, `ORCH_CONFIG`, `ORCH_CLAUDE_CMD`.
 
-- [ ] **Step 1: Crear `orchestrator.config.json`**
+- [x] **Step 1: Crear `orchestrator.config.json`**
 
 ```json
 {
@@ -66,7 +66,7 @@ apps/orchestrator/
 
 (Jhonny ajusta `repoPath` a la ruta real del clon del TMS.)
 
-- [ ] **Step 2: Crear `requirements.txt`**
+- [x] **Step 2: Crear `requirements.txt`**
 
 ```
 fastapi
@@ -75,7 +75,7 @@ httpx
 pytest
 ```
 
-- [ ] **Step 3: Crear `app.py` con config + DB**
+- [x] **Step 3: Crear `app.py` con config + DB**
 
 ```python
 import asyncio
@@ -150,7 +150,7 @@ app = FastAPI(title="ticket-orchestrator")
 init_db()
 ```
 
-- [ ] **Step 4: Escribir el test de DB (falla aún: faltan endpoints, pero la DB debe funcionar)**
+- [x] **Step 4: Escribir el test de DB (falla aún: faltan endpoints, pero la DB debe funcionar)**
 
 `tests/conftest.py`:
 
@@ -200,12 +200,12 @@ def test_db_tables_created(client):
     assert {"tickets", "runs"} <= names
 ```
 
-- [ ] **Step 5: Correr el test**
+- [x] **Step 5: Correr el test**
 
 Run: `cd apps/orchestrator/backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt && .venv/Scripts/python -m pytest tests/ -v`
 Expected: PASS (1 test).
 
-- [ ] **Step 6: Actualizar `.gitignore` (raíz)**
+- [x] **Step 6: Actualizar `.gitignore` (raíz)**
 
 ```
 apps/orchestrator/backend/.venv/
@@ -216,7 +216,7 @@ apps/orchestrator/frontend/dist/
 __pycache__/
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps .gitignore
@@ -235,7 +235,7 @@ git commit -m "feat(orchestrator): scaffold backend con config y SQLite"
 - Consumes: `db()`, `get_project()`, `PHASES` de Task 1.
 - Produces: `GET /projects` · `POST /tickets {ado_id, project}` → ticket · `GET /tickets` → lista · `GET /tickets/{id}` → `{ticket, runs, log_tail}` · `DELETE /tickets/{id}`. La Task 5 (UI) consume exactamente estas rutas.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Agregar a `tests/test_app.py`:
 
@@ -264,12 +264,12 @@ def test_projects_endpoint(client):
     assert client.get("/projects").json() == [{"name": "Demo", "org": "DemoOrg", "project": "Demo"}]
 ```
 
-- [ ] **Step 2: Correr y ver que fallan**
+- [x] **Step 2: Correr y ver que fallan**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: FAIL (404 en las rutas nuevas).
 
-- [ ] **Step 3: Implementar los endpoints en `app.py`**
+- [x] **Step 3: Implementar los endpoints en `app.py`**
 
 ```python
 class TicketIn(BaseModel):
@@ -338,12 +338,12 @@ def delete_ticket(tid: int):
         c.execute("DELETE FROM tickets WHERE id=?", (tid,))
 ```
 
-- [ ] **Step 4: Correr los tests**
+- [x] **Step 4: Correr los tests**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/backend
@@ -363,7 +363,7 @@ git commit -m "feat(orchestrator): CRUD de tickets y endpoint de proyectos"
 - Consumes: tablas y endpoints previos; env `ORCH_CLAUDE_CMD` (JSON array con el prefijo del comando; default `["claude"]` resuelto con `shutil.which`).
 - Produces: `POST /tickets/{id}/run {instructions?}` → 202 con el run creado; estados de run `queued→running→success|error`; ticket `running→analyzed|error`; log en `LOGS_DIR/<run_id>.log`. Re-trabajo = misma ruta con `instructions`.
 
-- [ ] **Step 1: Crear `tests/fake_claude.py`**
+- [x] **Step 1: Crear `tests/fake_claude.py`**
 
 ```python
 """Sustituto de `claude -p` para tests: imprime sus args y respeta FAKE_FAIL."""
@@ -378,7 +378,7 @@ if os.environ.get("FAKE_FAIL") == "1":
 print('{"type":"result","subtype":"success"}')
 ```
 
-- [ ] **Step 2: Escribir los tests que fallan**
+- [x] **Step 2: Escribir los tests que fallan**
 
 Agregar a `tests/test_app.py`:
 
@@ -437,12 +437,12 @@ def test_run_conflict_when_active(client, monkeypatch):
     assert client.post(f"/tickets/{tid}/run", json={}).status_code == 409
 ```
 
-- [ ] **Step 3: Correr y ver que fallan**
+- [x] **Step 3: Correr y ver que fallan**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: FAIL (404 en `/run`).
 
-- [ ] **Step 4: Implementar el runner en `app.py`**
+- [x] **Step 4: Implementar el runner en `app.py`**
 
 ```python
 RUN_LOCK = asyncio.Lock()
@@ -533,12 +533,12 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
 ```
 
-- [ ] **Step 5: Correr los tests**
+- [x] **Step 5: Correr los tests**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: PASS (9 tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/backend
@@ -555,7 +555,7 @@ git commit -m "feat(orchestrator): runner headless de Claude Code con lock, logs
 **Interfaces:**
 - Produces: proyecto React TS que compila con `npm run build`; proxy `/api` → `http://127.0.0.1:8000`; componentes shadcn `button card badge input textarea` disponibles. Task 5 escribe la UI encima.
 
-- [ ] **Step 1: Generar el proyecto y dependencias**
+- [x] **Step 1: Generar el proyecto y dependencias**
 
 ```bash
 cd apps/orchestrator
@@ -565,7 +565,7 @@ npm install
 npm install tailwindcss @tailwindcss/vite
 ```
 
-- [ ] **Step 2: Configurar Vite (Tailwind + proxy + alias)** — reemplazar `vite.config.ts`:
+- [x] **Step 2: Configurar Vite (Tailwind + proxy + alias)** — reemplazar `vite.config.ts`:
 
 ```ts
 import path from "node:path"
@@ -593,7 +593,7 @@ En `tsconfig.json` y `tsconfig.app.json`, dentro de `compilerOptions`, agregar:
 "paths": { "@/*": ["./src/*"] }
 ```
 
-- [ ] **Step 3: Inicializar shadcn/ui y componentes**
+- [x] **Step 3: Inicializar shadcn/ui y componentes**
 
 ```bash
 npx shadcn@latest init -d
@@ -602,12 +602,12 @@ npx shadcn@latest add button card badge input textarea
 
 (`-d` acepta defaults; si pregunta el color base, elegir `neutral`.)
 
-- [ ] **Step 4: Verificar build**
+- [x] **Step 4: Verificar build**
 
 Run: `npm run build`
 Expected: build exitoso sin errores de TypeScript.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/frontend
@@ -627,7 +627,7 @@ git commit -m "feat(orchestrator): scaffold frontend Vite + Tailwind v4 + shadcn
 - Consumes: la API de Tasks 2-3 vía proxy `/api`; componentes shadcn de Task 4.
 - Produces: página única — encolar (ID + proyecto), cola con stepper de 6 fases, detalle con historial/log/ajustar-y-recorrer/borrar, polling cada 3 s.
 
-- [ ] **Step 1: Crear `src/api.ts`**
+- [x] **Step 1: Crear `src/api.ts`**
 
 ```ts
 export type Ticket = {
@@ -664,7 +664,7 @@ export const api = {
 }
 ```
 
-- [ ] **Step 2: Reemplazar `src/App.tsx`**
+- [x] **Step 2: Reemplazar `src/App.tsx`**
 
 ```tsx
 import { useEffect, useState } from "react"
@@ -834,16 +834,16 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 3: Limpiar restos del template**
+- [x] **Step 3: Limpiar restos del template**
 
 Borrar `src/App.css` y quitar su import si `main.tsx` lo referencia (el template importa `./index.css`, que se queda).
 
-- [ ] **Step 4: Verificar build**
+- [x] **Step 4: Verificar build**
 
 Run: `npm run build`
 Expected: build exitoso.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/frontend
@@ -862,7 +862,7 @@ git commit -m "feat(orchestrator): UI de cola, workflow, historial y re-trabajo"
 - Consumes: todo lo anterior.
 - Produces: instrucciones de arranque y el criterio de aceptación real (ticket 3311).
 
-- [ ] **Step 1: Crear `apps/orchestrator/README.md`**
+- [x] **Step 1: Crear `apps/orchestrator/README.md`**
 
 ```markdown
 # Ticket Orchestrator
@@ -893,7 +893,7 @@ Abre http://localhost:5173 — encola un ticket por ID, córrelo y sigue el log.
     cd backend && .venv/Scripts/python -m pytest tests/ -v
 ```
 
-- [ ] **Step 2: Registrar la desviación en el spec**
+- [x] **Step 2: Registrar la desviación en el spec**
 
 En `docs/superpowers/specs/2026-08-08-orchestrator-design.md`, en la tabla de decisiones, cambiar la fila "Ejecución" a: `Claude Code CLI headless (claude -p) vía subprocess` con el porqué: `El Agent SDK requiere API key; el CLI usa la suscripción local ya logueada y carga los plugins del proyecto igual que el modo interactivo`. Añadir al final de la sección "Decisiones": "Desviación aprobada durante la implementación: se sustituye el Agent SDK por el CLI headless; el SDK queda como camino de mejora si se necesita control programático más fino."
 
@@ -904,7 +904,7 @@ En `docs/superpowers/specs/2026-08-08-orchestrator-design.md`, en la tabla de de
 3. Verificar: log en vivo en la UI, ticket termina `analyzed`, y existe `docs/tickets/3311-analysis.md` en el repo TMS.
 4. Probar "Ajustar y re-correr" con una instrucción real y verificar que el análisis se regenera.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/README.md docs

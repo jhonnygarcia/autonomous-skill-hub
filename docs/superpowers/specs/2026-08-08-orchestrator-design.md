@@ -19,11 +19,15 @@ crecen columnas conforme existan las Fases 2-4.
 | Decisión | Elección | Por qué |
 |---|---|---|
 | Estado | SQLite local (stdlib `sqlite3`), sin ORM | Cola transitoria de una sola máquina; al terminar un ticket se borra |
-| Ejecución | Claude Agent SDK de Python | Lanza Claude Code programáticamente con la suscripción local del dev — sin API key |
+| Ejecución | Claude Code CLI headless (`claude -p`) vía subprocess | El Agent SDK requiere API key; el CLI usa la suscripción local ya logueada y carga los plugins del proyecto igual que el modo interactivo |
 | Backend | FastAPI, stateless salvo SQLite | Preparado para compartirse después (deploy + auth) sin reescribir |
 | Frontend | React + Vite + Tailwind + shadcn/ui | Stack pedido; shadcn es la suite natural sobre Tailwind |
 | Progreso | Polling de la UI | Lo más simple que funciona; SSE solo si el polling se queda corto |
 | Concurrencia | Un ticket corre a la vez (lock global) | Dos sesiones de Claude Code sobre un repo se pisan; lock por-repo si algún día duele |
+
+> **Desviación aprobada durante la implementación:** se sustituye el Agent SDK de
+> Python por el CLI headless (`claude -p --output-format stream-json`); el SDK
+> queda como camino de mejora si se necesita control programático más fino.
 
 ## Ubicación
 
