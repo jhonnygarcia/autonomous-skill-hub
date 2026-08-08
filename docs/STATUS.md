@@ -81,9 +81,33 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 
 ## Cómo retomar en una sesión nueva
 
-Prompt sugerido (ajusta los corchetes):
+Prompt sugerido para la aceptación de la Fase 1 — **abrir Claude Code en el repo
+del TMS** (`D:/Companies/ProvidenceSolutions/ProvidenceTMS`):
 
-> Lee docs/STATUS.md de este repo para situarte en el proyecto. Estoy en
-> [la aceptación de la Fase 1 / el orquestador / diseñar la Fase 2].
-> Resultado de lo último que probé: [pega el análisis del 3311, errores, o tus
-> observaciones]. Continuemos desde ahí.
+> Lee D:/Companies/Jorge.Gutierrez/autonomous-skill-hub/docs/STATUS.md para
+> situarte en el proyecto del hub. Vamos a ejecutar la aceptación de la Fase 1
+> aquí en el repo del TMS:
+>
+> 1. Verifica que el plugin ticket-agent esté instalado y configurado en este
+>    repo (marketplace del hub agregado, `.claude/ticket-agent.json`, `ADO_ORG`
+>    en `.claude/settings.json`, MCP azure-devops conectado). Si falta algo,
+>    guíame para completarlo (pasos en el README del plugin, en
+>    plugins/ticket-agent/ del hub).
+> 2. Corre /ticket-agent:analyze 3311 siguiendo la skill al pie de la letra —
+>    en especial: escribir el análisis en docs/tickets/3311-analysis.md es
+>    obligatorio, no solo mostrarlo en el chat.
+> 3. Cuando exista el archivo, evalúalo críticamente contra el work item real:
+>    fidelidad de "Qué pide", criterios de aceptación completos, deducciones
+>    marcadas como DEDUCIDO, relaciones (parent #285) resumidas, reglas del
+>    proyecto detectadas (.claude/rules/financial-visibility.md,
+>    docs/quote-visibility-rules.md), e "Información faltante" honesta.
+>    Preséntame tu evaluación y espera la mía.
+> 4. Con mi feedback: si hay que afinar la metodología, edita la skill en
+>    D:/Companies/Jorge.Gutierrez/autonomous-skill-hub/plugins/ticket-agent/
+>    skills/ticket-comprehension/SKILL.md, committea en el hub y re-corre el
+>    análisis para verificar la mejora.
+> 5. Al cerrar, actualiza docs/STATUS.md del hub (marca la aceptación y
+>    registra lo aprendido).
+
+Para otros hitos (orquestador, diseño de Fase 2), el mismo patrón: leer
+STATUS.md, decir en qué pendiente estás, y pegar resultados u observaciones.
