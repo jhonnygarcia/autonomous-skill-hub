@@ -19,8 +19,15 @@ Para verificar tu sesión: `claude -p "di OK"` en una terminal sin
 `ANTHROPIC_API_KEY` definida debe responder sin pedir credenciales.
 
 ## Configurar
-Edita `orchestrator.config.json` con tus proyectos: `name`, `org`, `project`
-y `repoPath` (ruta local del clon).
+Los proyectos se dan de alta **desde la UI** (tarjeta *Proyectos*) y viven en la
+BD. Por cada uno: `name` (etiqueta local), `org` y `project` de Azure DevOps,
+`repoPath` (el repo primario — ahí corre el agente y ahí se escribe el análisis)
+y, opcionalmente, `extraDirs`: repos hermanos que el ticket necesita **leer**
+pero que están fuera del primario (p. ej. el backend, o la wiki clonada). Cada
+`extraDir` se monta con `--add-dir`.
+
+Las rutas se validan al guardar: si no existen, el alta falla con un 400 en vez
+de reventar después dentro del subproceso.
 
 ## Arrancar
     # Backend

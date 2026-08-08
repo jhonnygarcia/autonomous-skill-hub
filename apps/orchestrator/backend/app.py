@@ -12,7 +12,6 @@ from pydantic import BaseModel
 BASE = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("ORCH_DB", BASE / "orchestrator.db"))
 LOGS_DIR = Path(os.environ.get("ORCH_LOGS", BASE / "logs"))
-CONFIG_PATH = Path(os.environ.get("ORCH_CONFIG", BASE.parent / "orchestrator.config.json"))
 
 PHASES = ["analyze", "design", "implement", "test", "guards", "pr"]  # v1: solo analyze ejecutable
 
@@ -21,12 +20,22 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def load_config() -> dict:
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+def project_out(row: sqlite3.Row) -> dict:
+    return {"name": row["name"], "org": row["org"], "project": row["project"],
+            "repoPath": row["repo_path"], "extraDirs": json.loads(row["extra_dirs"])}
 
 
-def get_project(name: str) -> dict | None:
-    return next((p for p in load_config()["projects"] if p["name"] == name), None)
+def get_project(name: str) -> sqlite3.Row | None:
+    with db() as c:
+        return c.execute("SELECT * FROM projects WHERE name=?", (name,)).fetchone()
+
+
+def check_dirs(*paths: str) -> None:
+    """Las rutas llegan de un formulario y terminan como cwd y --add-dir de un
+    subproceso: un typo aquí revienta dentro del CLI con un error ilegible."""
+    bad = [p for p in paths if not Path(p).is_dir()]
+    if bad:
+        raise HTTPException(400, "No existen o no son directorios: " + ", ".join(bad))
 
 
 def db() -> sqlite3.Connection:
@@ -41,12 +50,20 @@ def init_db() -> None:
     with db() as c:
         c.executescript(
             """
+            CREATE TABLE IF NOT EXISTS projects(
+              name TEXT PRIMARY KEY,
+              org TEXT NOT NULL,
+              project TEXT NOT NULL,
+              repo_path TEXT NOT NULL,
+              extra_dirs TEXT NOT NULL DEFAULT '[]'
+            );
             CREATE TABLE IF NOT EXISTS tickets(
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               ado_id INTEGER NOT NULL,
               org TEXT NOT NULL,
               project TEXT NOT NULL,
               repo_path TEXT NOT NULL,
+              extra_dirs TEXT NOT NULL DEFAULT '[]',
               current_phase TEXT NOT NULL DEFAULT 'analyze',
               status TEXT NOT NULL DEFAULT 'queued',
               created_at TEXT NOT NULL,
@@ -64,10 +81,24 @@ def init_db() -> None:
             );
             """
         )
+        # BDs creadas antes de que existieran los repos extra. SQLite no tiene
+        # ADD COLUMN IF NOT EXISTS, así que se intenta y se ignora si ya está.
+        try:
+            c.execute("ALTER TABLE tickets ADD COLUMN extra_dirs TEXT NOT NULL DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass
 
 
 app = FastAPI(title="ticket-orchestrator")
 init_db()
+
+
+class ProjectIn(BaseModel):
+    name: str
+    org: str
+    project: str
+    repoPath: str
+    extraDirs: list[str] = []
 
 
 class TicketIn(BaseModel):
@@ -85,22 +116,61 @@ def ticket_row(tid: int) -> sqlite3.Row | None:
 
 
 @app.get("/projects")
-def projects():
-    return [{"name": p["name"], "org": p["org"], "project": p["project"]}
-            for p in load_config()["projects"]]
+def list_projects():
+    with db() as c:
+        return [project_out(r) for r in c.execute("SELECT * FROM projects ORDER BY name")]
+
+
+@app.post("/projects", status_code=201)
+def create_project(body: ProjectIn):
+    check_dirs(body.repoPath, *body.extraDirs)
+    with db() as c:
+        if c.execute("SELECT 1 FROM projects WHERE name=?", (body.name,)).fetchone():
+            raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
+        c.execute(
+            "INSERT INTO projects(name, org, project, repo_path, extra_dirs) VALUES(?,?,?,?,?)",
+            (body.name, body.org, body.project, body.repoPath, json.dumps(body.extraDirs)),
+        )
+    return project_out(get_project(body.name))
+
+
+@app.put("/projects/{name}")
+def update_project(name: str, body: ProjectIn):
+    # ponytail: reemplazo completo, sin PATCH parcial — el formulario manda todo.
+    # Renombrar = borrar y volver a crear; los tickets llevan su propia copia.
+    if body.name != name:
+        raise HTTPException(400, "El nombre no se puede cambiar desde esta ruta")
+    if not get_project(name):
+        raise HTTPException(404)
+    check_dirs(body.repoPath, *body.extraDirs)
+    with db() as c:
+        c.execute(
+            "UPDATE projects SET org=?, project=?, repo_path=?, extra_dirs=? WHERE name=?",
+            (body.org, body.project, body.repoPath, json.dumps(body.extraDirs), name),
+        )
+    return project_out(get_project(name))
+
+
+@app.delete("/projects/{name}", status_code=204)
+def delete_project(name: str):
+    # Seguro sin comprobar tickets: cada ticket guardó su propia copia al crearse.
+    with db() as c:
+        if not c.execute("DELETE FROM projects WHERE name=?", (name,)).rowcount:
+            raise HTTPException(404)
 
 
 @app.post("/tickets", status_code=201)
 def create_ticket(body: TicketIn):
     proj = get_project(body.project)
     if not proj:
-        raise HTTPException(400, f"Proyecto '{body.project}' no está en orchestrator.config.json")
+        raise HTTPException(400, f"El proyecto '{body.project}' no está dado de alta")
     ts = now()
     with db() as c:
         cur = c.execute(
-            "INSERT INTO tickets(ado_id, org, project, repo_path, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (body.ado_id, proj["org"], proj["project"], proj["repoPath"], ts, ts),
+            "INSERT INTO tickets(ado_id, org, project, repo_path, extra_dirs, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (body.ado_id, proj["org"], proj["project"], proj["repo_path"],
+             proj["extra_dirs"], ts, ts),
         )
     return dict(ticket_row(cur.lastrowid))
 
@@ -177,7 +247,14 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
             "-p", prompt,
             "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
+            # En headless, acceptEdits NO auto-aprueba las tools del MCP: se
+            # deniegan solas y el agente se queda sin poder leer el work item.
+            "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
         ]
+        # Repos hermanos que el ticket necesita leer (el backend, la wiki) pero que
+        # viven fuera del repo primario. El análisis se sigue escribiendo en el primario.
+        for extra in json.loads(ticket.get("extra_dirs") or "[]"):
+            cmd += ["--add-dir", extra]
         # Garantiza que el CLI use la suscripción logueada, nunca facturación por API:
         # sin estas variables, la única credencial disponible es la del /login local.
         env = {k: v for k, v in os.environ.items()

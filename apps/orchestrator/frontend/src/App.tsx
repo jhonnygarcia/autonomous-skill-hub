@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Projects } from "@/Projects"
 
 const PHASES = [
   { key: "analyze", label: "Análisis" }, { key: "design", label: "Diseño" },
@@ -57,9 +58,14 @@ export default function App() {
     if (selected != null) api.detail(selected).then(setDetail).catch(() => setDetail(null))
   }
 
-  useEffect(() => {
-    api.projects().then(ps => { setProjects(ps); if (ps[0]) setProject(ps[0].name) })
-  }, [])
+  const refreshProjects = () =>
+    api.projects().then(ps => {
+      setProjects(ps)
+      // si el seleccionado desapareció (o no había), cae al primero disponible
+      setProject(cur => ps.some(p => p.name === cur) ? cur : (ps[0]?.name ?? ""))
+    }).catch(e => setError(String(e)))
+
+  useEffect(() => { refreshProjects() }, [])
   useEffect(() => {
     refresh()
     const t = setInterval(refresh, 3000)
@@ -80,6 +86,8 @@ export default function App() {
     <div className="mx-auto max-w-5xl space-y-4 p-6">
       <h1 className="text-2xl font-bold">Ticket Orchestrator</h1>
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <Projects projects={projects} onChange={refreshProjects} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">Encolar ticket</CardTitle></CardHeader>

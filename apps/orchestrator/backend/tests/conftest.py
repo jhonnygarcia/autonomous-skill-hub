@@ -11,14 +11,8 @@ BACKEND = TESTS.parent
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_DB", str(tmp_path / "test.db"))
     monkeypatch.setenv("ORCH_LOGS", str(tmp_path / "logs"))
-    config = tmp_path / "config.json"
-    config.write_text(
-        '{"projects": [{"name": "Demo", "org": "DemoOrg", "project": "Demo", '
-        f'"repoPath": "{(tmp_path / "repo").as_posix()}"}}]}}',
-        encoding="utf-8",
-    )
     (tmp_path / "repo").mkdir()
-    monkeypatch.setenv("ORCH_CONFIG", str(config))
+    (tmp_path / "backend-repo").mkdir()
     sys.path.insert(0, str(BACKEND))
     if "app" in sys.modules:
         del sys.modules["app"]
@@ -27,4 +21,9 @@ def client(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     with TestClient(app_module.app) as c:
+        c.post("/projects", json={
+            "name": "Demo", "org": "DemoOrg", "project": "Demo",
+            "repoPath": (tmp_path / "repo").as_posix(),
+            "extraDirs": [(tmp_path / "backend-repo").as_posix()],
+        })
         yield c

@@ -27,7 +27,40 @@ def test_get_ticket_detail_and_delete(client):
 
 
 def test_projects_endpoint(client):
-    assert client.get("/projects").json() == [{"name": "Demo", "org": "DemoOrg", "project": "Demo"}]
+    [p] = client.get("/projects").json()
+    assert p["name"] == "Demo" and p["org"] == "DemoOrg" and p["project"] == "Demo"
+    assert Path(p["repoPath"]).is_dir() and len(p["extraDirs"]) == 1
+
+
+def test_project_crud_rejects_rutas_inexistentes(client):
+    bad = client.post("/projects", json={
+        "name": "Roto", "org": "O", "project": "P", "repoPath": "/no/existe",
+    })
+    assert bad.status_code == 400 and "/no/existe" in bad.json()["detail"]
+    assert client.post("/projects", json={
+        "name": "Demo", "org": "O", "project": "P",
+        "repoPath": client.get("/projects").json()[0]["repoPath"],
+    }).status_code == 409
+
+
+def test_project_update_y_delete(client):
+    repo = client.get("/projects").json()[0]["repoPath"]
+    r = client.put("/projects/Demo", json={
+        "name": "Demo", "org": "OtraOrg", "project": "Demo", "repoPath": repo, "extraDirs": [],
+    })
+    assert r.status_code == 200 and r.json()["org"] == "OtraOrg" and r.json()["extraDirs"] == []
+    assert client.delete("/projects/Demo").status_code == 204
+    assert client.get("/projects").json() == []
+    assert client.delete("/projects/Demo").status_code == 404
+
+
+def test_ticket_hereda_extra_dirs_del_proyecto(client):
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    t = client.get(f"/tickets/{tid}").json()["ticket"]
+    assert len(json.loads(t["extra_dirs"])) == 1
+    # el ticket conserva su copia aunque el proyecto desaparezca del catálogo
+    client.delete("/projects/Demo")
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == t["repo_path"]
 
 
 import json
@@ -80,6 +113,18 @@ def test_run_strips_api_key_so_subscription_is_used(client, monkeypatch):
     detail = client.get(f"/tickets/{tid}").json()
     assert detail["ticket"]["status"] == "analyzed"
     assert "SAW-API-KEY" not in detail["log_tail"]
+
+
+def test_run_pasa_allowed_tools_y_add_dir(client, monkeypatch):
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    # Sin --allowedTools, en headless las tools del MCP se auto-deniegan y el
+    # agente se queda sin poder leer el work item.
+    assert "--allowedTools mcp__azure-devops" in log
+    # Los repos hermanos del proyecto viajan como --add-dir.
+    assert "--add-dir" in log and "backend-repo" in log
 
 
 def test_run_conflict_when_active(client, monkeypatch):
