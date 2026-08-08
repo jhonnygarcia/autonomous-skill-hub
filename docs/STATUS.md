@@ -31,7 +31,9 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
   Azure DevOps, org por env `ADO_ORG`, dominios filtrados, auth `az login`),
   skill `ticket-comprehension`, comando `analyze`, README de instalación.
 - **Orquestador**: `apps/orchestrator/` — backend FastAPI+SQLite (`backend/app.py`,
-  10 tests pytest), frontend Vite+React+Tailwind+shadcn, README de arranque.
+  14 tests pytest), frontend Vite+React+Tailwind+shadcn (`Projects.tsx` da de alta
+  proyectos), README de arranque. No hay archivo de configuración: los proyectos
+  están en la BD.
 - **Diseños**: `docs/superpowers/specs/` (hub+fase1, orquestador). **Planes** con
   checkboxes de avance: `docs/superpowers/plans/`.
 - Configuración por proyecto destino: `.claude/ticket-agent.json` (org, project,
