@@ -3,6 +3,8 @@
 Marketplace personal de plugins de Claude Code. Cada plugin empaqueta experiencia
 real como skills, comandos, agents y hooks, instalable en cualquier proyecto.
 
+**Estado del proyecto** (qué está hecho, qué falta, decisiones): [docs/STATUS.md](docs/STATUS.md)
+
 ## Instalar en un proyecto
 
     /plugin marketplace add <url-o-ruta-de-este-repo>
