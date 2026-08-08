@@ -132,6 +132,16 @@ Ese es el test de aceptación; una skill markdown no lleva suite de unit tests.
 - Los proyectos destino pueden tener ya reglas propias (`.claude/rules/*`); el plugin
   las respeta y las incorpora al análisis.
 
+## Alternativas evaluadas
+
+- **OpenSpec** (Fission-AI): convención + CLI de spec-driven development. No compite
+  con superpowers (proceso) sino con el formato de artefactos: cada cambio =
+  proposal/specs/design/tasks, y al archivarse los requisitos se fusionan en un
+  `openspec/specs/` vivo por proyecto. **Decisión:** no adoptar en Fase 1 (solo
+  análisis, no aporta); reevaluar en el diseño de la Fase 2 como formato de salida
+  del ticket-agent, y en la Fase 5 como memoria acumulada por proyecto. Requiere
+  Node 20+ y `openspec init` en cada proyecto destino.
+
 ## Fuera de alcance (por ahora)
 
 - Fases 2-5 (solo esbozadas en el roadmap; cada una tendrá su propio diseño).
