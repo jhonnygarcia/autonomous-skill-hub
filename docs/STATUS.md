@@ -1,7 +1,7 @@
 # Estado del proyecto — Autonomous Skill Hub
 
 > Documento vivo. Actualízalo al cerrar cada hito o al tomar una decisión.
-> Última actualización: 2026-08-08 (aceptación Fase 1 cerrada)
+> Última actualización: 2026-08-09 (Fase 1 con n=2; orquestador con ciclo completo)
 
 ## Propósito
 
@@ -16,8 +16,8 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 | Fase | Qué entrega | Estado |
 |---|---|---|
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
-| 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311, 2026-08-08) — skill v0.2.0 |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | 🔨 Construido — ⏳ pendiente aceptación end-to-end desde la UI |
+| 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
+| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Ciclo completo verificado** (3322 en 5m33s) — ⏳ falta el repaso visual de la UI |
 | 2 — Diseño e implementación | Del análisis al código (evaluar OpenSpec como formato) | 📋 Futura — se diseña tras validar Fase 1 |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
 | 4 — Guards | Agents revisores read-only + hooks deterministas | 📋 Futura |
@@ -31,11 +31,14 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
   Azure DevOps, org por env `ADO_ORG`, dominios filtrados, auth `az login`),
   skill `ticket-comprehension`, comando `analyze`, README de instalación.
 - **Orquestador**: `apps/orchestrator/` — backend FastAPI+SQLite (`backend/app.py`,
-  14 tests pytest), frontend Vite+React+Tailwind+shadcn (`Projects.tsx` da de alta
-  proyectos), README de arranque. No hay archivo de configuración: los proyectos
-  están en la BD.
-- **Diseños**: `docs/superpowers/specs/` (hub+fase1, orquestador). **Planes** con
-  checkboxes de avance: `docs/superpowers/plans/`.
+  **18 tests** pytest), README de arranque. No hay archivo de configuración: los
+  proyectos están en la BD y se editan desde la UI.
+  Frontend (Vite+React+Tailwind+shadcn), una vista por archivo:
+  `App.tsx` (conmutador de vistas y estado), `Sidebar`, `ProjectHeader`,
+  `TicketList`, `TicketDetail`, `Projects` (ajustes), `estado.ts` (etiquetas,
+  bloqueo por corrida activa, duraciones).
+- **Diseños**: `docs/superpowers/specs/` (hub+fase1, orquestador, navegación de la
+  UI). **Planes** con checkboxes: `docs/superpowers/plans/`.
 - Configuración por proyecto destino: `.claude/ticket-agent.json` (org, project,
   `autonomy: supervised|autonomous`) + `ADO_ORG` en settings del proyecto.
 
@@ -56,6 +59,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
    arreglos de backend a `ProvidenceTMSTenant`, repo hermano del primario. Un proyecto
    declara un `repo_path` (cwd de la corrida, donde se escribe el análisis) y
    `extra_dirs` que el runner monta con `--add-dir`. La decisión 4 no cambia.
+   **Corolario (2026-08-09): montar no basta.** Ver "Lo aprendido".
 7. **Los proyectos viven en la BD y se editan desde la UI** (2026-08-08), no en un
    archivo. Con `extra_dirs` siendo una lista, el JSON a mano dejaba de tener gracia;
    y un proyecto que no se puede dar de alta desde la UI es un agujero en el producto.
@@ -65,6 +69,16 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
    desde `cwd` hacia arriba, cruzando el límite del repo. Comprobado en el 3311, que
    absorbió tres niveles — incluido `D:/Companies/ProvidenceSolutions/CLAUDE.md`, que
    está fuera del repo — sin que nadie se lo dijera.
+9. **Un proyecto tiene repos; el usuario marca cuál es el principal** (2026-08-09).
+   La API expone una lista plana `repos: [{path, label, primary}]`. Por dentro se
+   siguen guardando separados porque el runner los usa distinto, pero eso deja de
+   ser un concepto que el usuario tenga que entender. La `label` no es decorativa:
+   viaja al prompt. El nombre del proyecto es editable — renombrar es seguro porque
+   los tickets copian sus datos al crearse (decisión 7).
+10. **El proyecto es el contexto de la UI** (2026-08-09, spec
+    `2026-08-09-orchestrator-ui-navegacion-design.md`): barra lateral de proyectos,
+    cabecera que muestra qué repos verá el agente, y el panel derecho pasa a ser el
+    ticket al elegirlo. Tres vistas con `useState`, sin router.
 
 ## Aceptación de la Fase 1 — cerrada el 2026-08-08
 
@@ -98,15 +112,65 @@ v0.1.0 no tenía). Todas las cifras citan fuente; el 27 % ya se atribuye a A.6.
 De propina detectó una incoherencia interna de `ESTADO.md` (declara 179/179 en un
 sitio y 144/144 en otro).
 
-## Pendientes inmediatos (bloquean avanzar a Fase 2)
+## Segunda jornada — 2026-08-09
 
-- [ ] **Aceptación del orquestador end-to-end**: arrancar backend
-  (`uvicorn app:app --port 8000`) + frontend (`npm run dev`), dar de alta el
-  proyecto TMS desde la UI (con `ProvidenceTMSTenant` en *repos extra*), encolar
-  el 3311, correrlo y probar "Ajustar y re-correr". El código ya está (proyectos
-  en BD, `--add-dir`, `--allowedTools`); falta la pasada real con un humano mirando.
-- [ ] **Diseñar la Fase 2** partiendo del análisis del 3311, que ya es material
-  suficiente para hacerlo.
+**El orquestador completó el ciclo real.** Alta de proyecto por API con validación
+de rutas (`400`/`409` correctos), encolado, corrida del **3322 en 5m33s** con
+estado `analyzed`, y log en vivo. Se verificó el argv del subproceso:
+`--allowedTools mcp__azure-devops … --add-dir …Tenant --add-dir …TMS.wiki`.
+
+**Fase 1 con n=2, y la predicción falló.** Se temía que la skill se rompiera con un
+Bug —el contenido vive en `Microsoft.VSTS.TCM.ReproSteps`, no en `System.Description`,
+y la forma es Repro/Expected/Actual—. Lo manejó sin problema: sacó **5 criterios
+explícitos** de un ticket cuya línea `AC:` es una sola frase, y discriminó bien que
+el load **16791** citado en el texto es un dato de producción, no un work item que
+haya que abrir. Además **contradijo la hipótesis del ticket con evidencia**: los
+iconos de excepción no están gateados por rol (`load-icon-exception.component.ts:21`
+solo cubre HotLoad), así que la causa raíz está en el backend.
+
+**Rediseño de la UI del orquestador** (spec propio, ver decisión 10), en respuesta a
+que "todo estaba en una misma pantalla y no era intuitivo". Además: repos como lista
+plana con principal marcado por el usuario, nombre de proyecto editable, un único
+botón de alta y ancho completo.
+
+## Pendientes inmediatos
+
+- [ ] **Re-correr el 3322 con las descripciones puestas** — la prueba de fuego de
+  la skill v0.3.0. En la corrida anterior el agente tenía `ProvidenceTMSTenant`
+  montado, lo mencionó 15 veces y **no lo abrió ni una**; escribió "fuera de este
+  repo, no inspeccionado". Ahora el runner le nombra los repos con su etiqueta.
+  Instrucción sugerida en "Ajustar y re-correr": *"confirma en el backend qué
+  devuelve el payload del load board para un rol cliente"*.
+- [ ] **Repaso visual de la UI**: es lo único del spec que no se pudo verificar
+  (el navegador con el perfil de devtools es el de Jhonny). Recorrer las tres
+  vistas y los cinco estados vacíos.
+- [ ] **Diseñar la Fase 2.** Usar como candidato un ticket **pequeño y
+  autocontenido** (el 3322, 1 punto, o el 3320) — **no el 3311**: son 60 puntos,
+  15 fases, y Jhonny ya lo está implementando a mano (la rama `jhonny/quote-v2`
+  iba por 19 commits el 2026-08-09). Diseñar "del análisis al código" contra esa
+  épica sería sobre-ajustar a un monstruo que ningún agente va a implementar.
+- [ ] **Quitar `organization` de `.claude/ticket-agent.json`** — duplica `ADO_ORG`,
+  que no se puede eliminar porque el MCP la necesita como env var al arrancar.
+
+## Lo aprendido (2026-08-09)
+
+- **`--add-dir` da acceso, no atención.** Montar un repo no hace que el agente lo
+  mire: en la corrida del 3322 tenía `ProvidenceTMSTenant` disponible, lo nombró 15
+  veces y registró 0 lecturas dentro. Hay que **nombrárselos en el prompt y decirle
+  de qué va cada uno** — de ahí que la etiqueta del repo sea funcional y no adorno.
+  El runner lo inyecta; `SKILL.md` 2.8 (v0.3.0) dice que esos repos entran en el
+  alcance de "Código afectado" en vez de declararse fuera.
+- **`uvicorn --reload` deja procesos huérfanos en Windows.** Tres veces seguidas el
+  backend siguió sirviendo código anterior y una prueba dio un resultado falso. El
+  puerto 8000 quedaba retenido por un hijo del recargador. **Arrancar sin `--reload`
+  y reiniciar a mano**; ante un comportamiento raro, sospechar del proceso antes que
+  del código.
+- **Aceptar con n=1 es aceptar poco.** El 3311 es una épica escrita por el propio
+  Jhonny, con criterios numerados: el ticket soñado. La prueba de verdad es el
+  ticket de dos frases. Salió bien, pero eso solo se supo al correr el segundo.
+- **Un `<select>` no dice qué arrastra.** El origen del rediseño de la UI: el usuario
+  elegía proyecto sin ver qué repos montaría el agente. La información tiene que
+  estar donde se toma la decisión, no donde se configuró la semana pasada.
 
 ## Lo aprendido en la aceptación (2026-08-08)
 
@@ -132,8 +196,12 @@ sitio y 144/144 en otro).
 
 - **Límites de la suscripción**: las corridas del orquestador consumen la ventana
   del plan igual que el uso interactivo; análisis largos pueden toparla.
-- **Adjuntos e imágenes**: la rama de adjuntos de la skill no se ha ejercitado
-  aún con un ticket que los tenga (el 3311 no tiene).
+- **Adjuntos e imágenes**: la rama de adjuntos de la skill sigue sin ejercitarse —
+  ni el 3311 ni el 3322 tienen. Hace falta un ticket con captura.
+- **El stepper de fases se retiró de la UI** al rediseñarla: mostraba 6 fases con 5
+  apagadas en cada fila. Vuelve cuando las fases 2-4 existan de verdad.
+- **Las columnas de fase del orquestador ya no están deshabilitadas: no están.**
+  Al llegar la Fase 2 hay que decidir cómo se representa el avance por fases.
 - **Permisos del runner**: corre con `--permission-mode acceptEdits` más una lista
   explícita de `--allowedTools` (sin ella el MCP se auto-deniega en headless). Hoy
   la Fase 1 es solo lectura + escribir el análisis; al llegar la Fase 2 (escribir
@@ -145,26 +213,34 @@ sitio y 144/144 en otro).
 
 ## Cómo retomar en una sesión nueva
 
-Prompt sugerido para la **aceptación del orquestador** — abrir Claude Code en el
-hub (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
+Prompt sugerido — abrir Claude Code en el hub
+(`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md. Vamos con la aceptación end-to-end del orquestador:
+> Lee docs/STATUS.md para situarte. Vamos por los pendientes en este orden:
 >
-> 1. Arranca backend (`apps/orchestrator/backend`, `uvicorn app:app --port 8000`)
->    y frontend (`apps/orchestrator/frontend`, `npm run dev`).
-> 2. Desde la UI da de alta el proyecto TMS: org `ProvidenceSolutions`, proyecto
->    `ProvidenceTMS`, repo primario
->    `D:/Companies/ProvidenceSolutions/ProvidenceTMS`, y como repo extra
->    `D:/Companies/ProvidenceSolutions/ProvidenceTMSTenant`.
-> 3. Encola el 3311, córrelo y sigue el log. Verifica que el análisis se escriba
->    en el repo primario y que el agente pueda leer el repo extra.
-> 4. Prueba "Ajustar y re-correr" con una instrucción concreta.
-> 5. Actualiza docs/STATUS.md con el resultado.
+> 1. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
+>    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend
+>    en `apps/orchestrator/frontend` (`npm run dev`). Antes de dar nada por bueno,
+>    comprueba que el backend sirve el código actual — ya nos engañó tres veces.
+> 2. **Prueba de fuego de la skill v0.3.0**: desde la UI, "Ajustar y re-correr" el
+>    ticket 3322 con la instrucción *"confirma en el backend qué devuelve el
+>    payload del load board para un rol cliente"*. Luego mira el log y dime si el
+>    agente **abrió de verdad** `ProvidenceTMSTenant` (cuenta lecturas de archivo
+>    dentro de esa ruta) o si volvió a declararlo "no inspeccionado". Ese era el
+>    fallo que v0.3.0 intenta arreglar.
+> 3. Con el resultado, dime si la skill necesita otro ajuste. Si sí: edítala en
+>    `plugins/ticket-agent/skills/ticket-comprehension/SKILL.md`, **sube `version`
+>    en `plugin.json`**, `claude plugin update ticket-agent@autonomous-skill-hub`,
+>    y re-corre.
+> 4. Después, arrancamos el **diseño de la Fase 2** (del análisis al código) usando
+>    como candidato el 3322 o el 3320 — pequeños y autocontenidos. No el 3311.
+> 5. Al cerrar, actualiza docs/STATUS.md.
 
-El plugin ya está instalado a nivel de usuario y el TMS ya está configurado
-(`.claude/ticket-agent.json` + `ADO_ORG` en `.claude/settings.json`). Si tocas la
-skill, **sube `version` en `plugin.json`** y corre `claude plugin update
-ticket-agent@autonomous-skill-hub`, o el cambio no llega.
+Contexto que ya no hace falta rehacer: el plugin está instalado a nivel de usuario,
+el TMS configurado (`.claude/ticket-agent.json` + `ADO_ORG` en
+`.claude/settings.json`), y el proyecto dado de alta en la BD del orquestador con
+sus tres repos etiquetados.
 
-Para otros hitos (orquestador, diseño de Fase 2), el mismo patrón: leer
-STATUS.md, decir en qué pendiente estás, y pegar resultados u observaciones.
+Dos trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega
+al plugin instalado; y **no usar `uvicorn --reload`**, que deja procesos huérfanos
+reteniendo el puerto 8000 y sirve código viejo sin avisar.
