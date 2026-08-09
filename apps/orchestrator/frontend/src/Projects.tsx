@@ -21,17 +21,22 @@ function Campo({ label, hint, children }: {
   )
 }
 
-export function Projects({ projects, onChange }: {
+const nuevoForm = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
+
+export function Projects({ projects, startNew, onChange }: {
   projects: Project[]
+  /** Entrar por "+ Nuevo" abre el formulario de alta directamente. El componente se
+   *  remonta al cambiar de vista, así que basta con inicializar el estado. */
+  startNew?: boolean
   /** `select` viaja para que, al renombrar, la barra lateral siga al mismo proyecto. */
   onChange: (select?: string) => void
 }) {
-  const [form, setForm] = useState<Project | null>(null)
+  const [form, setForm] = useState<Project | null>(startNew ? nuevoForm() : null)
   const [original, setOriginal] = useState<string | null>(null)  // null = alta; si no, edición
   const [error, setError] = useState("")
 
   const open = (p: Project | null) => {
-    setForm(p ? { ...p, repos: p.repos.map(r => ({ ...r })) } : { ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
+    setForm(p ? { ...p, repos: p.repos.map(r => ({ ...r })) } : nuevoForm())
     setOriginal(p?.name ?? null)
     setError("")
   }
@@ -47,10 +52,9 @@ export function Projects({ projects, onChange }: {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between">
-        <CardTitle className="text-base">Proyectos</CardTitle>
-        <Button size="sm" variant="outline" onClick={() => open(null)}>Agregar proyecto</Button>
-      </CardHeader>
+      {/* Sin botón de alta aquí: el de la barra lateral ("+ Nuevo") ya abre esta
+          vista con el formulario desplegado, y dos botones para lo mismo confunden. */}
+      <CardHeader><CardTitle className="text-base">Proyectos</CardTitle></CardHeader>
       <CardContent className="space-y-2">
         {error && <p className="text-sm text-red-600">{error}</p>}
 

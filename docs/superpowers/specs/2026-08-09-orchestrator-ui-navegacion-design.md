@@ -102,8 +102,14 @@ que no es de este ticket, el botón "Correr" se deshabilita y explica por qué:
 | Ticket sin corridas | "Sin corridas aún. Pulsa Correr para lanzar el análisis." |
 | Log vacío | "(el log aparecerá cuando arranque la corrida)" |
 
-**Ancho.** De `max-w-5xl` (1024 px) a `max-w-7xl`: con barra lateral, el log se
-queda sin sitio.
+**Ancho.** Sin tope: se pasa de `max-w-5xl` (1024 px) a ocupar la ventana entera.
+Con barra lateral, cualquier límite deja el log y las tablas de repos apretados —
+y esto es una herramienta local, no un texto que haya que leer en columna.
+
+**Un solo botón de alta.** "+ Nuevo" en la barra lateral abre Ajustes con el
+formulario ya desplegado. La tarjeta de Ajustes no lleva su propio botón: dos
+botones para la misma acción, uno al lado del otro, solo generan la duda de si
+hacen cosas distintas.
 
 **Polling.** Se mantiene el intervalo de 3 s que ya existe. Si la vista activa es
 `ticket`, se refresca ese detalle; si es `proyecto`, solo la lista.

@@ -11,7 +11,7 @@ import { TicketList } from "@/TicketList"
 type View =
   | { kind: "proyecto" }
   | { kind: "ticket"; id: number }
-  | { kind: "ajustes" }
+  | { kind: "ajustes"; nuevo?: boolean }
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -63,17 +63,19 @@ export default function App() {
   const back = () => { setDetail(null); setView({ kind: "proyecto" }) }
 
   return (
-    <div className="mx-auto flex max-w-7xl gap-5 p-6">
+    <div className="flex w-full gap-5 p-6">
       <Sidebar projects={projects} current={current} settings={view.kind === "ajustes"}
                onSelect={n => { setCurrent(n); back() }}
-               onNew={() => setView({ kind: "ajustes" })}
+               onNew={() => setView({ kind: "ajustes", nuevo: true })}
                onSettings={() => setView({ kind: "ajustes" })} />
 
       <main className="min-w-0 flex-1 space-y-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {view.kind === "ajustes" && (
-          <Projects projects={projects} onChange={refreshProjects} />
+          // el `key` fuerza remontaje al pulsar "+ Nuevo" estando ya en Ajustes
+          <Projects key={view.nuevo ? "nuevo" : "lista"} projects={projects}
+                    startNew={view.nuevo} onChange={refreshProjects} />
         )}
 
         {view.kind !== "ajustes" && !project && (
