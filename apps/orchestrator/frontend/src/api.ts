@@ -7,6 +7,11 @@ export type Run = {
   status: string; started_at: string | null; finished_at: string | null
 }
 export type TicketDetail = { ticket: Ticket; runs: Run[]; log_tail: string }
+// El runner corre de uno en uno entre TODOS los proyectos: esto es lo que permite
+// explicar por qué no se puede lanzar, en vez de fallar con un 409 mudo.
+export type ActiveRun = {
+  id: number; ticket_id: number; started_at: string | null; ado_id: number; project: string
+}
 // La etiqueta no es decorativa: viaja al prompt del agente y es lo que le dice
 // cuándo mirar en ese repo. Sin ella lo monta y lo ignora.
 export type ExtraDir = { path: string; label: string }
@@ -31,6 +36,7 @@ export const api = {
   removeProject: (name: string) =>
     fetch(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }).then(r => json<void>(r)),
   tickets: () => fetch("/api/tickets").then(r => json<Ticket[]>(r)),
+  activeRun: () => fetch("/api/runs/active").then(r => json<ActiveRun | null>(r)),
   detail: (id: number) => fetch(`/api/tickets/${id}`).then(r => json<TicketDetail>(r)),
   create: (ado_id: number, project: string) =>
     fetch("/api/tickets", {

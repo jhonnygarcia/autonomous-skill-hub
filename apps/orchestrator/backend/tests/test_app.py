@@ -116,6 +116,23 @@ def test_run_strips_api_key_so_subscription_is_used(client, monkeypatch):
     assert "SAW-API-KEY" not in detail["log_tail"]
 
 
+def test_runs_active(client):
+    import os
+    import sqlite3 as sq
+    assert client.get("/runs/active").json() is None
+
+    tid = client.post("/tickets", json={"ado_id": 3322, "project": "Demo"}).json()["id"]
+    # Se inserta la corrida a mano: con TestClient el background task termina antes de
+    # que vuelva la respuesta, así que no hay forma de observar una corrida "en vuelo".
+    conn = sq.connect(os.environ["ORCH_DB"])
+    conn.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'analyze','running')", (tid,))
+    conn.commit()
+    conn.close()
+
+    a = client.get("/runs/active").json()
+    assert a["ado_id"] == 3322 and a["project"] == "Demo" and a["ticket_id"] == tid
+
+
 def test_run_pasa_allowed_tools_y_add_dir(client, monkeypatch):
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]

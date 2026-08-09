@@ -220,6 +220,19 @@ def delete_ticket(tid: int):
         c.execute("DELETE FROM tickets WHERE id=?", (tid,))
 
 
+@app.get("/runs/active")
+def active_run():
+    """La corrida en marcha, si la hay. El lock es global, así que la UI necesita esto
+    para explicar por qué no puede lanzarse un ticket de OTRO proyecto."""
+    with db() as c:
+        r = c.execute(
+            "SELECT r.id, r.ticket_id, r.started_at, t.ado_id, t.project "
+            "FROM runs r JOIN tickets t ON t.id = r.ticket_id "
+            "WHERE r.status IN ('queued','running') ORDER BY r.id LIMIT 1"
+        ).fetchone()
+    return dict(r) if r else None
+
+
 RUN_LOCK = asyncio.Lock()
 
 
