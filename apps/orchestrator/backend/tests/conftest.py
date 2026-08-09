@@ -23,7 +23,9 @@ def client(tmp_path, monkeypatch):
     with TestClient(app_module.app) as c:
         c.post("/projects", json={
             "name": "Demo", "org": "DemoOrg", "project": "Demo",
-            "repoPath": (tmp_path / "repo").as_posix(),
-            "extraDirs": [{"path": (tmp_path / "backend-repo").as_posix(), "label": "backend"}],
+            "repos": [
+                {"path": (tmp_path / "repo").as_posix(), "label": "front", "primary": True},
+                {"path": (tmp_path / "backend-repo").as_posix(), "label": "backend"},
+            ],
         })
         yield c

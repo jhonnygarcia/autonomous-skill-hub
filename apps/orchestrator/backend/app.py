@@ -28,8 +28,12 @@ def norm_dirs(items: list) -> list[dict]:
 
 
 def project_out(row: sqlite3.Row) -> dict:
-    return {"name": row["name"], "org": row["org"], "project": row["project"],
-            "repoPath": row["repo_path"], "extraDirs": norm_dirs(json.loads(row["extra_dirs"]))}
+    """Hacia fuera un proyecto tiene UNA lista de repos, con uno marcado principal.
+    Por dentro se guardan separados porque el runner los usa distinto: el principal
+    es el `cwd` de la corrida, el resto viajan como `--add-dir`."""
+    repos = [{"path": row["repo_path"], "label": row["repo_label"], "primary": True}]
+    repos += [{**d, "primary": False} for d in norm_dirs(json.loads(row["extra_dirs"]))]
+    return {"name": row["name"], "org": row["org"], "project": row["project"], "repos": repos}
 
 
 def get_project(name: str) -> sqlite3.Row | None:
@@ -43,6 +47,23 @@ def check_dirs(*paths: str) -> None:
     bad = [p for p in paths if not Path(p).is_dir()]
     if bad:
         raise HTTPException(400, "No existen o no son directorios: " + ", ".join(bad))
+
+
+def split_repos(repos: list) -> tuple:
+    """Valida la lista tal como la manda la UI y la parte en (principal, resto)."""
+    if not repos:
+        raise HTTPException(400, "El proyecto necesita al menos un repo")
+    principales = [r for r in repos if r.primary]
+    if len(principales) != 1:
+        raise HTTPException(400, "Marca exactamente un repo como principal")
+    check_dirs(*[r.path for r in repos])
+    return principales[0], [r for r in repos if not r.primary]
+
+
+def repos_columns(body) -> tuple:   # ProjectIn se define más abajo; sin anotación
+    principal, resto = split_repos(body.repos)
+    return (principal.path, principal.label,
+            json.dumps([{"path": r.path, "label": r.label} for r in resto]))
 
 
 def db() -> sqlite3.Connection:
@@ -62,6 +83,7 @@ def init_db() -> None:
               org TEXT NOT NULL,
               project TEXT NOT NULL,
               repo_path TEXT NOT NULL,
+              repo_label TEXT NOT NULL DEFAULT '',
               extra_dirs TEXT NOT NULL DEFAULT '[]'
             );
             CREATE TABLE IF NOT EXISTS tickets(
@@ -90,27 +112,31 @@ def init_db() -> None:
         )
         # BDs creadas antes de que existieran los repos extra. SQLite no tiene
         # ADD COLUMN IF NOT EXISTS, así que se intenta y se ignora si ya está.
-        try:
-            c.execute("ALTER TABLE tickets ADD COLUMN extra_dirs TEXT NOT NULL DEFAULT '[]'")
-        except sqlite3.OperationalError:
-            pass
+        for alter in (
+            "ALTER TABLE tickets ADD COLUMN extra_dirs TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE projects ADD COLUMN repo_label TEXT NOT NULL DEFAULT ''",
+        ):
+            try:
+                c.execute(alter)
+            except sqlite3.OperationalError:
+                pass
 
 
 app = FastAPI(title="ticket-orchestrator")
 init_db()
 
 
-class ExtraDir(BaseModel):
+class Repo(BaseModel):
     path: str
-    label: str = ""      # "backend", "app de autenticación"… viaja al prompt del agente
+    label: str = ""       # "backend", "app de autenticación"… viaja al prompt del agente
+    primary: bool = False  # exactamente uno: es el cwd y donde se escribe el análisis
 
 
 class ProjectIn(BaseModel):
     name: str
     org: str
     project: str
-    repoPath: str
-    extraDirs: list[ExtraDir] = []
+    repos: list[Repo] = []
 
 
 class TicketIn(BaseModel):
@@ -135,14 +161,14 @@ def list_projects():
 
 @app.post("/projects", status_code=201)
 def create_project(body: ProjectIn):
-    check_dirs(body.repoPath, *[d.path for d in body.extraDirs])
+    cols = repos_columns(body)
     with db() as c:
         if c.execute("SELECT 1 FROM projects WHERE name=?", (body.name,)).fetchone():
             raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
         c.execute(
-            "INSERT INTO projects(name, org, project, repo_path, extra_dirs) VALUES(?,?,?,?,?)",
-            (body.name, body.org, body.project, body.repoPath,
-             json.dumps([d.model_dump() for d in body.extraDirs])),
+            "INSERT INTO projects(name, org, project, repo_path, repo_label, extra_dirs) "
+            "VALUES(?,?,?,?,?,?)",
+            (body.name, body.org, body.project, *cols),
         )
     return project_out(get_project(body.name))
 
@@ -155,12 +181,12 @@ def update_project(name: str, body: ProjectIn):
         raise HTTPException(400, "El nombre no se puede cambiar desde esta ruta")
     if not get_project(name):
         raise HTTPException(404)
-    check_dirs(body.repoPath, *[d.path for d in body.extraDirs])
+    cols = repos_columns(body)
     with db() as c:
         c.execute(
-            "UPDATE projects SET org=?, project=?, repo_path=?, extra_dirs=? WHERE name=?",
-            (body.org, body.project, body.repoPath,
-             json.dumps([d.model_dump() for d in body.extraDirs]), name),
+            "UPDATE projects SET org=?, project=?, repo_path=?, repo_label=?, extra_dirs=? "
+            "WHERE name=?",
+            (body.org, body.project, *cols, name),
         )
     return project_out(get_project(name))
 

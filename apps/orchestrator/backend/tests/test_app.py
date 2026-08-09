@@ -26,30 +26,70 @@ def test_get_ticket_detail_and_delete(client):
     assert client.get(f"/tickets/{tid}").status_code == 404
 
 
+def _repos(client):
+    return client.get("/projects").json()[0]["repos"]
+
+
 def test_projects_endpoint(client):
     [p] = client.get("/projects").json()
     assert p["name"] == "Demo" and p["org"] == "DemoOrg" and p["project"] == "Demo"
-    assert Path(p["repoPath"]).is_dir() and len(p["extraDirs"]) == 1
-    assert p["extraDirs"][0]["label"] == "backend" and Path(p["extraDirs"][0]["path"]).is_dir()
+    # una sola lista; el principal viene marcado, no en un campo aparte
+    assert len(p["repos"]) == 2
+    principal = [r for r in p["repos"] if r["primary"]]
+    assert len(principal) == 1 and principal[0]["label"] == "front"
+    assert all(Path(r["path"]).is_dir() for r in p["repos"])
+    assert [r["label"] for r in p["repos"] if not r["primary"]] == ["backend"]
 
 
 def test_project_crud_rejects_rutas_inexistentes(client):
     bad = client.post("/projects", json={
-        "name": "Roto", "org": "O", "project": "P", "repoPath": "/no/existe",
+        "name": "Roto", "org": "O", "project": "P",
+        "repos": [{"path": "/no/existe", "primary": True}],
     })
     assert bad.status_code == 400 and "/no/existe" in bad.json()["detail"]
     assert client.post("/projects", json={
-        "name": "Demo", "org": "O", "project": "P",
-        "repoPath": client.get("/projects").json()[0]["repoPath"],
+        "name": "Demo", "org": "O", "project": "P", "repos": _repos(client),
     }).status_code == 409
 
 
-def test_project_update_y_delete(client):
-    repo = client.get("/projects").json()[0]["repoPath"]
-    r = client.put("/projects/Demo", json={
-        "name": "Demo", "org": "OtraOrg", "project": "Demo", "repoPath": repo, "extraDirs": [],
+def test_project_exige_un_unico_principal(client):
+    repos = _repos(client)
+    sin = client.post("/projects", json={
+        "name": "Sin", "org": "O", "project": "P",
+        "repos": [{**r, "primary": False} for r in repos],
     })
-    assert r.status_code == 200 and r.json()["org"] == "OtraOrg" and r.json()["extraDirs"] == []
+    assert sin.status_code == 400 and "principal" in sin.json()["detail"]
+
+    dos = client.post("/projects", json={
+        "name": "Dos", "org": "O", "project": "P",
+        "repos": [{**r, "primary": True} for r in repos],
+    })
+    assert dos.status_code == 400 and "principal" in dos.json()["detail"]
+
+    vacio = client.post("/projects", json={"name": "V", "org": "O", "project": "P", "repos": []})
+    assert vacio.status_code == 400 and "al menos un repo" in vacio.json()["detail"]
+
+
+def test_cambiar_cual_es_el_principal(client):
+    repos = _repos(client)
+    volteados = [{**r, "primary": not r["primary"]} for r in repos]
+    r = client.put("/projects/Demo", json={
+        "name": "Demo", "org": "DemoOrg", "project": "Demo", "repos": volteados,
+    })
+    assert r.status_code == 200
+    nuevo = [x for x in r.json()["repos"] if x["primary"]][0]
+    assert nuevo["label"] == "backend"
+    # y el ticket que se cree ahora usa ese repo como cwd
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == nuevo["path"]
+
+
+def test_project_update_y_delete(client):
+    principal = [r for r in _repos(client) if r["primary"]]
+    r = client.put("/projects/Demo", json={
+        "name": "Demo", "org": "OtraOrg", "project": "Demo", "repos": principal,
+    })
+    assert r.status_code == 200 and r.json()["org"] == "OtraOrg" and len(r.json()["repos"]) == 1
     assert client.delete("/projects/Demo").status_code == 204
     assert client.get("/projects").json() == []
     assert client.delete("/projects/Demo").status_code == 404

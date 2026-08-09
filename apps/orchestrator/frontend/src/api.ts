@@ -12,14 +12,11 @@ export type TicketDetail = { ticket: Ticket; runs: Run[]; log_tail: string }
 export type ActiveRun = {
   id: number; ticket_id: number; started_at: string | null; ado_id: number; project: string
 }
-// La etiqueta no es decorativa: viaja al prompt del agente y es lo que le dice
-// cuándo mirar en ese repo. Sin ella lo monta y lo ignora.
-export type ExtraDir = { path: string; label: string }
-export type Project = {
-  name: string; org: string; project: string
-  repoPath: string          // repo primario: cwd de la corrida y donde se escribe el análisis
-  extraDirs: ExtraDir[]     // repos hermanos que el ticket necesita leer (--add-dir)
-}
+// Un proyecto tiene UNA lista de repos y tú marcas cuál es el principal (el cwd de
+// la corrida). `label` no es decorativa: viaja al prompt del agente y es lo que le
+// dice cuándo mirar en ese repo — sin ella lo monta y lo ignora.
+export type Repo = { path: string; label: string; primary: boolean }
+export type Project = { name: string; org: string; project: string; repos: Repo[] }
 
 const json = async <T,>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? r.statusText)
