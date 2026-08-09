@@ -84,6 +84,24 @@ def test_cambiar_cual_es_el_principal(client):
     assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == nuevo["path"]
 
 
+def test_renombrar_proyecto(client):
+    repos = _repos(client)
+    cuerpo = {"org": "DemoOrg", "project": "Demo", "repos": repos}
+    # un ticket creado antes conserva sus rutas: no apunta al catálogo
+    tid = client.post("/tickets", json={"ado_id": 7, "project": "Demo"}).json()["id"]
+    antes = client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"]
+
+    r = client.put("/projects/Demo", json={"name": "Demo2", **cuerpo})
+    assert r.status_code == 200 and r.json()["name"] == "Demo2"
+    assert [p["name"] for p in client.get("/projects").json()] == ["Demo2"]
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == antes
+
+    # y el nombre sigue siendo único
+    client.post("/projects", json={"name": "Otro", **cuerpo})
+    choque = client.put("/projects/Otro", json={"name": "Demo2", **cuerpo})
+    assert choque.status_code == 409
+
+
 def test_project_update_y_delete(client):
     principal = [r for r in _repos(client) if r["primary"]]
     r = client.put("/projects/Demo", json={

@@ -21,7 +21,11 @@ function Campo({ label, hint, children }: {
   )
 }
 
-export function Projects({ projects, onChange }: { projects: Project[]; onChange: () => void }) {
+export function Projects({ projects, onChange }: {
+  projects: Project[]
+  /** `select` viaja para que, al renombrar, la barra lateral siga al mismo proyecto. */
+  onChange: (select?: string) => void
+}) {
   const [form, setForm] = useState<Project | null>(null)
   const [original, setOriginal] = useState<string | null>(null)  // null = alta; si no, edición
   const [error, setError] = useState("")
@@ -38,8 +42,8 @@ export function Projects({ projects, onChange }: { projects: Project[]; onChange
   const save = () => form && api
     // las filas en blanco se descartan aquí; el backend rechaza rutas que no existan
     .saveProject({ ...form, repos: form.repos.filter(r => r.path.trim()) }, original)
-    .then(() => { setForm(null); onChange() }).catch(fail)
-  const remove = (name: string) => api.removeProject(name).then(onChange).catch(fail)
+    .then(p => { setForm(null); onChange(p.name) }).catch(fail)
+  const remove = (name: string) => api.removeProject(name).then(() => onChange()).catch(fail)
 
   return (
     <Card>
@@ -70,9 +74,8 @@ export function Projects({ projects, onChange }: { projects: Project[]; onChange
 
         {form && (
           <div className="space-y-4 rounded-md border p-4">
-            {/* El nombre es la clave del catálogo: renombrar = borrar y volver a crear. */}
-            <Campo label="Nombre del proyecto" hint="como quieras llamarlo tú">
-              <Input placeholder="p. ej. TMS" value={form.name} disabled={!!original}
+            <Campo label="Nombre del proyecto" hint="como quieras llamarlo tú; puedes cambiarlo">
+              <Input placeholder="p. ej. TMS" value={form.name}
                      onChange={e => setForm({ ...form, name: e.target.value })} />
             </Campo>
 

@@ -176,19 +176,20 @@ def create_project(body: ProjectIn):
 @app.put("/projects/{name}")
 def update_project(name: str, body: ProjectIn):
     # ponytail: reemplazo completo, sin PATCH parcial — el formulario manda todo.
-    # Renombrar = borrar y volver a crear; los tickets llevan su propia copia.
-    if body.name != name:
-        raise HTTPException(400, "El nombre no se puede cambiar desde esta ruta")
     if not get_project(name):
         raise HTTPException(404)
+    # Renombrar es seguro: los tickets copian los datos del proyecto al crearse, así
+    # que ninguno apunta aquí. Solo hay que respetar que el nombre siga siendo único.
+    if body.name != name and get_project(body.name):
+        raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
     cols = repos_columns(body)
     with db() as c:
         c.execute(
-            "UPDATE projects SET org=?, project=?, repo_path=?, repo_label=?, extra_dirs=? "
-            "WHERE name=?",
-            (body.org, body.project, *cols, name),
+            "UPDATE projects SET name=?, org=?, project=?, repo_path=?, repo_label=?, "
+            "extra_dirs=? WHERE name=?",
+            (body.name, body.org, body.project, *cols, name),
         )
-    return project_out(get_project(name))
+    return project_out(get_project(body.name))
 
 
 @app.delete("/projects/{name}", status_code=204)

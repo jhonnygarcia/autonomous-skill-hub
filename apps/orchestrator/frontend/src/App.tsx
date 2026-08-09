@@ -24,10 +24,15 @@ export default function App() {
 
   const fail = (e: unknown) => setError(String(e))
 
-  const refreshProjects = () =>
+  // `select` lo manda Ajustes tras guardar, para que un renombrado no cambie de
+  // proyecto activo por debajo (el nombre viejo ya no existe en la lista).
+  const refreshProjects = (select?: string) =>
     api.projects().then(ps => {
       setProjects(ps)
-      setCurrent(c => ps.some(p => p.name === c) ? c : (ps[0]?.name ?? null))
+      setCurrent(c => {
+        const quiere = select ?? c
+        return ps.some(p => p.name === quiere) ? quiere : (ps[0]?.name ?? null)
+      })
     }).catch(fail)
 
   const refresh = () => {
