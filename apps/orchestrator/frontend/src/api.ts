@@ -7,10 +7,13 @@ export type Run = {
   status: string; started_at: string | null; finished_at: string | null
 }
 export type TicketDetail = { ticket: Ticket; runs: Run[]; log_tail: string }
+// La etiqueta no es decorativa: viaja al prompt del agente y es lo que le dice
+// cuándo mirar en ese repo. Sin ella lo monta y lo ignora.
+export type ExtraDir = { path: string; label: string }
 export type Project = {
   name: string; org: string; project: string
   repoPath: string          // repo primario: cwd de la corrida y donde se escribe el análisis
-  extraDirs: string[]       // repos hermanos que el ticket necesita leer (--add-dir)
+  extraDirs: ExtraDir[]     // repos hermanos que el ticket necesita leer (--add-dir)
 }
 
 const json = async <T,>(r: Response): Promise<T> => {

@@ -20,9 +20,16 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def norm_dirs(items: list) -> list[dict]:
+    """Los repos extra fueron una lista de rutas antes de llevar etiqueta. Se
+    normaliza al leer para que las filas viejas no rompan; sanan al siguiente guardado."""
+    return [{"path": i, "label": ""} if isinstance(i, str)
+            else {"path": i["path"], "label": i.get("label", "")} for i in items]
+
+
 def project_out(row: sqlite3.Row) -> dict:
     return {"name": row["name"], "org": row["org"], "project": row["project"],
-            "repoPath": row["repo_path"], "extraDirs": json.loads(row["extra_dirs"])}
+            "repoPath": row["repo_path"], "extraDirs": norm_dirs(json.loads(row["extra_dirs"]))}
 
 
 def get_project(name: str) -> sqlite3.Row | None:
@@ -93,12 +100,17 @@ app = FastAPI(title="ticket-orchestrator")
 init_db()
 
 
+class ExtraDir(BaseModel):
+    path: str
+    label: str = ""      # "backend", "app de autenticación"… viaja al prompt del agente
+
+
 class ProjectIn(BaseModel):
     name: str
     org: str
     project: str
     repoPath: str
-    extraDirs: list[str] = []
+    extraDirs: list[ExtraDir] = []
 
 
 class TicketIn(BaseModel):
@@ -123,13 +135,14 @@ def list_projects():
 
 @app.post("/projects", status_code=201)
 def create_project(body: ProjectIn):
-    check_dirs(body.repoPath, *body.extraDirs)
+    check_dirs(body.repoPath, *[d.path for d in body.extraDirs])
     with db() as c:
         if c.execute("SELECT 1 FROM projects WHERE name=?", (body.name,)).fetchone():
             raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
         c.execute(
             "INSERT INTO projects(name, org, project, repo_path, extra_dirs) VALUES(?,?,?,?,?)",
-            (body.name, body.org, body.project, body.repoPath, json.dumps(body.extraDirs)),
+            (body.name, body.org, body.project, body.repoPath,
+             json.dumps([d.model_dump() for d in body.extraDirs])),
         )
     return project_out(get_project(body.name))
 
@@ -142,11 +155,12 @@ def update_project(name: str, body: ProjectIn):
         raise HTTPException(400, "El nombre no se puede cambiar desde esta ruta")
     if not get_project(name):
         raise HTTPException(404)
-    check_dirs(body.repoPath, *body.extraDirs)
+    check_dirs(body.repoPath, *[d.path for d in body.extraDirs])
     with db() as c:
         c.execute(
             "UPDATE projects SET org=?, project=?, repo_path=?, extra_dirs=? WHERE name=?",
-            (body.org, body.project, body.repoPath, json.dumps(body.extraDirs), name),
+            (body.org, body.project, body.repoPath,
+             json.dumps([d.model_dump() for d in body.extraDirs]), name),
         )
     return project_out(get_project(name))
 
@@ -238,6 +252,18 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
         set_run(run_id, status="running", log_path=str(log_path), started_at=now())
         set_ticket(ticket["id"], status="running")
         prompt = f"/ticket-agent:analyze {ticket['ado_id']}"
+        extras = norm_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
+        if extras:
+            # Montarlos con --add-dir no basta: en la corrida del 3322 el agente tenía
+            # ProvidenceTMSTenant accesible, lo mencionó 15 veces y no lo abrió ni una.
+            # Hay que nombrárselos, y la etiqueta es lo que le dice cuándo mirar ahí.
+            listado = "; ".join(
+                e["path"] + (f" — {e['label']}" if e["label"] else "") for e in extras)
+            prompt += (
+                f"\n\nRepos adicionales montados y legibles además del principal: {listado}. "
+                "Léelos cuando el ticket apunte a comportamiento que no vive en el repo "
+                "principal; el análisis se sigue escribiendo en el principal."
+            )
         if instructions:
             prompt += (
                 "\n\nInstrucciones de ajuste del usuario para re-trabajar el análisis "
@@ -251,10 +277,8 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
             # deniegan solas y el agente se queda sin poder leer el work item.
             "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
         ]
-        # Repos hermanos que el ticket necesita leer (el backend, la wiki) pero que
-        # viven fuera del repo primario. El análisis se sigue escribiendo en el primario.
-        for extra in json.loads(ticket.get("extra_dirs") or "[]"):
-            cmd += ["--add-dir", extra]
+        for e in extras:
+            cmd += ["--add-dir", e["path"]]
         # Garantiza que el CLI use la suscripción logueada, nunca facturación por API:
         # sin estas variables, la única credencial disponible es la del /login local.
         env = {k: v for k, v in os.environ.items()

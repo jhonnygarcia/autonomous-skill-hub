@@ -56,7 +56,10 @@ Herramientas del MCP azure-devops. Prohibido usar cualquier herramienta `*_write
    arriba, así que puede haber reglas por encima de la raíz del repo — inclúyelas.
    Estas reglas condicionan el análisis, no se reemplazan.
 8. **Código afectado**: subagente `Explore` con los archivos/componentes/clases que
-   el ticket menciona; devuelve rutas concretas y qué papel juega cada una.
+   el ticket menciona; devuelve rutas concretas y qué papel juega cada una. Si el
+   prompt te nombra **repos adicionales montados** (con su etiqueta: backend, app de
+   auth…), entran en el alcance de este paso: cuando el ticket apunte a comportamiento
+   que no vive en el repo principal, ábrelos en vez de declararlo "fuera de alcance".
 9. **Estado del trabajo ya empezado** (solo si lo hay): si el ticket está en curso,
    puedes inspeccionar la rama, sus commits y los documentos de trabajo del repo.
    Es material valioso, pero es **estado del repo, no contenido del ticket**: va en
@@ -76,7 +79,7 @@ fallo de la tarea, no una variante aceptable.
 # Análisis del ticket <id>: <título>
 
 **Tipo/Estado:** ... · **Asignado:** ... · **Iteración:** ...
-**Analizado:** <fecha> por ticket-agent v0.2.0
+**Analizado:** <fecha> por ticket-agent v0.3.0
 
 ## Qué pide
 (2-6 líneas fieles al ticket, sin interpretar de más)

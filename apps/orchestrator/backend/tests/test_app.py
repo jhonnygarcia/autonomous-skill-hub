@@ -30,6 +30,7 @@ def test_projects_endpoint(client):
     [p] = client.get("/projects").json()
     assert p["name"] == "Demo" and p["org"] == "DemoOrg" and p["project"] == "Demo"
     assert Path(p["repoPath"]).is_dir() and len(p["extraDirs"]) == 1
+    assert p["extraDirs"][0]["label"] == "backend" and Path(p["extraDirs"][0]["path"]).is_dir()
 
 
 def test_project_crud_rejects_rutas_inexistentes(client):
@@ -123,8 +124,11 @@ def test_run_pasa_allowed_tools_y_add_dir(client, monkeypatch):
     # Sin --allowedTools, en headless las tools del MCP se auto-deniegan y el
     # agente se queda sin poder leer el work item.
     assert "--allowedTools mcp__azure-devops" in log
-    # Los repos hermanos del proyecto viajan como --add-dir.
+    # Los repos hermanos del proyecto viajan como --add-dir...
     assert "--add-dir" in log and "backend-repo" in log
+    # ...y además se nombran en el prompt con su etiqueta: montarlos no basta para
+    # que el agente los mire (lo comprobamos con Tenant en la corrida del 3322).
+    assert "Repos adicionales montados" in log and "— backend" in log
 
 
 def test_run_conflict_when_active(client, monkeypatch):
