@@ -107,24 +107,46 @@ usa esa; no inventes una nueva por cada ticket.
 
 ## 6. Validación
 
-Ejecuta `npx --yes @fission-ai/openspec@latest validate`. Si falla, corrige y vuelve a
-validar. **A la segunda
-validación fallida, para**: deja el change escrito y reporta qué no pasa. Un change
-inválido que se puede revisar vale más que ninguno.
+Ejecuta exactamente:
+
+    npx --yes @fission-ai/openspec@latest validate --changes --no-interactive
+
+Sin `--changes` ni `--no-interactive` el CLI entra en modo interactivo esperando una
+selección por terminal, y en headless no hay terminal que la responda: la corrida se
+queda colgada. Si falla, corrige y vuelve a validar. **A la segunda validación
+fallida, para**: deja el change escrito y reporta qué no pasa. Un change inválido que
+se puede revisar vale más que ninguno.
 
 ## 7. Cierre según autonomía
 
 - `supervised`: resume en el chat qué se planificó, qué quedó bloqueado y qué falta;
   no toques el work item.
 - `autonomous`: igual, y además señala explícitamente qué decisiones tomaste solo.
+- Cualquier otro valor de `autonomy` se trata como `supervised` y se avisa al
+  usuario de que el valor no se reconoce.
 
-En ambos casos, la última línea del resumen dice dónde quedó el change.
+**Regla obligatoria de cierre.** La última línea del resumen —sin nada después—
+tiene que ser exactamente uno de estos tres sellos, seguido del motivo. El
+orquestador lee esta línea para decidir si la corrida queda `planned` o `error`: el
+código de salida del CLI no lo dice, porque sale en 0 aunque el agente se haya
+detenido sin escribir nada.
+
+- `PLAN: validado` — `openspec validate --changes --no-interactive` pasó.
+- `PLAN: sin-validar` — el change se escribió pero la validación no pasó (dos
+  intentos) o no llegó a correrse.
+- `PLAN: no-escrito` — no se llegó a escribir ningún change: falta el análisis,
+  `npx` no está disponible, o `openspec init` falló.
 
 ## Manejo de errores
 
-- Falta el análisis → detente y pide la Fase 1.
-- `npx` no disponible o `openspec init` falla → detente y repórtalo.
-- El análisis existe pero no trae el código afectado → planifica lo que puedas y
-  registra el hueco señalando que viene de la Fase 1.
+- Falta el análisis → detente, pide la Fase 1 y cierra con `PLAN: no-escrito`.
+- `npx` no disponible o `openspec init` falla → detente, repórtalo y cierra con
+  `PLAN: no-escrito`.
+- El análisis existe pero no trae el código afectado → planifica lo que puedas,
+  registra el hueco señalando que viene de la Fase 1, y cierra con `PLAN: validado`
+  o `PLAN: sin-validar` según haya pasado la validación.
+- `openspec validate` falla dos veces → deja el change escrito, reporta qué no pasa
+  y cierra con `PLAN: sin-validar`.
 - No encuentras un espejo para una tarea → dilo en la tarea. Una tarea sin espejo es
-  una tarea que el implementador tendrá que investigar, y eso hay que avisarlo.
+  una tarea que el implementador tendrá que investigar, y eso hay que avisarlo (no
+  cambia el sello por sí solo).

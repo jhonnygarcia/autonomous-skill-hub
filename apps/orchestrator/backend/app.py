@@ -24,6 +24,27 @@ PHASE_COMMANDS = {
 }
 # En qué deja al ticket una corrida que sale bien.
 PHASE_DONE = {"analyze": "analyzed", "design": "planned"}
+# Bash va acotado por fase, no solo por comando: la Fase 1 es de solo lectura y no
+# lleva Bash; la Fase 2 necesita invocar el paquete de npm `@fission-ai/openspec`
+# (el CLI NO se llama `openspec`) para `init` y `validate`, y nada más. El
+# especificador tiene que coincidir literalmente con el principio del comando o
+# Claude lo bloquea, así que se cubren las dos formas de invocarlo. Un Bash suelto
+# en el repo de un cliente es otra conversación — y fue justo lo que pasó cuando
+# esta lista viajaba fija para todas las fases.
+PHASE_ALLOWED_TOOLS = {
+    "analyze": [],
+    "design": [
+        "Bash(npx --yes @fission-ai/openspec@latest:*)",
+        "Bash(npx @fission-ai/openspec:*)",
+    ],
+}
+# Sustantivo del entregable, para que el prompt no le diga "análisis" al agente
+# cuando la fase es design (y viceversa).
+PHASE_NOUN = {"analyze": "el análisis", "design": "el plan"}
+# Si alguien añade una fase a un diccionario y no a los otros, hoy eso es un
+# KeyError sin capturar dentro de un background task que deja la corrida en
+# `success` y el ticket sin actualizar.
+assert PHASE_COMMANDS.keys() == PHASE_DONE.keys() == PHASE_ALLOWED_TOOLS.keys() == PHASE_NOUN.keys()
 
 
 def now() -> str:
@@ -303,6 +324,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         set_run(run_id, status="running", log_path=str(log_path), started_at=now())
         set_ticket(ticket["id"], status="running")
         prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
+        noun = PHASE_NOUN[phase]
         extras = norm_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
         if extras:
             # Montarlos con --add-dir no basta: en la corrida del 3322 el agente tenía
@@ -313,11 +335,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             prompt += (
                 f"\n\nRepos adicionales montados y legibles además del principal: {listado}. "
                 "Léelos cuando el ticket apunte a comportamiento que no vive en el repo "
-                "principal; el análisis se sigue escribiendo en el principal."
+                f"principal; {noun} se sigue escribiendo en el principal."
             )
         if instructions:
             prompt += (
-                "\n\nInstrucciones de ajuste del usuario para re-trabajar el análisis "
+                f"\n\nInstrucciones de ajuste del usuario para re-trabajar {noun} "
                 f"(aplícalas y regenera el archivo): {instructions}"
             )
         cmd = claude_cmd() + [
@@ -326,14 +348,9 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             "--permission-mode", "acceptEdits",
             # En headless, acceptEdits NO auto-aprueba las tools del MCP: se
             # deniegan solas y el agente se queda sin poder leer el work item.
-            # Bash va acotado por comando: la Fase 2 necesita invocar el paquete de
-            # npm `@fission-ai/openspec` (el CLI NO se llama `openspec`) para `init`
-            # y `validate`, y nada más. El especificador tiene que coincidir
-            # literalmente con el principio del comando o Claude lo bloquea, así que
-            # se cubren las dos formas de invocarlo. Un Bash suelto en el repo de un
-            # cliente es otra conversación.
+            # El resto de tools por fase viene de PHASE_ALLOWED_TOOLS (ver arriba).
             "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
-            "Bash(npx --yes @fission-ai/openspec@latest:*)", "Bash(npx @fission-ai/openspec:*)",
+            *PHASE_ALLOWED_TOOLS[phase],
         ]
         for e in extras:
             cmd += ["--add-dir", e["path"]]
@@ -368,6 +385,15 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         except Exception as exc:  # el error queda en el log, jamás tumba el server
             with open(log_path, "a", encoding="utf-8") as log:
                 log.write(f"\n[orchestrator] excepción: {exc}\n")
+        if phase == "design" and ok:
+            # `claude -p` sale con 0 aunque el agente se haya detenido sin escribir
+            # nada: el código de salida no basta para saber si hay plan. El sello de
+            # cierre de la skill (change-planning/SKILL.md §7) es el único contrato
+            # fiable — sin él, o con "no-escrito", se trata como error aunque el
+            # proceso no haya fallado.
+            cola = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+            if not any(s in cola for s in ("PLAN: validado", "PLAN: sin-validar")):
+                ok = False
         set_run(run_id, status="success" if ok else "error", finished_at=now())
         set_ticket(ticket["id"], status=PHASE_DONE[phase] if ok else "error")
 

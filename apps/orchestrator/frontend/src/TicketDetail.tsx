@@ -33,8 +33,8 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
             {detail.runs.length ? "Re-correr análisis" : "Correr análisis"}
           </Button>
           <Button size="sm" variant="secondary"
-                  disabled={!!motivo || !puedePlanificar(t)}
-                  title={motivo || (puedePlanificar(t) ? undefined
+                  disabled={!!motivo || !puedePlanificar(t, detail.runs[0]?.phase)}
+                  title={motivo || (puedePlanificar(t, detail.runs[0]?.phase) ? undefined
                                     : "Necesita un análisis: corre primero la Fase 1")}
                   onClick={() => onRun(undefined, "design")}>
             Planificar

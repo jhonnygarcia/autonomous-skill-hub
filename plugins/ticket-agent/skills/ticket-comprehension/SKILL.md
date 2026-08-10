@@ -79,7 +79,7 @@ fallo de la tarea, no una variante aceptable.
 # Análisis del ticket <id>: <título>
 
 **Tipo/Estado:** ... · **Asignado:** ... · **Iteración:** ...
-**Analizado:** <fecha> por ticket-agent v0.4.1
+**Analizado:** <fecha> por ticket-agent v0.4.2
 
 ## Qué pide
 (2-6 líneas fieles al ticket, sin interpretar de más)
@@ -128,8 +128,12 @@ fuente de cada cifra. Omite la sección entera si no hay trabajo empezado)
 
 - `supervised`: presenta un resumen del análisis al usuario con la ruta del archivo
   y detente. No propongas implementación.
-- `autonomous`: hoy se comporta igual que supervised (las fases de diseño e
-  implementación aún no existen); cuando existan, continuará con ellas.
+- `autonomous`: presenta el mismo resumen y detente igual — el cierre de esta skill
+  es detenerse **en todos los casos**, sin excepción. La Fase 2 (`change-planning`)
+  no se encadena aquí: se lanza como una corrida propia del orquestador, nunca
+  dentro de la corrida de análisis.
+- Cualquier otro valor de `autonomy` se trata como `supervised` y se avisa al
+  usuario de que el valor no se reconoce.
 
 ## Manejo de errores
 

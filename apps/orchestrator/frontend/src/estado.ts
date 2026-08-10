@@ -42,7 +42,10 @@ export function duracion(desde: string | null, hasta: string | null): string {
 }
 
 /** La Fase 2 lee el análisis de la Fase 1: sin análisis no hay nada que planificar.
- *  `planned` también vale — re-planificar es legítimo si cambió el análisis. */
-export function puedePlanificar(t: Ticket): boolean {
+ *  `planned` también vale — re-planificar es legítimo si cambió el análisis. Y un
+ *  ticket en `error` cuya última corrida fue `design` también: la Fase 2 falló a
+ *  medias y la única salida no puede ser re-correr toda la Fase 1 de nuevo. */
+export function puedePlanificar(t: Ticket, ultimaFase?: string): boolean {
   return t.status === "analyzed" || t.status === "planned"
+    || (t.status === "error" && ultimaFase === "design")
 }

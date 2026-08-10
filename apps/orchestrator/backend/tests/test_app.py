@@ -127,10 +127,14 @@ import sys
 from pathlib import Path
 
 
-def _use_fake_claude(monkeypatch, fail=False):
+def _use_fake_claude(monkeypatch, fail=False, plan_sello=None):
     fake = Path(__file__).parent / "fake_claude.py"
     monkeypatch.setenv("ORCH_CLAUDE_CMD", json.dumps([sys.executable, str(fake)]))
     monkeypatch.setenv("FAKE_FAIL", "1" if fail else "0")
+    if plan_sello is None:
+        monkeypatch.delenv("FAKE_PLAN_SELLO", raising=False)
+    else:
+        monkeypatch.setenv("FAKE_PLAN_SELLO", plan_sello)
 
 
 def test_run_success_writes_log_and_states(client, monkeypatch):
@@ -157,7 +161,7 @@ def test_run_design_invoca_el_comando_plan(client, monkeypatch):
 
 
 def test_run_design_deja_el_ticket_planned(client, monkeypatch):
-    _use_fake_claude(monkeypatch)
+    _use_fake_claude(monkeypatch, plan_sello="validado — la validación de OpenSpec pasó")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     assert client.get(f"/tickets/{tid}").json()["ticket"]["status"] == "planned"
@@ -193,6 +197,28 @@ def test_bash_va_acotado_a_openspec(client, monkeypatch):
     assert " Bash " not in log        # nunca Bash a secas
 
 
+def test_bash_incluye_las_dos_formas_de_invocar_openspec_en_design(client, monkeypatch):
+    """El especificador tiene que calzar literalmente con el principio del comando:
+    hacen falta las dos formas (`npx --yes ...@latest` y `npx ...` a secas)."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in log
+    assert "Bash(npx @fission-ai/openspec:*)" in log
+
+
+def test_bash_no_aparece_en_fase_analyze(client, monkeypatch):
+    """C1: la Fase 1 es de solo lectura. Antes del fix, Bash viajaba en TODAS las
+    corridas porque --allowedTools no miraba la fase; una corrida real de analyze
+    llegó a ejecutar `ls`, `find` y `git remote -v` en el repo de un cliente."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "Bash" not in log
+
+
 def test_run_sobrevive_a_una_linea_gigante(client, monkeypatch):
     """El stream-json pasa de 64 KiB en una sola línea cuando el agente escribe un
     archivo grande. Leer por líneas reventaba ahí y marcaba `error` una corrida buena."""
@@ -215,6 +241,68 @@ def test_run_error_state(client, monkeypatch):
     detail = client.get(f"/tickets/{tid}").json()
     assert detail["ticket"]["status"] == "error"
     assert detail["runs"][0]["status"] == "error"
+
+
+def test_design_sello_validado_deja_planned(client, monkeypatch):
+    _use_fake_claude(monkeypatch, plan_sello="validado — la validación de OpenSpec pasó")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "planned"
+    assert detail["runs"][0]["status"] == "success"
+
+
+def test_design_sello_sin_validar_deja_planned(client, monkeypatch):
+    _use_fake_claude(monkeypatch, plan_sello="sin-validar — dos intentos de validación fallaron")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "planned"
+    assert detail["runs"][0]["status"] == "success"
+
+
+def test_design_sello_no_escrito_deja_error(client, monkeypatch):
+    """El spec exige `error` cuando falta el análisis o el CLI de OpenSpec no está
+    disponible: la skill cierra con este sello en esos casos."""
+    _use_fake_claude(monkeypatch, plan_sello="no-escrito — falta el análisis de la Fase 1")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "error"
+    assert detail["runs"][0]["status"] == "error"
+
+
+def test_design_sin_sello_se_trata_como_error(client, monkeypatch):
+    """I2: `claude -p` sale con 0 aunque el agente se haya detenido sin hacer nada.
+    Sin sello no hay forma de distinguir eso de un plan real, así que se trata como
+    error aunque el proceso no haya fallado."""
+    _use_fake_claude(monkeypatch)  # sin FAKE_PLAN_SELLO
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "error"
+    assert detail["runs"][0]["status"] == "error"
+
+
+def test_sello_no_se_exige_en_analyze(client, monkeypatch):
+    """El contrato del sello es solo de la Fase 2: analyze no debe verse afectado."""
+    _use_fake_claude(monkeypatch)  # sin FAKE_PLAN_SELLO
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "analyzed"
+    assert detail["runs"][0]["status"] == "success"
+
+
+def test_prompt_design_no_menciona_analisis(client, monkeypatch):
+    """I6: el entregable de una corrida design es el plan, no el análisis — decirle
+    "análisis" al agente ahí lo manda a re-trabajar el archivo equivocado."""
+    _use_fake_claude(monkeypatch, plan_sello="validado — ok")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design", "instructions": "ajusta el alcance"})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "análisis" not in log
+    assert "el plan" in log
 
 
 def test_rework_passes_instructions(client, monkeypatch):

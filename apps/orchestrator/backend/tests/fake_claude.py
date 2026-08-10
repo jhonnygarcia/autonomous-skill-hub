@@ -15,4 +15,8 @@ if os.environ.get("FAKE_BIG") == "1":
 if os.environ.get("FAKE_FAIL") == "1":
     print("boom", file=sys.stderr)
     sys.exit(1)
+sello = os.environ.get("FAKE_PLAN_SELLO")
+if sello:
+    # Simula el sello de cierre obligatorio de change-planning/SKILL.md §7.
+    print('{"type":"assistant","text":"resumen del cierre. PLAN: ' + sello + '"}')
 print('{"type":"result","subtype":"success"}')
