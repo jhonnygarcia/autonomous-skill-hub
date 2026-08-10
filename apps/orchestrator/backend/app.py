@@ -607,13 +607,27 @@ def artefacto(tid: int, ruta: str):
     #    ESTRICTAMENTE dentro de alguna raíz del ticket — ni es la raíz misma (`..`
     #    resuelve al repo entero) ni queda por encima. Lo que no cumple eso no es una
     #    huella, es un comodín, y se descarta aquí, antes de comparar con `real`.
+    #
+    #    Dos preguntas, NO una: `any(rd != r and r in rd.parents for r in raices)`
+    #    (ronda 2) las fundía en un solo `any`, y con raíces anidadas — un `extra_dir`
+    #    ANCESTRO del `repo_path`, el caso monorepo real (principal `Tenant/src/Web`,
+    #    extra `Tenant`; `check_dirs` lo acepta sin objeción porque solo comprueba
+    #    `is_dir`) — bastaba con que la declarada quedara dentro de ALGUNA raíz, aunque
+    #    ESA raíz fuera otra raíz: `.` resuelve al repo principal, que está
+    #    estrictamente dentro del extra, y volvía a colar como huella. Primero se
+    #    descarta lo que ES una raíz o está POR ENCIMA de cualquiera de ellas; solo lo
+    #    que sobrevive a eso se comprueba por contención. Ese orden es lo que arregla
+    #    el caso anidado: una declarada que resuelve a la raíz principal se descarta en
+    #    el primer paso aunque esté dentro del extra.
     declaradas_reales = []
     for d in declaradas:
         if not d:
             continue
         rd = (Path(t["repo_path"]) / d).resolve()
-        if any(rd != r and r in rd.parents for r in raices):
-            declaradas_reales.append(rd)
+        if any(rd == r or rd in r.parents for r in raices):
+            continue                      # es una raíz, o la contiene: comodín, se tira
+        if any(r in rd.parents for r in raices):
+            declaradas_reales.append(rd)  # estrictamente dentro de alguna: vale
     if not any(real == d or d in real.parents for d in declaradas_reales):
         raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
 

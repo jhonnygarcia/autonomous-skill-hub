@@ -725,3 +725,71 @@ def test_artefacto_travesia_que_vuelve_a_entrar_al_declarado_sirve(client, monke
     ruta = "openspec/changes/3323-xpo/../3323-xpo/tasks.md"
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": ruta})
     assert r.status_code == 200 and r.json()["texto"] == "- [ ] uno"
+
+
+def test_artefacto_declarada_dentro_de_un_extra_dir_sirve_su_hijo(client, monkeypatch, tmp_path):
+    """Caso legítimo que no tenía cobertura propia: una declarada puede navegar fuera
+    del `repo_path` hasta un `extra_dir` (son ambos raíces válidas del ticket), y su
+    hijo se sigue sirviendo."""
+    (tmp_path / "backend-repo" / "report.md").write_text("informe", encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella="ok — ../backend-repo/report.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "../backend-repo/report.md"})
+    assert r.status_code == 200 and r.json()["texto"] == "informe"
+
+
+def test_artefacto_extra_dir_ancestro_del_principal_no_reactiva_el_comodin(
+    client, monkeypatch, tmp_path
+):
+    """RONDA 3: `any(rd != r and r in rd.parents for r in raices)` (ronda 2) funde dos
+    preguntas — basta con que la declarada quede dentro de ALGUNA raíz, aunque SEA
+    otra raíz. En un monorepo donde el `extra_dir` es ANCESTRO del `repo_path`
+    (principal `Tenant/Web`, extra `Tenant`; `check_dirs` lo acepta porque solo mira
+    `is_dir`), `.` resuelve al repo principal, que está estrictamente DENTRO del
+    extra — y volvía a colar como huella, reactivando la vulnerabilidad original por
+    configuración con el mismo disparador alcanzable (`HUELLA: ok — .`)."""
+    (tmp_path / "Tenant" / "Web").mkdir(parents=True)
+    (tmp_path / "Tenant" / "Api").mkdir(parents=True)
+    (tmp_path / "Tenant" / "Web" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    (tmp_path / "Tenant" / "Api" / "appsettings.json").write_text(
+        '{"ConnectionStrings": "secreta"}', encoding="utf-8")
+    client.post("/projects", json={
+        "name": "Anidado", "org": "O", "project": "P",
+        "repos": [
+            {"path": (tmp_path / "Tenant" / "Web").as_posix(), "label": "web", "primary": True},
+            {"path": (tmp_path / "Tenant").as_posix(), "label": "tenant"},
+        ],
+    })
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Anidado"}).json()["id"]
+    for huella in (".", "docs/..", ".."):
+        _use_fake_claude(monkeypatch, huella=f"ok — {huella}")
+        client.post(f"/tickets/{tid}/run", json={})
+        assert client.get(f"/tickets/{tid}/artefacto",
+                          params={"ruta": ".env"}).status_code == 400
+        assert client.get(f"/tickets/{tid}/artefacto",
+                          params={"ruta": "../Api/appsettings.json"}).status_code == 400
+
+
+def test_artefacto_extra_dir_descendiente_del_principal_sigue_rechazando_comodin(
+    client, monkeypatch, tmp_path
+):
+    """Dirección contraria del caso anidado: el `extra_dir` es DESCENDIENTE del
+    `repo_path` (p. ej. un `vendor/` montado como repo aparte dentro del principal).
+    `.` y `sub/..` siguen resolviendo a la raíz del repo principal, que sigue siendo
+    una raíz — se descartan igual que en el caso plano."""
+    (tmp_path / "repo2" / "vendor").mkdir(parents=True)
+    (tmp_path / "repo2" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    client.post("/projects", json={
+        "name": "Descendiente", "org": "O", "project": "P",
+        "repos": [
+            {"path": (tmp_path / "repo2").as_posix(), "label": "principal", "primary": True},
+            {"path": (tmp_path / "repo2" / "vendor").as_posix(), "label": "vendor"},
+        ],
+    })
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Descendiente"}).json()["id"]
+    for huella in (".", "vendor/.."):
+        _use_fake_claude(monkeypatch, huella=f"ok — {huella}")
+        client.post(f"/tickets/{tid}/run", json={})
+        assert client.get(f"/tickets/{tid}/artefacto",
+                          params={"ruta": ".env"}).status_code == 400
