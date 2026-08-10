@@ -52,6 +52,20 @@ export const FASE_NOUN: Record<string, string> = {
   analyze: "análisis", design: "plan",
 }
 
+/** Tamaño legible de un artefacto: bytes, KB o MB. */
+export function tamaño(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Hora local corta, para la marca de cada corrida en la fila de una fase. */
+export function hora(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  })
+}
+
 export function iconoFase(estado?: string): string {
   return estado === "ok" ? "✓" : estado === "parcial" ? "!" : estado === "error" ? "✕"
     : estado === "corriendo" ? "·" : "—"
