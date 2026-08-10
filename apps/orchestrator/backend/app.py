@@ -298,10 +298,83 @@ def create_ticket(body: TicketIn):
     return dict(ticket_row(cur.lastrowid))
 
 
+def segundos(desde: str | None, hasta: str | None) -> int | None:
+    if not desde or not hasta:
+        return None
+    return int((datetime.fromisoformat(hasta) - datetime.fromisoformat(desde)).total_seconds())
+
+
+def stat_huella(repo: str, rel: str) -> dict:
+    """Tamaño y número de archivos de lo que la corrida declaró haber escrito. Una ruta
+    declarada que no existe NO se oculta: se informa `existe: False`. Es la regla de oro
+    de las skills aplicada al orquestador."""
+    p = Path(repo) / rel
+    if not p.exists():
+        return {"ruta": rel, "existe": False, "archivos": 0, "bytes": 0, "nombres": []}
+    hijos = sorted(x for x in p.iterdir() if x.is_file()) if p.is_dir() else [p]
+    return {"ruta": rel, "existe": True, "archivos": len(hijos),
+            "bytes": sum(x.stat().st_size for x in hijos),
+            # ponytail: 12 nombres bastan para el timeline; un change tiene 4.
+            "nombres": [x.name for x in hijos[:12]]}
+
+
+def fases_de(t: sqlite3.Row, runs: list[dict], con_huella: bool = True) -> list[dict]:
+    """El avance de una fase ES su corrida más reciente. `runs` llega ordenado por id DESC."""
+    out = []
+    for nombre in PHASES:
+        if nombre not in PHASE_COMMANDS:
+            out.append({"fase": nombre, "disponible": False})
+            continue
+        rs = [r for r in runs if r["phase"] == nombre]
+        e = {"fase": nombre, "disponible": True, "corridas": len(rs),
+             "fallidas": sum(1 for r in rs if r["status"] == "error")}
+        if not rs:
+            e["estado"] = "pendiente"
+            out.append(e)
+            continue
+        u = rs[0]
+        if u["status"] in ("queued", "running"):
+            e["estado"] = "corriendo"
+        elif u["status"] == "success" and u["artifact_state"] in ("ok", "parcial"):
+            e["estado"] = u["artifact_state"]
+        else:
+            e["estado"] = "error"
+        e["en"] = u["finished_at"] or u["started_at"]
+        e["duracion_s"] = segundos(u["started_at"], u["finished_at"])
+        if e["estado"] == "error":
+            e["motivo"] = u["artifact_path"] or "la corrida falló sin declarar huella"
+        elif e["estado"] in ("ok", "parcial") and u["artifact_path"] and con_huella:
+            e["huella"] = stat_huella(t["repo_path"], u["artifact_path"])
+        out.append(e)
+    return out
+
+
+def status_plegado(fases: list[dict]) -> str:
+    """La etiqueta de la lista, plegada de las mismas fases que ve el detalle. Deja de
+    depender de una columna que se sobrescribía a cada corrida."""
+    if any(f.get("estado") == "corriendo" for f in fases):
+        return "running"
+    hechas = [f for f in fases if f.get("estado") in ("ok", "parcial")]
+    if hechas:
+        return PHASE_DONE[hechas[-1]["fase"]]
+    if any(f.get("estado") == "error" for f in fases):
+        return "error"
+    return "queued"
+
+
+def ticket_out(t: sqlite3.Row, fases: list[dict]) -> dict:
+    return {**dict(t), "status": status_plegado(fases)}
+
+
 @app.get("/tickets")
 def list_tickets():
     with db() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM tickets ORDER BY id DESC")]
+        ts = c.execute("SELECT * FROM tickets ORDER BY id DESC").fetchall()
+        runs = [dict(r) for r in c.execute("SELECT * FROM runs ORDER BY id DESC")]
+    # ponytail: se traen todas las corridas de una y se agrupan en memoria; con miles
+    # de tickets tocaría una consulta por ticket o un GROUP BY. Es una cola local.
+    return [ticket_out(t, fases_de(t, [r for r in runs if r["ticket_id"] == t["id"]],
+                                   con_huella=False)) for t in ts]
 
 
 @app.get("/tickets/{tid}")
@@ -315,7 +388,8 @@ def get_ticket(tid: int):
     tail = ""
     if runs and runs[0]["log_path"] and Path(runs[0]["log_path"]).exists():
         tail = Path(runs[0]["log_path"]).read_text(encoding="utf-8", errors="replace")[-8000:]
-    return {"ticket": dict(t), "runs": runs, "log_tail": tail}
+    fases = fases_de(t, runs)
+    return {"ticket": ticket_out(t, fases), "fases": fases, "runs": runs, "log_tail": tail}
 
 
 @app.delete("/tickets/{tid}", status_code=204)

@@ -400,3 +400,88 @@ def test_run_conflict_when_active(client, monkeypatch):
             "INSERT INTO runs(ticket_id, phase, status) VALUES(?, 'analyze', 'running')", (tid,)
         )
     assert client.post(f"/tickets/{tid}/run", json={}).status_code == 409
+
+
+def test_fases_sin_corridas(client):
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    fases = client.get(f"/tickets/{tid}").json()["fases"]
+    assert [f["fase"] for f in fases] == ["analyze", "design", "implement", "test", "guards", "pr"]
+    assert fases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
+                        "corridas": 0, "fallidas": 0}
+    # una fase no ejecutable no informa estado: no hay nada que informar
+    assert fases[2] == {"fase": "implement", "disponible": False}
+    assert client.get("/tickets").json()[0]["status"] == "queued"
+
+
+def test_fases_con_una_corrida_por_fase(client, monkeypatch, tmp_path):
+    (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "repo" / "docs" / "tickets" / "3323-analysis.md").write_text("x" * 500)
+    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3323-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    f = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert f["estado"] == "ok" and f["corridas"] == 1 and f["fallidas"] == 0
+    assert f["huella"] == {"ruta": "docs/tickets/3323-analysis.md", "existe": True,
+                           "archivos": 1, "bytes": 500,
+                           "nombres": ["3323-analysis.md"]}
+    assert isinstance(f["duracion_s"], int)
+    # y el estado del ticket se pliega de ahí, sin leer ninguna columna
+    assert client.get("/tickets").json()[0]["status"] == "analyzed"
+
+
+def test_la_fase_toma_el_estado_de_su_corrida_mas_reciente(client, monkeypatch, tmp_path):
+    (tmp_path / "repo" / "a.md").write_text("uno")
+    _use_fake_claude(monkeypatch, huella="nada — se cayó")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    _use_fake_claude(monkeypatch, huella="ok — a.md")
+    client.post(f"/tickets/{tid}/run", json={})
+    f = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert f["estado"] == "ok" and f["corridas"] == 2 and f["fallidas"] == 1
+
+
+def test_una_recorrida_del_analisis_no_borra_que_hay_plan(client, monkeypatch, tmp_path):
+    """El defecto que mata este diseño: `tickets.status` se sobrescribía y el plan
+    desaparecía del mundo al re-correr la Fase 1."""
+    (tmp_path / "repo" / "a.md").write_text("uno")
+    _use_fake_claude(monkeypatch, huella="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    client.post(f"/tickets/{tid}/run", json={})          # re-corre el análisis
+    d = client.get(f"/tickets/{tid}").json()
+    assert [f["estado"] for f in d["fases"][:2]] == ["ok", "ok"]
+    assert d["ticket"]["status"] == "planned"
+    assert client.get("/tickets").json()[0]["status"] == "planned"
+
+
+def test_huella_de_un_directorio_cuenta_y_lista_sus_archivos(client, monkeypatch, tmp_path):
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    d.mkdir(parents=True)
+    for n in ("proposal.md", "tasks.md", "design.md"):
+        (d / n).write_text("abc")
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    h = client.get(f"/tickets/{tid}").json()["fases"][1]["huella"]
+    assert h["existe"] and h["archivos"] == 3 and h["bytes"] == 9
+    assert sorted(h["nombres"]) == ["design.md", "proposal.md", "tasks.md"]
+
+
+def test_ruta_declarada_que_no_existe_en_disco_no_se_oculta(client, monkeypatch):
+    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/fantasma.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    f = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert f["estado"] == "ok"                      # la fase conserva su estado
+    assert f["huella"]["existe"] is False           # y la huella se delata
+    assert f["huella"]["archivos"] == 0
+
+
+def test_fase_en_error_lleva_el_motivo_del_sello(client, monkeypatch):
+    _use_fake_claude(monkeypatch, huella="nada — falta el análisis de la Fase 1")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    f = client.get(f"/tickets/{tid}").json()["fases"][1]
+    assert f["estado"] == "error" and "falta el análisis" in f["motivo"]
+    assert "huella" not in f
