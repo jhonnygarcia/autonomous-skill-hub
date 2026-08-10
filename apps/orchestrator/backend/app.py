@@ -577,16 +577,21 @@ def artefacto(tid: int, ruta: str):
         declaradas = [r["artifact_path"] for r in c.execute(
             "SELECT artifact_path FROM runs WHERE ticket_id=? AND artifact_path IS NOT NULL "
             "AND artifact_path != '' AND artifact_state IN ('ok','parcial')", (tid,))]
-            # ^ '' además de NULL: un sello degenerado guarda cadena vacía, y
-            # PurePosixPath('') == PurePosixPath('.'), que "pertenece" a los
-            # .parents de cualquier ruta relativa — un comodín que abre todo el repo.
+            # ^ '' además de NULL como cinturón y tirantes — la propiedad real que
+            # descarta los comodines vive más abajo, al construir `declaradas_reales`.
+
+    # Las raíces del ticket: el repo principal y los extra. Se calculan una vez y
+    # sirven dos veces — para decidir qué declaradas cuentan como huella real y,
+    # más abajo, para la regla 2.
+    raices = [Path(t["repo_path"]).resolve()]
+    raices += [Path(d["path"]).resolve() for d in norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
 
     # Se resuelve UNA sola vez, ANTES de comparar nada: comparar sobre PurePosixPath
-    # sin resolver (como hacía la regla 1 antes de este arreglo) NO normaliza `..`,
-    # así que "dir/../../../fuera" seguía teniendo a "dir" entre sus `.parents` y
-    # colaba como si fuera un descendiente real de un directorio declarado. Resolver
-    # antes es lo mismo que ya hacía bien la regla 2, y de paso cierra la asimetría
-    # absoluta/relativa y la sensibilidad a mayúsculas de Windows.
+    # sin resolver (como hacía la regla 1 antes de la ronda 1 de arreglos) NO
+    # normaliza `..`, así que "dir/../../../fuera" seguía teniendo a "dir" entre sus
+    # `.parents` y colaba como si fuera un descendiente real de un directorio
+    # declarado. Resolver antes cierra eso, la asimetría absoluta/relativa y la
+    # insensibilidad a mayúsculas de Windows.
     real = (Path(t["repo_path"]) / ruta).resolve()
 
     # 1. Declarada por una corrida DE ESTE TICKET, o un archivo BAJO un directorio
@@ -594,14 +599,26 @@ def artefacto(tid: int, ruta: str):
     #    3) cuenta recursivo porque un change de OpenSpec anida `specs/<capability>/
     #    spec.md`, y `huella.nombres` es justo la lista blanca que ofrece la UI. Admitir
     #    solo hijos directos rechazaría con 400 los botones que el propio backend ofreció.
-    declaradas_reales = [(Path(t["repo_path"]) / d).resolve() for d in declaradas if d]
+    #
+    #    Filtrar comodines por GRAFÍA ('', '.', '..', 'docs/..', '   ') es jugar al
+    #    gato y al ratón: la ronda 2 de revisión encontró cuatro formas más en cuanto
+    #    la comparación pasó a rutas resueltas. La propiedad que de verdad importa es
+    #    otra: una declarada solo cuenta como huella si, YA RESUELTA, queda
+    #    ESTRICTAMENTE dentro de alguna raíz del ticket — ni es la raíz misma (`..`
+    #    resuelve al repo entero) ni queda por encima. Lo que no cumple eso no es una
+    #    huella, es un comodín, y se descarta aquí, antes de comparar con `real`.
+    declaradas_reales = []
+    for d in declaradas:
+        if not d:
+            continue
+        rd = (Path(t["repo_path"]) / d).resolve()
+        if any(rd != r and r in rd.parents for r in raices):
+            declaradas_reales.append(rd)
     if not any(real == d or d in real.parents for d in declaradas_reales):
         raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
 
     # 2. Cae dentro del repo principal o de los extra del ticket. resolve() sigue
     #    enlaces, así que un symlink apuntando fuera muere aquí.
-    raices = [Path(t["repo_path"]).resolve()]
-    raices += [Path(d["path"]).resolve() for d in norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
     if not any(real == r or r in real.parents for r in raices):
         raise HTTPException(400, "Esa ruta cae fuera de los repos del ticket")
 
@@ -609,17 +626,20 @@ def artefacto(tid: int, ruta: str):
     if not real.is_file():
         raise HTTPException(400, "No es un archivo regular")
 
-    # 4. Tope, sin cargar el archivo entero en memoria: el tope protege el tamaño de
-    #    la RESPUESTA, no el del PROCESO — leer con `read_bytes()` un archivo de 60 MB
-    #    para servir 0,5 KB es un pico de 60 MB en una lectura síncrona que bloquea el
-    #    mismo event loop donde corre el runner. Se lee como mucho TOPE+4 bytes; el
-    #    tamaño real (para el campo `bytes`) sale de `stat()`, no de lo leído. El
-    #    retroceso hasta un byte que no sea de continuación (0b10xxxxxx) sigue igual:
-    #    cortar a ciegas parte un carácter multibyte por la mitad.
+    # 4. Tope, sin cargar el archivo entero en memoria: se lee como mucho TOPE+4
+    #    bytes en vez de todo el archivo, para no pagar un pico de memoria igual al
+    #    tamaño completo del artefacto solo para servir 0,5 KB de él. El tamaño real
+    #    (para el campo `bytes`) sale de `stat()`, no de lo leído — y por eso
+    #    `truncado` exige TAMBIÉN que el búfer leído supere el tope: si el archivo se
+    #    encoge entre el `stat()` y el `read()` (una corrida reescribiendo el
+    #    artefacto mientras la UI lo mira), el índice de corte no puede salirse del
+    #    búfer que de verdad se leyó y reventar con `IndexError`. El retroceso hasta
+    #    un byte que no sea de continuación (0b10xxxxxx) sigue igual: cortar a ciegas
+    #    parte un carácter multibyte por la mitad.
     tam = real.stat().st_size
     with open(real, "rb") as fh:
         crudo = fh.read(TOPE_ARTEFACTO + 4)
-    truncado = tam > TOPE_ARTEFACTO
+    truncado = tam > TOPE_ARTEFACTO and len(crudo) > TOPE_ARTEFACTO
     corte = TOPE_ARTEFACTO
     while truncado and corte > 0 and (crudo[corte] & 0xC0) == 0x80:
         corte -= 1

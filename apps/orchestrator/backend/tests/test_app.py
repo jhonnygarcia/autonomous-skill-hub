@@ -633,3 +633,95 @@ def test_artefacto_artifact_path_vacio_no_es_comodin(client, monkeypatch, tmp_pa
     conn.close()
     assert client.get(f"/tickets/{tid}/artefacto",
                       params={"ruta": ".env"}).status_code == 400
+
+
+def test_artefacto_declarada_punto_no_es_comodin(client, monkeypatch, tmp_path):
+    """RONDA 2: al pasar la regla 1 a rutas resueltas, `artifact_path='.'` resuelve a
+    la raíz misma del repo, que sigue siendo un comodín aunque ya no sea `''`. La
+    propiedad correcta es "estrictamente DENTRO de una raíz", no "distinto de ''"."""
+    (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/a.md")
+    _use_fake_claude(monkeypatch, huella="ok — .")
+    client.post(f"/tickets/{tid}/run", json={})
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": ".env"}).status_code == 400
+
+
+def test_artefacto_declarada_doble_punto_no_es_comodin_y_alcanza_extra_dirs(
+    client, monkeypatch, tmp_path
+):
+    """RONDA 2, el vector CRÍTICO verificado por el revisor: `artifact_path='..'`
+    resuelve por encima del repo, y desde ahí `..` en la regla 2 vuelve a entrar tanto
+    al repo principal como a los `extra_dirs` — cualquier archivo de cualquiera de los
+    dos quedaba servible. `HUELLA: ok — ..` es alcanzable de verdad desde el sello de
+    cierre de una skill degenerada."""
+    (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    (tmp_path / "backend-repo" / "secreto-hermano.env").write_text("OTRO=1", encoding="utf-8")
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/a.md")
+    _use_fake_claude(monkeypatch, huella="ok — ..")
+    client.post(f"/tickets/{tid}/run", json={})
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": ".env"}).status_code == 400
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": "../backend-repo/secreto-hermano.env"}).status_code == 400
+
+
+def test_artefacto_declarada_dir_punto_punto_no_es_comodin(client, monkeypatch, tmp_path):
+    """RONDA 2: `docs/..` resuelve a la raíz del repo igual que `.` — otra grafía para
+    el mismo comodín, y la razón de que el arreglo tenga que ir por propiedad y no por
+    lista de grafías prohibidas."""
+    (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/a.md")
+    _use_fake_claude(monkeypatch, huella="ok — docs/..")
+    client.post(f"/tickets/{tid}/run", json={})
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": ".env"}).status_code == 400
+
+
+def test_artefacto_declarada_solo_espacios_no_es_comodin(client, monkeypatch, tmp_path):
+    """RONDA 2: `leer_huella` hace `.strip()` sobre el sello, así que un `artifact_path`
+    de solo espacios no puede llegar por el camino normal de una corrida — se simula
+    insertando la fila directo, igual que el caso de `''` de la ronda 1."""
+    import os
+    import sqlite3 as sq
+
+    (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    conn = sq.connect(os.environ["ORCH_DB"])
+    conn.execute(
+        "INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+        "VALUES(?, 'analyze', 'success', 'ok', '   ')", (tid,),
+    )
+    conn.commit()
+    conn.close()
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": ".env"}).status_code == 400
+
+
+def test_artefacto_directorio_de_primer_nivel_sigue_sirviendo(client, monkeypatch, tmp_path):
+    """El filtro por propiedad de la ronda 2 no puede llevarse por delante el caso
+    normal: una declarada legítima que sea un directorio de primer nivel del repo
+    (aquí `docs`) sigue quedando estrictamente DENTRO de la raíz, así que sus hijos
+    se siguen sirviendo."""
+    (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "repo" / "docs" / "tickets" / "a.md").write_text("hola", encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella="ok — docs")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "docs/tickets/a.md"})
+    assert r.status_code == 200 and r.json()["texto"] == "hola"
+
+
+def test_artefacto_travesia_que_vuelve_a_entrar_al_declarado_sirve(client, monkeypatch, tmp_path):
+    """Una ruta con `..` no es sospechosa por tener `..`: lo que importa es dónde
+    resuelve. Si vuelve a entrar al mismo directorio declarado, tiene que servirse
+    igual que la forma directa — la regla 1 compara sobre `real`, ya resuelta."""
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("- [ ] uno", encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    ruta = "openspec/changes/3323-xpo/../3323-xpo/tasks.md"
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": ruta})
+    assert r.status_code == 200 and r.json()["texto"] == "- [ ] uno"
