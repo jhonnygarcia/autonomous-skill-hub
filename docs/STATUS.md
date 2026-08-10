@@ -1,7 +1,7 @@
 # Estado del proyecto — Autonomous Skill Hub
 
 > Documento vivo. Actualízalo al cerrar cada hito o al tomar una decisión.
-> Última actualización: 2026-08-10 (avance por fases, huellas y timeline — implementado)
+> Última actualización: 2026-08-10 (Fase 2 **cerrada**: el fallo del negativo, arreglado y verificado)
 
 ## Propósito
 
@@ -18,7 +18,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
 | Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables + **avance por fases, huellas y timeline implementados y validados con corrida real** (2026-08-10) |
-| 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Construida y validada** (3323) — skill **v0.4.2**, n=1 |
+| 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Cerrada** (3323 y 3320, n=2) — plugin **v0.5.2**, con la regla del negativo verificada en re-corrida |
 | 2b — Del plan al código | Ejecutar el plan: escribir código, rama, PR | 📋 Futura — la Fase 2 se quedó deliberadamente en el documento |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
 | 4 — Guards | Agents revisores read-only + hooks deterministas | 📋 Futura |
@@ -110,6 +110,12 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
     `.opencode/`— **no hay que versionarlo ni revertirlo**. Se están probando el plugin y
     el orquestador, no ese repo. Sí merece la pena **medir** la huella que dejan: eso es
     evidencia sobre la herramienta.
+16. **Un negativo lleva su fuente igual que una cifra** (2026-08-10, regla 5 de `change-planning`,
+    plugin v0.5.2). Las reglas de oro disciplinaban lo que el agente **encuentra**; nada
+    disciplinaba lo que declara **ausente**, y ahí falló el 3320. Ahora declarar "no existe" exige
+    haber buscado **por forma de nombre** (`Glob`), no por símbolos, y **nombrar esa búsqueda en la
+    tarea**. Generalizable a las fases que vengan: toda afirmación negativa del agente es
+    verificable o no vale.
 
 ## Aceptación de la Fase 1 — cerrada el 2026-08-08
 
@@ -236,16 +242,99 @@ pendiente. Arreglado en `8f3e6a2`. Consola limpia, sin desbordamiento horizontal
 modo oscuro legible — aunque **la app no tiene interruptor de tema**, así que los `dark:`
 son inversión a futuro.
 
+## Quinta jornada — 2026-08-10 (noche): el 3320 y el fallo del negativo
+
+**Fase 2 llega a n=2.** El 3320 (*Bug, "Ready To Pay" no persiste*, padre #827 sin
+descripción, **cero comentarios propios**) corrió entero por el orquestador reusando el
+proyecto existente: Fase 1 en **4m11s** (`HUELLA: parcial`) y Fase 2 en **7m59s**
+(`HUELLA: ok`). Change: `openspec/changes/3320-ap-ready-to-pay-persistence`, 14 tareas en
+7 grupos y 3 bloqueos. `openspec validate --strict` **re-corrido a mano**: exit 0.
+
+**La pregunta de la jornada tenía dos respuestas previstas y ganó una tercera.** No inventó
+espejos: los 9 `archivo:línea` que verifiqué caen **exactos** sobre lo que dicen citar, en
+los dos repos. Y encontró el espejo bueno donde nadie lo había apuntado — `ArApReceivableInvoice.cs:13-15`,
+el par `ReadyToProcessARBy`/`Date` de AR, con la observación de que AR lo tiene `Guid` **no
+nulo** y la desviación justificada en `design.md`. Tampoco se limitó a la forma: la tarea 4.2
+es "verifica y **no cambies**", y el `## Bloqueado` hereda la reserva de la Fase 1.
+
+**Pero el negativo salió falso.** La tarea 6.3 declara *"Sin espejo directo: no hay hoy ningún
+test de comando para AR/AP en el repo"* y avisa al implementador de que elija fixture. Existe
+`PTMS.Mediator.Tests/Load/Command/UpdateArReadyToProcessCommandTest.cs` — el gemelo AR literal
+del comando a testear, en la carpeta exacta, y **ya mockea `ISecurityService.GetUserIdentity()`**,
+que es justo lo que la tarea 3.1 necesita para sellar `ReadyToProcessAPBy`. El mejor espejo del
+plan, descartado.
+
+El log dice por qué: **13 lecturas, ninguna sobre un `*Test*.cs`**, y una sola búsqueda —
+`Grep "ForceReadyToPay|UpdateApReadyToProcessCommand"`. El gemelo AR no contiene ninguno de los
+dos símbolos, así que **el patrón no podía encontrarlo**. La cita `ApGetListQueryTest.cs:297` sí
+es correcta porque salió de ese mismo grep con `-n`: citar de un grep es una fuente legítima;
+**concluir una ausencia de un grep, no**.
+
+**La rama de adjuntos sigue sin ejercitarse, y ya se sabe por qué.** El padre #827 lleva
+`AR AP V20241023 with notes.jpg`, pero **inline en el HTML de `System.Description`**
+(`<img src=".../_apis/wit/attachments/<guid>?fileName=...">`), no como adjunto en `relations`.
+El agente cargó el esquema de `wit_work_item_attachment` por `ToolSearch` y **nunca lo invocó**:
+no tenía id que pasarle. Lo declaró sin leer en la reserva en vez de inventarse el contenido.
+
+**El contrato del sello aguantó otra vez, y por poco.** El log de la Fase 2 trae **11**
+coincidencias de `HUELLA:` y la buena está a **211 caracteres del final**; el de la Fase 1, 6 y a
+304. Diez señuelos en una sola corrida. El visor sirvió `tasks.md` **bajo el directorio
+declarado** (200), rechazó el directorio en sí (400, no es archivo regular) y siguió rechazando
+la travesía a `.env` (400).
+
+**Primer `parcial` real en producción.** La Fase 1 cerró con reserva —falta
+`.claude/ticket-agent.json` en el Tenant (asumió `project: ProvidenceTMS`), y el comentario y la
+imagen de #827 sin leer— y la reserva viajó hasta el `## Bloqueado` de la Fase 2. La cadena
+completa funcionó sin tocarla.
+
+### El arreglo, y la re-corrida con respuesta conocida
+
+**Regla 5 en `change-planning`** (plugin **v0.5.2**): *decir "no existe" es una afirmación y
+necesita su fuente igual que una cifra*. Va en tres sitios — la regla de oro, un paso en §4 que
+manda **buscar por parentesco** (si tocas AP busca AR, si tocas un comando busca el test del
+comando hermano) y el caso límite, que ahora exige **nombrar la búsqueda en la propia tarea**.
+El ejemplo dentro de la skill es el fallo real: `Grep UpdateApReadyToProcess` no puede encontrar
+`UpdateArReadyToProcessCommandTest.cs`.
+
+Preparación para que la prueba fuera limpia: el change v1 se apartó del repo (queda como
+evidencia fuera de `openspec/changes/`) y se creó el `.claude/ticket-agent.json` que faltaba en
+el Tenant. `claude plugin update` aplicó la 0.5.2 sin TTY — el cache va por carpeta de versión.
+
+**Re-corrida (5m41s, `HUELLA: ok`, validate `--strict` exit 0): la regla funcionó.** Donde la v1
+declaraba "no hay ningún test de comando AR/AP", la v2 cita
+`UpdateArReadyToProcessCommandTest.cs:1-94` y respalda el negativo con
+`Glob **/*ReadyToProcess*` → 3 archivos. Verificado: el archivo tiene **94 líneas exactas** y el
+glob da **exactamente 3**. No es cumplimiento de boquilla — la tarea del spec de Angular cita
+**tres** búsquedas para sostener a la vez un positivo y un negativo, y sus tres conteos (1 spec
+bajo `pages/loads`, 0 bajo `load-ar-ap`, 0 bajo `*ar-ap*`) son exactos. El log lo confirma:
+**7 invocaciones de `Glob` frente a 0 en la v1**.
+
+**Lo que el arreglo no explica.** La v2 cambió de estrategia entera —5 tareas en vez de 14, solo
+frontend, y la columna nueva + migración al `## Bloqueado` por necesitar decisión de negocio y no
+caber en las 2 h de `Custom.EstimatedBugHrs`—. Eso es **varianza entre corridas, no efecto de la
+regla**, que solo tocaba el negativo. Conviene anotarlo así para no atribuirse mejoras que no se
+diseñaron.
+
+**Y por el camino, el hallazgo de la jornada.** La v2 metió en alcance el auto-marcado de **AR**,
+que la v1 había declarado explícitamente fuera: dispara
+`UpdateArReadyToProcessCommand.cs:36-43`, que estampa `ReadyToProcessARBy` con la identidad de
+quien **abrió la pantalla** y pone `BilledOn = today` si estaba vacío. Verificado en el código.
+Abrir la pestaña falsea autoría y fecha de facturación — eso ya no es un checkbox que no
+persiste, y no está en el ticket.
+
 ## Pendientes inmediatos
 
-- [ ] **Segundo ticket para la Fase 2, y que sea el 3320.** Está aceptada con **n=1**.
-  Otro carrier del #3319 mediría repetibilidad del caso fácil: mismo padre con su
-  *Definition of Done*, mismo espejo, misma tarea de "replica esto". El **3320**
-  (*"Ready To Pay" no persiste*) es la forma opuesta — repro determinista pero **sin
-  padre rico y sin patrón que copiar**. Ahí la regla central de la skill (*toda tarea cita
-  su espejo con `archivo:línea`*) no se puede cumplir, y la salida honesta que tiene
-  escrita para ese caso **nunca se ha ejercitado**. Lo que hay que mirar: si inventa
-  espejos para cumplir la forma, o si declara las tareas como investigación pendiente.
+- [ ] **Avisar del hallazgo de AR al equipo.** El auto-marcado de AR estampa autoría y
+  `BilledOn` al abrir la pantalla (`UpdateArReadyToProcessCommand.cs:36-43`). Es un defecto de
+  integridad de datos que **no está en ningún ticket** y que salió de planificar el 3320. Merece
+  work item propio; decidir quién lo abre.
+- [x] ~~**Regla del negativo en `change-planning`**~~ — hecha el 2026-08-10, plugin v0.5.2, y
+  **verificada en re-corrida**: la tarea que antes negaba el espejo ahora lo cita con su `Glob`.
+- [ ] **Adjuntos embebidos en el HTML.** La skill manda descargar lo que cuelga de `relations`;
+  las imágenes pegadas en la descripción llevan su GUID en el `src` y hoy nadie lo mina. Es la
+  razón concreta de que la rama de adjuntos siga sin ejercitarse (#827 es el caso de prueba).
+- [x] ~~**Segundo ticket para la Fase 2, y que sea el 3320**~~ — hecho el 2026-08-10.
+  Resultado en "Quinta jornada": no inventa espejos, pero declara ausencias sin buscarlas bien.
 - [x] ~~**Repaso visual de la UI**~~ — hecho el 2026-08-10 con el MCP de chrome-devtools,
   al liberarse el navegador. Un defecto real (el riel del timeline), arreglado.
 - [ ] **Decidir qué se hace con `Bash` en el runner.** Ver "Lo aprendido": el
@@ -271,6 +360,35 @@ son inversión a futuro.
 - `puedeLanzar` duplica los textos de bloqueo de `bloqueo()` en `estado.ts`.
 - Los planes de las jornadas anteriores tienen casillas sin marcar
   (`fase-0-1`: 15/20, `orchestrator`: 31/32, `fase-2`: 30/32) pese a estar cerradas.
+
+## Lo aprendido (2026-08-10, noche)
+
+- **Un negativo es una afirmación, y necesita su fuente igual que una cifra.** La regla de oro
+  "toda cita lleva `archivo:línea`" disciplina lo que el agente **sí** encuentra; nada disciplina
+  lo que declara **ausente**. El 3320 citó nueve espejos exactos y falló el único que no citó:
+  dijo "no existe test de comando AR/AP" tras un `Grep` de dos símbolos que el archivo buscado no
+  contiene. **Una ausencia vale lo que valga la búsqueda que la respalda**, y la skill no pide
+  esa búsqueda ni obliga a nombrarla.
+- **El fallo salió por el lado seguro, y por eso pasa desapercibido.** Inventar un espejo produce
+  un `archivo:línea` falso que cualquier verificación tumba. Declarar "sin espejo" produce un
+  aviso prudente que **nadie va a verificar** — se lee como honestidad. El coste no es un error
+  visible sino trabajo duplicado por el implementador.
+- **La salida honesta funcionó; lo que falló fue la premisa.** Las dos hipótesis eran "inventa
+  espejos" o "declara investigación pendiente". Ganó la segunda **con el dato equivocado**, que
+  no estaba en la quiniela. Vale la pena anotar la forma: un mecanismo puede dispararse
+  correctamente sobre una entrada falsa, y el sello no lo nota porque el sello mide entregable,
+  no verdad.
+- **Un ticket pobre no da un plan pobre.** El 3320 no tiene padre rico, ni *Definition of Done*,
+  ni patrón que copiar — y el plan salió con más espejos verificados que el 3323. El material se
+  lo fabricó él, cruzando AP contra AR: la simetría del propio repo hizo de padre.
+- **Arreglar la regla arregló la regla, y nada más — y hay que decirlo.** La re-corrida salió
+  mejor en varios ejes (alcance más ajustado, un defecto nuevo encontrado), pero la edición solo
+  tocaba el negativo. Atribuir esas mejoras al arreglo sería exactamente el error que el proyecto
+  lleva cinco sesiones cazando: **un resultado bueno no valida el cambio que lo precede**. Lo que
+  el arreglo demuestra es lo que se midió — el negativo, con respuesta conocida de antemano.
+- **La prueba con respuesta conocida vale más que la corrida número tres.** Antes de re-correr ya
+  sabíamos qué archivo tenía que aparecer. Eso convierte una corrida de 6 minutos en un veredicto
+  en vez de en otro relato que interpretar. Cuando se pueda montar así, se monta así.
 
 ## Lo aprendido (2026-08-10, tarde)
 
@@ -378,8 +496,9 @@ son inversión a futuro.
 
 - **Límites de la suscripción**: las corridas del orquestador consumen la ventana
   del plan igual que el uso interactivo; análisis largos pueden toparla.
-- **Adjuntos e imágenes**: la rama de adjuntos de la skill sigue sin ejercitarse —
-  ni el 3311 ni el 3322 tienen. Hace falta un ticket con captura.
+- **Adjuntos e imágenes**: la rama sigue sin ejercitarse, pero ya no por falta de caso. El
+  padre #827 del 3320 trae un `.jpg` **embebido en el HTML de la descripción**, no colgado de
+  `relations`, y el agente no tiene de dónde sacar el id. Ver "Pendientes inmediatos".
 - **El stepper de fases se retiró de la UI** al rediseñarla: mostraba 6 fases con 5
   apagadas en cada fila. Vuelve cuando las fases 2-4 existan de verdad.
 - **El contrato del sello depende de que el agente obedezca un markdown.** Funcionó en el
@@ -398,7 +517,8 @@ son inversión a futuro.
   `openspec/`, instala 6 skills en `.claude/skills/openspec-*`, `.claude/commands/opsx/`
   y comandos en `.opencode/`. En `ProvidenceTMSTenant` está todo sin trackear, pendiente
   de decidir si se commitea o se revierte.
-- **La Fase 2 está aceptada con n=1.** La Fase 1 enseñó que eso es aceptar poco.
+- **La Fase 2 va por n=2** (3323 y 3320), las dos formas opuestas de ticket. Lo que falta medir
+  no es otra forma más: es **si sus negativos son fiables**, que es lo que el 3320 destapó.
 - **El orquestador es v1 delgado**: sin SSE, sin corridas paralelas, columnas de
   fases 2-4 deshabilitadas — crecen junto con las fases del agente.
 - **Actualizar este documento** y los checkboxes de los planes al cerrar hitos.
@@ -408,31 +528,34 @@ son inversión a futuro.
 Prompt sugerido — abrir Claude Code en el hub
 (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md para situarte. El avance por fases, las huellas y el timeline están
-> implementados y **validados con una corrida real**. El objetivo de esta sesión es el
-> **segundo ticket de la Fase 2, y que sea el 3320** — está explicado en "Pendientes
-> inmediatos" por qué ese y no otro carrier del #3319.
+> Lee docs/STATUS.md para situarte. **La Fase 2 está cerrada** (n=2, plugin v0.5.2): el fallo del
+> negativo que destapó el 3320 está arreglado y verificado con una re-corrida de respuesta
+> conocida. Lo que queda ya no es la Fase 2.
 >
-> 1. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
->    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
->    `apps/orchestrator/frontend` (`npm run dev`). Comprueba que el proceso que escucha en
->    el 8000 arrancó **después** de la última modificación de `app.py` — nos ha engañado
->    cuatro veces ya.
-> 2. **Da de alta el 3320 y corre la Fase 1.** Ojo a que el proyecto correcto tenga como
->    repo principal el que toque: el 3322 escribe en `ProvidenceTMS` y el 3323 en
->    `ProvidenceTMSTenant`.
-> 3. **Encadena la Fase 2** y mira lo que de verdad se está midiendo: el 3320 no tiene
->    padre rico ni patrón que copiar, así que la regla central de `change-planning`
->    (*toda tarea cita su espejo con `archivo:línea`*) **no se puede cumplir**. Lo que hay
->    que ver es si inventa espejos para cumplir la forma o si declara las tareas como
->    investigación pendiente — esa salida honesta está escrita en la skill y nunca se ha
->    ejercitado.
-> 4. Comprueba el sello de cierre en el log y el artefacto en el timeline, como se hizo
->    con el 3322.
+> El objetivo de esta sesión es **desbloquear la Fase 2b (del plan al código)**, y lo que la
+> bloquea no es código sino una decisión aplazada tres sesiones: **qué hace el runner con `Bash` y
+> con los permisos de escritura**. Hoy `analyze` va con lista vacía y `design` con
+> `Bash(npx …)` — que habilita la herramienta entera, no la acota. Escribir código exige
+> `Edit`/`Write` en el repo de un cliente, rama, build y tests, y los `extra_dirs` están montados
+> como lectura pero nada impide escribir en ellos. Eso es un cambio de postura de riesgo, no una
+> bandera más: **merece spec propio en `docs/superpowers/specs/`** antes de tocar el runner.
+>
+> Antes de empezar, dos cosas pequeñas que quedaron abiertas: el **hallazgo de AR** (el
+> auto-marcado estampa autoría y `BilledOn` al abrir la pantalla) necesita work item propio, y los
+> **adjuntos embebidos en HTML** siguen sin ejercitarse (el `.jpg` de #827 lleva su GUID en el
+> `src`, no en `relations`).
+>
+> Para levantar el orquestador: backend en `apps/orchestrator/backend`
+> (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
+> `apps/orchestrator/frontend` (`npm run dev`). Comprueba que el proceso del 8000 arrancó
+> **después** de la última modificación de `app.py` — nos ha engañado cuatro veces ya.
 
-Contexto que ya no hace falta rehacer: el TMS está configurado (`ADO_ORG` en
-`.claude/settings.json`), el proyecto dado de alta en la BD del orquestador y el plugin
-instalado a nivel de usuario en **v0.5.1**. El **3322 está analizado con el contrato nuevo**
+Contexto que ya no hace falta rehacer: el **3320 está dado de alta** en el orquestador
+(ticket interno `id=3`, proyecto "Providence (Back & Front)", primario `ProvidenceTMSTenant`)
+con sus dos fases corridas y verdes, y el Tenant ya tiene su `.claude/ticket-agent.json`.
+El TMS está configurado (`ADO_ORG` en `.claude/settings.json`), el proyecto dado de alta en la
+BD del orquestador y el plugin instalado a nivel de usuario en **v0.5.2**.
+El **3322 está analizado con el contrato nuevo**
 y su timeline se ve completo, con artefacto abrible. El **3323** está analizado y
 planificado, pero **sus corridas son anteriores al sello**, así que sale en rojo y sin
 artefacto: eso es correcto, no es un bug — el backfill leyó sus logs y no había sello que
