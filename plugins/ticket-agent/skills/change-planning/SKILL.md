@@ -29,8 +29,9 @@ usuario para crearlo (plantilla en el README del plugin). Lee `autonomy`.
    **detente** y dile al usuario que corra primero `/ticket-agent:analyze <id>`.
    No lo generes tú: son dos fases y esta es la segunda.
 2. **OpenSpec.** Si no existe la carpeta `openspec/` en la raíz del repo, ejecuta
-   `npx openspec init`. Si el comando no está disponible o falla, **detente** y
-   repórtalo: sin el CLI no hay validación, y la validación es parte del entregable.
+   `npx --yes @fission-ai/openspec@latest init`. Si el comando no está disponible o
+   falla, **detente** y repórtalo: sin el CLI no hay validación, y la validación es
+   parte del entregable.
 
 ## 3. Lectura del análisis
 
@@ -106,7 +107,8 @@ usa esa; no inventes una nueva por cada ticket.
 
 ## 6. Validación
 
-Ejecuta `npx openspec validate`. Si falla, corrige y vuelve a validar. **A la segunda
+Ejecuta `npx --yes @fission-ai/openspec@latest validate`. Si falla, corrige y vuelve a
+validar. **A la segunda
 validación fallida, para**: deja el change escrito y reporta qué no pasa. Un change
 inválido que se puede revisar vale más que ninguno.
 

@@ -183,12 +183,13 @@ def test_run_sin_fase_sigue_siendo_analyze(client, monkeypatch):
 
 
 def test_bash_va_acotado_a_openspec(client, monkeypatch):
-    """La Fase 2 necesita `npx openspec`; nada más. Bash suelto sería otra cosa."""
+    """La Fase 2 necesita invocar `@fission-ai/openspec`; nada más. Bash suelto sería
+    otra cosa."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     log = client.get(f"/tickets/{tid}").json()["log_tail"]
-    assert "Bash(npx openspec:*)" in log
+    assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in log
     assert " Bash " not in log        # nunca Bash a secas
 
 

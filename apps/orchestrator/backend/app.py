@@ -326,11 +326,14 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             "--permission-mode", "acceptEdits",
             # En headless, acceptEdits NO auto-aprueba las tools del MCP: se
             # deniegan solas y el agente se queda sin poder leer el work item.
-            # Bash va acotado por comando: la Fase 2 necesita `npx openspec init` y
-            # `validate`, y nada más. Un Bash suelto en el repo de un cliente es otra
-            # conversación.
+            # Bash va acotado por comando: la Fase 2 necesita invocar el paquete de
+            # npm `@fission-ai/openspec` (el CLI NO se llama `openspec`) para `init`
+            # y `validate`, y nada más. El especificador tiene que coincidir
+            # literalmente con el principio del comando o Claude lo bloquea, así que
+            # se cubren las dos formas de invocarlo. Un Bash suelto en el repo de un
+            # cliente es otra conversación.
             "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
-            "Bash(npx openspec:*)",
+            "Bash(npx --yes @fission-ai/openspec@latest:*)", "Bash(npx @fission-ai/openspec:*)",
         ]
         for e in extras:
             cmd += ["--add-dir", e["path"]]
