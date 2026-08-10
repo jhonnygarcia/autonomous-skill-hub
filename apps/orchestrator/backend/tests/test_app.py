@@ -145,6 +145,21 @@ def test_run_success_writes_log_and_states(client, monkeypatch):
     assert "/ticket-agent:analyze 3311" in detail["log_tail"]
 
 
+def test_run_sobrevive_a_una_linea_gigante(client, monkeypatch):
+    """El stream-json pasa de 64 KiB en una sola línea cuando el agente escribe un
+    archivo grande. Leer por líneas reventaba ahí y marcaba `error` una corrida buena."""
+    _use_fake_claude(monkeypatch)
+    monkeypatch.setenv("FAKE_BIG", "1")
+    tid = client.post("/tickets", json={"ado_id": 3322, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "analyzed"
+    assert detail["runs"][0]["status"] == "success"
+    entero = Path(detail["runs"][0]["log_path"]).read_text(encoding="utf-8")
+    assert "ácido" * 20000 in entero          # llegó completa y sin partir un carácter
+    assert "�" not in entero             # ningún carácter roto entre trozos
+
+
 def test_run_error_state(client, monkeypatch):
     _use_fake_claude(monkeypatch, fail=True)
     tid = client.post("/tickets", json={"ado_id": 8, "project": "Demo"}).json()["id"]

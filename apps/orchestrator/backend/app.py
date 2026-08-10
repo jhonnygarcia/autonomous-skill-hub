@@ -1,4 +1,5 @@
 import asyncio
+import codecs
 import json
 import os
 import shutil
@@ -336,9 +337,16 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
                     stderr=asyncio.subprocess.STDOUT,
                 )
                 assert proc.stdout is not None
-                async for line in proc.stdout:
-                    log.write(line.decode("utf-8", errors="replace"))
+                # Por trozos, no por líneas: el lector de líneas de asyncio revienta con
+                # "Separator is found, but chunk is longer than limit" a los 64 KiB, y el
+                # stream-json los pasa en cuanto el agente escribe un archivo grande.
+                # Pasó de verdad: una corrida buena del 3322 quedó marcada como error.
+                # El decodificador incremental evita partir un carácter entre dos trozos.
+                dec = codecs.getincrementaldecoder("utf-8")("replace")
+                while chunk := await proc.stdout.read(65536):
+                    log.write(dec.decode(chunk))
                     log.flush()
+                log.write(dec.decode(b"", True))
                 ok = (await proc.wait()) == 0
         except Exception as exc:  # el error queda en el log, jamás tumba el server
             with open(log_path, "a", encoding="utf-8") as log:
