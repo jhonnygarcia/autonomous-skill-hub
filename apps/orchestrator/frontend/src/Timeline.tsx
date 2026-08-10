@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { api, type ActiveRun, type Artefacto, type Fase } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -28,15 +28,21 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
   const [instrucciones, setInstrucciones] = useState("")
   const [visor, setVisor] = useState<Artefacto | null>(null)
   const [cargando, setCargando] = useState<string | null>(null)
-  const [errorVisor, setErrorVisor] = useState("")
+  const [error, setError] = useState<{ ruta: string; msg: string } | null>(null)
+  // Cada click a un chip incrementa la secuencia; una respuesta que llega cuando ya no es
+  // la última pedida se descarta entera (ni pisa el visor, ni borra el `cargando` del
+  // clic que sí sigue en vuelo). Sin esto, un clic lento en A seguido de uno rápido en B
+  // deja a B mostrado y luego lo sobreescribe A al resolver tarde.
+  const peticion = useRef(0)
 
   const ver = (ruta: string) => {
     if (visor?.ruta === ruta) return setVisor(null)     // segundo clic: cerrar
-    setCargando(ruta); setErrorVisor("")
+    const id = ++peticion.current
+    setCargando(ruta); setError(null)
     api.artefacto(ticketId, ruta)
-      .then(a => setVisor(a))
-      .catch(e => { setVisor(null); setErrorVisor(String(e)) })
-      .finally(() => setCargando(null))
+      .then(a => { if (id === peticion.current) setVisor(a) })
+      .catch(e => { if (id === peticion.current) { setVisor(null); setError({ ruta, msg: String(e) }) } })
+      .finally(() => { if (id === peticion.current) setCargando(null) })
   }
 
   return (
@@ -45,13 +51,24 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
         const motivo = puedeLanzar(fases, i, activo, ticketId)
         const h = f.huella
         // Dos formas de artefacto: un directorio (ruta + "/" + cada nombre) o un archivo
-        // suelto (la ruta ya es completa y coincide con su propio nombre). Ver el brief:
-        // cuando archivos===1 la huella es siempre el caso "archivo suelto" en este dominio
-        // (el análisis es un único .md; un plan siempre trae 2+ archivos).
-        const rutas = h?.existe
-          ? (h.archivos === 1 && h.nombres[0] === h.ruta.split("/").pop()
-              ? [h.ruta] : h.nombres.map(n => (h.archivos === 1 ? h.ruta : `${h.ruta}/${n}`)))
-          : []
+        // suelto (la ruta ya es completa y coincide con su propio nombre). La decisión se
+        // toma UNA vez, fuera del map — meterla dentro del map (como en la primera versión)
+        // hacía que la rama "no coincide" recalculara `archivos === 1` y llegara a la misma
+        // conclusión que la rama "sí coincide", así que un plan `parcial` que se detiene con
+        // un solo archivo en el directorio (p.ej. solo `proposal.md`) pintaba un chip
+        // rotulado con el nombre del DIRECTORIO, que al pulsarlo daba 400.
+        const esArchivo = h?.existe ? h.archivos === 1 && h.nombres[0] === h.ruta.split("/").pop() : false
+        // ponytail: un directorio "X/" que por casualidad contuviera un único archivo
+        // también llamado "X" produce el mismo payload {ruta:"X", nombres:["X"]} que un
+        // archivo suelto "X" — ambigüedad real, irresoluble desde el frontend sin que el
+        // backend marque `es_dir`. No se da en la práctica hoy (analyze siempre es archivo
+        // suelto; design siempre trae 2+), así que se deja anotada y no se resuelve aquí.
+        const items: { ruta: string; etiqueta: string }[] = !h?.existe ? []
+          : esArchivo ? [{ ruta: h.ruta, etiqueta: h.nombres[0] }]
+          // La etiqueta es el nombre RELATIVO que mandó el backend (`specs/pagos/spec.md`),
+          // no su basename: con dos capacidades, dos `spec.md` serían indistinguibles.
+          : h.nombres.map(n => ({ ruta: `${h.ruta}/${n}`, etiqueta: n }))
+        const rutas = items.map(it => it.ruta)
         const ultima = i === fases.length - 1
         const corriendo = f.estado === "corriendo"
 
@@ -106,6 +123,7 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
                             title={motivo || "Correr con instrucciones de ajuste"}
                             aria-label={`Ajustar y correr ${FASE_LABEL[f.fase] ?? f.fase}`}
                             aria-expanded={abierta === f.fase}
+                            aria-controls={`ajuste-${f.fase}`}
                             onClick={() => {
                               setAbierta(abierta === f.fase ? null : f.fase); setInstrucciones("")
                             }}>
@@ -137,13 +155,14 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
                         </span>
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
-                        {rutas.map(r => (
-                          <button key={r} onClick={() => ver(r)}
-                                  aria-pressed={visor?.ruta === r}
-                                  className={`${CHIP} ${visor?.ruta === r
+                        {items.map(it => (
+                          <button key={it.ruta} onClick={() => ver(it.ruta)}
+                                  title={it.ruta}
+                                  aria-pressed={visor?.ruta === it.ruta}
+                                  className={`${CHIP} ${visor?.ruta === it.ruta
                                     ? "border-ring bg-accent text-accent-foreground"
                                     : "border-border text-muted-foreground"}`}>
-                            {cargando === r ? "cargando…" : r.split("/").pop()}
+                            {cargando === it.ruta ? "cargando…" : it.etiqueta}
                           </button>
                         ))}
                       </div>
@@ -158,9 +177,10 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
               )}
 
               {abierta === f.fase && (
-                <div className="pb-3">
+                <div id={`ajuste-${f.fase}`} className="pb-3">
                   <Textarea rows={2} value={instrucciones}
-                            placeholder={`Ajuste para ${FASE_LABEL[f.fase]}…`}
+                            placeholder={`Ajuste para ${FASE_LABEL[f.fase] ?? f.fase}…`}
+                            aria-label={`Ajuste para ${FASE_LABEL[f.fase] ?? f.fase}`}
                             onChange={e => setInstrucciones(e.target.value)} />
                   <Button size="sm" className="mt-2" disabled={!instrucciones || !!motivo}
                           onClick={() => {
@@ -171,8 +191,11 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
                 </div>
               )}
 
-              {errorVisor && visor === null && rutas.length > 0 && (
-                <p className="pb-2 text-xs text-destructive">{errorVisor}</p>
+              {/* La ruta va guardada junto al mensaje: con analyze y design mostrando huella
+                  a la vez, un 400 al abrir un archivo de una fase no debe pintarse también
+                  bajo la otra. */}
+              {error && rutas.includes(error.ruta) && (
+                <p className="pb-2 text-xs text-destructive">{error.msg}</p>
               )}
 
               {visor && rutas.includes(visor.ruta) && (
