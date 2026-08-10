@@ -587,3 +587,49 @@ def test_artefacto_trunca_a_512kb(client, monkeypatch, tmp_path):
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "grande.md"}).json()
     assert r["truncado"] is True and len(r["texto"]) <= TOPE
     assert "�" not in r["texto"]      # no se parte un carácter multibyte al cortar
+
+
+def test_artefacto_sirve_exactamente_512kb_sin_truncar(client, monkeypatch, tmp_path):
+    """Frontera del tope: ni un byte de más entra en el corte, así que un archivo de
+    exactamente TOPE bytes se sirve entero."""
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "justo.md", "x" * TOPE)
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "justo.md"}).json()
+    assert r["truncado"] is False and r["bytes"] == TOPE and len(r["texto"]) == TOPE
+
+
+def test_artefacto_rechaza_travesia_desde_directorio_declarado(client, monkeypatch, tmp_path):
+    """CRÍTICO de la ronda 1: contra un directorio declarado (no un archivo), `..` sin
+    normalizar dejaba fugarse a cualquier archivo del repo — verificado leyendo
+    `secreto.env` fuera del change declarado. La regla 1 tiene que resolver la ruta
+    ANTES de decidir si cae bajo lo declarado, igual que ya hacía la regla 2."""
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("x", encoding="utf-8")
+    (tmp_path / "repo" / "secreto.env").write_text("DB_PASSWORD=superclave", encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    posix = "openspec/changes/3323-xpo/../../../secreto.env"
+    windows = "openspec\\changes\\3323-xpo\\..\\..\\..\\secreto.env"
+    assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": posix}).status_code == 400
+    assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": windows}).status_code == 400
+
+
+def test_artefacto_artifact_path_vacio_no_es_comodin(client, monkeypatch, tmp_path):
+    """IMPORTANTE de la ronda 1: un sello degenerado puede guardar `artifact_path=''`.
+    `PurePosixPath('')` vale `.`, que "pertenece" a los `.parents` de cualquier ruta
+    relativa — sin el filtro `!= ''` eso convierte la lista blanca en un comodín."""
+    import os
+    import sqlite3 as sq
+
+    (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    conn = sq.connect(os.environ["ORCH_DB"])
+    conn.execute(
+        "INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+        "VALUES(?, 'analyze', 'success', 'ok', '')", (tid,),
+    )
+    conn.commit()
+    conn.close()
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": ".env"}).status_code == 400

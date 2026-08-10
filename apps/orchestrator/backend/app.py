@@ -6,7 +6,7 @@ import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -576,23 +576,32 @@ def artefacto(tid: int, ruta: str):
     with db() as c:
         declaradas = [r["artifact_path"] for r in c.execute(
             "SELECT artifact_path FROM runs WHERE ticket_id=? AND artifact_path IS NOT NULL "
-            "AND artifact_state IN ('ok','parcial')", (tid,))]
+            "AND artifact_path != '' AND artifact_state IN ('ok','parcial')", (tid,))]
+            # ^ '' además de NULL: un sello degenerado guarda cadena vacía, y
+            # PurePosixPath('') == PurePosixPath('.'), que "pertenece" a los
+            # .parents de cualquier ruta relativa — un comodín que abre todo el repo.
+
+    # Se resuelve UNA sola vez, ANTES de comparar nada: comparar sobre PurePosixPath
+    # sin resolver (como hacía la regla 1 antes de este arreglo) NO normaliza `..`,
+    # así que "dir/../../../fuera" seguía teniendo a "dir" entre sus `.parents` y
+    # colaba como si fuera un descendiente real de un directorio declarado. Resolver
+    # antes es lo mismo que ya hacía bien la regla 2, y de paso cierra la asimetría
+    # absoluta/relativa y la sensibilidad a mayúsculas de Windows.
+    real = (Path(t["repo_path"]) / ruta).resolve()
 
     # 1. Declarada por una corrida DE ESTE TICKET, o un archivo BAJO un directorio
     #    declarado — a cualquier profundidad, no solo hijo directo: `stat_huella` (Tarea
     #    3) cuenta recursivo porque un change de OpenSpec anida `specs/<capability>/
     #    spec.md`, y `huella.nombres` es justo la lista blanca que ofrece la UI. Admitir
     #    solo hijos directos rechazaría con 400 los botones que el propio backend ofreció.
-    pedida = PurePosixPath(ruta.replace("\\", "/"))
-    declaradas_posix = [PurePosixPath(d.replace("\\", "/")) for d in declaradas]
-    if not any(pedida == d or d in pedida.parents for d in declaradas_posix):
+    declaradas_reales = [(Path(t["repo_path"]) / d).resolve() for d in declaradas if d]
+    if not any(real == d or d in real.parents for d in declaradas_reales):
         raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
 
-    # 2. Resuelta con realpath, cae dentro del repo principal o de los extra del ticket.
-    #    resolve() sigue enlaces, así que un symlink apuntando fuera muere aquí.
+    # 2. Cae dentro del repo principal o de los extra del ticket. resolve() sigue
+    #    enlaces, así que un symlink apuntando fuera muere aquí.
     raices = [Path(t["repo_path"]).resolve()]
     raices += [Path(d["path"]).resolve() for d in norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
-    real = (Path(t["repo_path"]) / ruta).resolve()
     if not any(real == r or r in real.parents for r in raices):
         raise HTTPException(400, "Esa ruta cae fuera de los repos del ticket")
 
@@ -600,13 +609,19 @@ def artefacto(tid: int, ruta: str):
     if not real.is_file():
         raise HTTPException(400, "No es un archivo regular")
 
-    # 4. Tope. El corte va en bytes, así que hay que retroceder hasta el último byte que
-    #    NO sea de continuación (0b10xxxxxx): cortar a ciegas parte un carácter multibyte
-    #    por la mitad y el visor pinta un rombo negro donde había una tilde.
-    crudo = real.read_bytes()
-    truncado = len(crudo) > TOPE_ARTEFACTO
+    # 4. Tope, sin cargar el archivo entero en memoria: el tope protege el tamaño de
+    #    la RESPUESTA, no el del PROCESO — leer con `read_bytes()` un archivo de 60 MB
+    #    para servir 0,5 KB es un pico de 60 MB en una lectura síncrona que bloquea el
+    #    mismo event loop donde corre el runner. Se lee como mucho TOPE+4 bytes; el
+    #    tamaño real (para el campo `bytes`) sale de `stat()`, no de lo leído. El
+    #    retroceso hasta un byte que no sea de continuación (0b10xxxxxx) sigue igual:
+    #    cortar a ciegas parte un carácter multibyte por la mitad.
+    tam = real.stat().st_size
+    with open(real, "rb") as fh:
+        crudo = fh.read(TOPE_ARTEFACTO + 4)
+    truncado = tam > TOPE_ARTEFACTO
     corte = TOPE_ARTEFACTO
     while truncado and corte > 0 and (crudo[corte] & 0xC0) == 0x80:
         corte -= 1
     texto = (crudo[:corte] if truncado else crudo).decode("utf-8", "replace")
-    return {"ruta": ruta, "texto": texto, "bytes": len(crudo), "truncado": truncado}
+    return {"ruta": ruta, "texto": texto, "bytes": tam, "truncado": truncado}
