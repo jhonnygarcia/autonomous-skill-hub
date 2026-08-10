@@ -1,4 +1,5 @@
 """Sustituto de `claude -p` para tests: imprime sus args y respeta FAKE_FAIL."""
+import json
 import os
 import sys
 
@@ -15,6 +16,18 @@ if os.environ.get("FAKE_BIG") == "1":
 if os.environ.get("FAKE_FAIL") == "1":
     print("boom", file=sys.stderr)
     sys.exit(1)
+if os.environ.get("FAKE_SKILL_LEAK") == "1":
+    # Imita el cuerpo de change-planning/SKILL.md colándose en el log (el
+    # tool_result de cargar la skill): trae los tres sellos en prosa, ANTES
+    # del sello de cierre real, tal como pasa con la corrida de verdad.
+    cuerpo = (
+        "## 7. Cierre\n"
+        "Termina siempre con una de estas tres líneas exactas:\n"
+        "PLAN: validado\n"
+        "PLAN: sin-validar\n"
+        "PLAN: no-escrito\n"
+    )
+    print('{"type":"tool_result","text":' + json.dumps(cuerpo) + '}')
 sello = os.environ.get("FAKE_PLAN_SELLO")
 if sello:
     # Simula el sello de cierre obligatorio de change-planning/SKILL.md §7.

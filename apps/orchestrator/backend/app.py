@@ -2,6 +2,7 @@ import asyncio
 import codecs
 import json
 import os
+import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
@@ -390,9 +391,14 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # nada: el código de salida no basta para saber si hay plan. El sello de
             # cierre de la skill (change-planning/SKILL.md §7) es el único contrato
             # fiable — sin él, o con "no-escrito", se trata como error aunque el
-            # proceso no haya fallado.
+            # proceso no haya fallado. Se ancla en la ÚLTIMA coincidencia, no en la
+            # mera presencia: el propio cuerpo de la skill viaja en el log (el
+            # tool_result de cargarla) y contiene los tres sellos en prosa, así que
+            # buscar solo "está el string" se encuentra a sí mismo y da la corrida
+            # por buena aunque el cierre real sea "no-escrito".
             cola = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
-            if not any(s in cola for s in ("PLAN: validado", "PLAN: sin-validar")):
+            sellos = re.findall(r"PLAN: (validado|sin-validar|no-escrito)", cola)
+            if not sellos or sellos[-1] == "no-escrito":
                 ok = False
         set_run(run_id, status="success" if ok else "error", finished_at=now())
         set_ticket(ticket["id"], status=PHASE_DONE[phase] if ok else "error")

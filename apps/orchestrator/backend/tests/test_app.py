@@ -127,10 +127,11 @@ import sys
 from pathlib import Path
 
 
-def _use_fake_claude(monkeypatch, fail=False, plan_sello=None):
+def _use_fake_claude(monkeypatch, fail=False, plan_sello=None, skill_leak=False):
     fake = Path(__file__).parent / "fake_claude.py"
     monkeypatch.setenv("ORCH_CLAUDE_CMD", json.dumps([sys.executable, str(fake)]))
     monkeypatch.setenv("FAKE_FAIL", "1" if fail else "0")
+    monkeypatch.setenv("FAKE_SKILL_LEAK", "1" if skill_leak else "0")
     if plan_sello is None:
         monkeypatch.delenv("FAKE_PLAN_SELLO", raising=False)
     else:
@@ -265,6 +266,23 @@ def test_design_sello_no_escrito_deja_error(client, monkeypatch):
     """El spec exige `error` cuando falta el análisis o el CLI de OpenSpec no está
     disponible: la skill cierra con este sello en esos casos."""
     _use_fake_claude(monkeypatch, plan_sello="no-escrito — falta el análisis de la Fase 1")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["ticket"]["status"] == "error"
+    assert detail["runs"][0]["status"] == "error"
+
+
+def test_design_ignora_los_sellos_del_cuerpo_de_la_skill(client, monkeypatch):
+    """El tool_result de cargar change-planning/SKILL.md deja los tres sellos en
+    prosa dentro del log, antes del cierre real. Si la comprobación solo mira
+    presencia (`any(...)`), esos sellos de la skill bastan para que "validado" y
+    "sin-validar" den positivo aunque el cierre real sea "no-escrito": hay que
+    quedarse con la ÚLTIMA coincidencia, no con cualquiera."""
+    _use_fake_claude(
+        monkeypatch, skill_leak=True,
+        plan_sello="no-escrito — falta el análisis de la Fase 1",
+    )
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     detail = client.get(f"/tickets/{tid}").json()
