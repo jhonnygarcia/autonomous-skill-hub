@@ -17,7 +17,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 |---|---|---|
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables + **avance por fases, huellas y timeline implementados** (2026-08-10) — ⚠️ sin corrida real que lo ejercite todavía |
+| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables + **avance por fases, huellas y timeline implementados y validados con corrida real** (2026-08-10) |
 | 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Construida y validada** (3323) — skill **v0.4.2**, n=1 |
 | 2b — Del plan al código | Ejecutar el plan: escribir código, rama, PR | 📋 Futura — la Fase 2 se quedó deliberadamente en el documento |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
@@ -215,20 +215,29 @@ raíces anidadas (un `extra_dir` que contiene al `repo_path`). Cerrado y verific
 ADS, nombres 8.3, UNC y comodines de toda grafía—: cero fugas, y los 30 casos legítimos
 siguen sirviendo.
 
-**Falta la prueba de fuego.** Ninguna `HUELLA:` real ha pasado nunca por la tubería: todo
-lo verificado del contrato de cierre viene de `fake_claude.py`. Ver "Pendientes".
+**La prueba de fuego pasó.** Re-corrida la Fase 1 sobre el **3322** con el plugin v0.5.1,
+**8m14s**, y el recorrido entero se cerró fuera del laboratorio por primera vez:
+
+- El agente estampó `HUELLA: ok — docs/tickets/3322-analysis.md`, con `/` y como última
+  línea. El log trae **6 coincidencias del sello**: 4 son el cuerpo de la skill filtrado
+  (incluido el ejemplo `parcial` que menciona el 3323), y la buena está a **190 caracteres
+  del final**. *Anclar en la última coincidencia no era una precaución teórica: sin ella
+  esta corrida habría leído un ejemplo de la documentación como si fuera su resultado.*
+- El runner guardó `artifact_state='ok'` y una ruta limpia; la fase salió `ok`, el ticket
+  se plegó a `analizado` y **`Plan` se desbloqueó solo**.
+- El visor sirvió el documento de 28,6 KB dentro de la app (200), y siguió devolviendo
+  400 a la travesía. El análisis estampa `ticket-agent v0.5.1`, así que el archivo prueba
+  qué versión lo produjo.
+
+**Repaso visual hecho** (el que se arrastraba desde el rediseño del 2026-08-09). Un solo
+defecto real: el riel del timeline estaba acotado a su fila con `bottom-0` y en las fases
+apagadas medía 4px, así que el recorrido se veía como círculos sueltos justo en el tramo
+pendiente. Arreglado en `8f3e6a2`. Consola limpia, sin desbordamiento horizontal, y el
+modo oscuro legible — aunque **la app no tiene interruptor de tema**, así que los `dark:`
+son inversión a futuro.
 
 ## Pendientes inmediatos
 
-- [ ] **Una corrida real con el plugin v0.5.1** sobre `ProvidenceTMSTenant`. Es lo único
-  que prueba que el agente de verdad estampa el sello como última línea y que el recorrido
-  skill → log → BD → API → UI → visor se cierra fuera del laboratorio. Hoy los 5 logs
-  históricos son **anteriores al contrato** y no contienen ningún sello, así que el 3322 y
-  el 3323 salen legítimamente en rojo y **sin artefacto que abrir** — el visor no se puede
-  ejercitar con los datos que hay.
-- [ ] **Repaso visual del timeline.** Sigue sin poder verificarse: el MCP de
-  chrome-devtools no puede adjuntarse porque el perfil ya lo tiene abierto el navegador de
-  Jhonny (pide `--isolated`). Se resuelve solo cuando haya una corrida real que mirar.
 - [ ] **Segundo ticket para la Fase 2, y que sea el 3320.** Está aceptada con **n=1**.
   Otro carrier del #3319 mediría repetibilidad del caso fácil: mismo padre con su
   *Definition of Done*, mismo espejo, misma tarea de "replica esto". El **3320**
@@ -361,11 +370,11 @@ lo verificado del contrato de cierre viene de `fake_claude.py`. Ver "Pendientes"
   ni el 3311 ni el 3322 tienen. Hace falta un ticket con captura.
 - **El stepper de fases se retiró de la UI** al rediseñarla: mostraba 6 fases con 5
   apagadas en cada fila. Vuelve cuando las fases 2-4 existan de verdad.
-- **El contrato del sello nunca ha corrido de verdad.** Todo lo que sabemos de él viene de
-  `fake_claude.py`. Que el agente estampe `HUELLA:` como última línea, con `/` y no `\`,
-  es una instrucción en un markdown: hasta que una corrida real lo demuestre, es una
-  hipótesis. Si declara la ruta con barras invertidas, la regex captura solo el primer
-  segmento y el visor pasa a servir todo ese directorio, sin fallar de forma visible.
+- **El contrato del sello depende de que el agente obedezca un markdown.** Funcionó en el
+  3322 con n=1. Pero si algún día declara la ruta con barras invertidas, la regex captura
+  solo el primer segmento (`docs`) y el visor pasa a servir **todo ese directorio**, sin
+  fallar de forma visible. Por eso las dos skills lo dicen explícitamente; no hay guarda
+  en el backend que lo detecte.
 - **Permisos del runner**: corre con `--permission-mode acceptEdits` más una lista
   explícita de `--allowedTools` (sin ella el MCP se auto-deniega en headless), ahora
   ramificada por fase (`PHASE_ALLOWED_TOOLS`; `analyze` va con la lista vacía).
@@ -387,35 +396,36 @@ lo verificado del contrato de cierre viene de `fake_claude.py`. Ver "Pendientes"
 Prompt sugerido — abrir Claude Code en el hub
 (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md para situarte. El avance por fases y el timeline **ya están
-> implementados**; lo que falta es **ejercitarlos con una corrida real**, porque hasta
-> ahora todo el contrato del sello se ha verificado solo contra el doble de tests.
+> Lee docs/STATUS.md para situarte. El avance por fases, las huellas y el timeline están
+> implementados y **validados con una corrida real**. El objetivo de esta sesión es el
+> **segundo ticket de la Fase 2, y que sea el 3320** — está explicado en "Pendientes
+> inmediatos" por qué ese y no otro carrier del #3319.
 >
-> 1. **Actualiza el plugin instalado a la v0.5.1** (`claude plugin update`) y comprueba
->    que la versión efectiva subió: si no cambia, el cambio committeado aquí no llega.
-> 2. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
+> 1. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
 >    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
 >    `apps/orchestrator/frontend` (`npm run dev`). Comprueba que el proceso que escucha en
 >    el 8000 arrancó **después** de la última modificación de `app.py` — nos ha engañado
->    cuatro veces ya, la última en esta misma sesión.
-> 3. **Corre la Fase 1 sobre el 3322** desde la UI. Cuando termine, comprueba en el log
->    que el agente estampó `HUELLA: ok — docs/tickets/3322-analysis.md` como **última
->    línea**, y con separador `/`. Es la prueba que nunca se ha hecho.
-> 4. **Recorre el timeline**: seis filas con las cuatro últimas apagadas, la fase de
->    análisis en verde con su hora y su huella, y el artefacto abriéndose dentro de la
->    app al pulsar su nombre. Si el MCP de chrome-devtools no puede adjuntarse porque mi
->    navegador ya está abierto, dímelo y lo miro yo; **no cierres mi navegador**.
-> 5. Si eso pasa, encadena la **Fase 2 sobre el 3320** — el segundo ticket que la Fase 2
->    necesita, explicado en "Pendientes inmediatos" por qué ese y no otro del #3319.
+>    cuatro veces ya.
+> 2. **Da de alta el 3320 y corre la Fase 1.** Ojo a que el proyecto correcto tenga como
+>    repo principal el que toque: el 3322 escribe en `ProvidenceTMS` y el 3323 en
+>    `ProvidenceTMSTenant`.
+> 3. **Encadena la Fase 2** y mira lo que de verdad se está midiendo: el 3320 no tiene
+>    padre rico ni patrón que copiar, así que la regla central de `change-planning`
+>    (*toda tarea cita su espejo con `archivo:línea`*) **no se puede cumplir**. Lo que hay
+>    que ver es si inventa espejos para cumplir la forma o si declara las tareas como
+>    investigación pendiente — esa salida honesta está escrita en la skill y nunca se ha
+>    ejercitado.
+> 4. Comprueba el sello de cierre en el log y el artefacto en el timeline, como se hizo
+>    con el 3322.
 
 Contexto que ya no hace falta rehacer: el TMS está configurado (`ADO_ORG` en
-`.claude/settings.json`) y el proyecto dado de alta en la BD del orquestador con
-`ProvidenceTMSTenant` como repo principal. El 3322 y el 3323 están analizados, y el 3323
-además planificado con su change de OpenSpec validado — pero **sus corridas son anteriores
-al contrato del sello**, así que en el timeline salen en rojo y sin artefacto. Eso es
-correcto, no es un bug: el backfill leyó sus logs y no había ningún sello que recuperar.
-`ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas dejen ahí no hay que
-versionarlo ni limpiarlo (decisión 15).
+`.claude/settings.json`), el proyecto dado de alta en la BD del orquestador y el plugin
+instalado a nivel de usuario en **v0.5.1**. El **3322 está analizado con el contrato nuevo**
+y su timeline se ve completo, con artefacto abrible. El **3323** está analizado y
+planificado, pero **sus corridas son anteriores al sello**, así que sale en rojo y sin
+artefacto: eso es correcto, no es un bug — el backfill leyó sus logs y no había sello que
+recuperar. `ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas dejen ahí
+no hay que versionarlo ni limpiarlo (decisión 15).
 
 Cinco trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
 plugin instalado; **no usar `uvicorn --reload`**, que deja procesos huérfanos reteniendo
