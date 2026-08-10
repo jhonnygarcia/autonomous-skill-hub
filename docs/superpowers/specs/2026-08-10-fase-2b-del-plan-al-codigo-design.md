@@ -82,8 +82,10 @@ siendo la red:
 verificado en corrida real que el especificador habilita la herramienta y no la acota.
 El diseño no finge una restricción que no existe; la contención va aparte.
 
-**`--settings` se ramifica por fase igual que las tools**, con una tabla propia
-(`PHASE_SETTINGS`) en vez de colgarlo del argv fijo. Solo `implement` lo lleva. Poner el
+**`--settings` se ramifica por fase igual que las tools**, con una función
+`settings_de(phase)` en vez de colgarlo del argv fijo. Función y no tabla porque el
+valor no es constante: el JSON del hook lleva la ruta del intérprete y la del script,
+que se resuelven en tiempo de ejecución. Solo `implement` lo lleva. Poner el
 hook en todas las fases daría igual en la práctica —las otras no tienen Bash— pero
 volvería a mezclar "lo que necesita esta fase" con "lo que arrastran todas", que es
 exactamente el error que costó que la Fase 1 acabara ejecutando shell sin que nadie lo
@@ -211,8 +213,10 @@ inmediato en vez de dejarla sin ejercitar.
 
 - **Herencia de permisos por los subagentes.** No está comprobado que un subagente
   lanzado con `Task` herede `Bash` y los `--add-dir` en headless. Si no los hereda, el
-  paso 1 del bucle se cae y el diseño necesita otra forma. **Es lo primero que hay que
-  verificar**, con `fake_claude` antes que con una corrida real.
+  paso 1 del bucle se cae y el diseño cae a la variante lineal pura (enfoque A). **Es lo
+  primero que hay que verificar**, y hay que hacerlo con **el CLI real**: `fake_claude`
+  lo sustituye, así que no puede decir nada sobre cómo reparte permisos. Basta una
+  invocación suelta de medio minuto, no una corrida de fase.
 - **`npm test` en `ClientApp`.** La tarea de guardia de regresión del plan del 3320 lo
   necesita y no está confirmado que exista configurado.
 - **Duración.** Un plan de 21 tareas con un subagente y una revisión por tarea puede
