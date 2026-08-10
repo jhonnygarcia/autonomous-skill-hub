@@ -219,7 +219,10 @@ inmediato en vez de dejarla sin ejercitar.
   lectura de archivo ahí mismo. El agente principal delegó (no lo ejecutó él mismo, que
   era el riesgo del spike) y el evento del `Bash` dentro del subagente trae
   `subagent_type` y `parent_tool_use_id` apuntando a la invocación de `Task`, o sea que
-  no es una lectura ambigua a nivel del log:
+  no es una lectura ambigua a nivel del log. El siguiente bloque es una
+  reconstrucción simplificada para citar (aplana `message.content[0]` en una clave
+  `tool_use` de nivel superior y omite campos intermedios) — no es una línea literal
+  del log, aunque los valores sí coinciden con él:
 
   ```json
   {
@@ -243,8 +246,16 @@ inmediato en vez de dejarla sin ejercitar.
   confirmado aparte); si el `--add-dir` no se hubiera heredado, el intento de acceso
   fuera del `cwd` original habría chocado con el límite de directorio antes de
   siquiera preguntar si el archivo existe. `permission_denials` del evento `result`
-  final salió vacío. Con esto la decisión 6 se sostiene tal como está escrita: bucle
-  con subagente por tarea.
+  final salió vacío. **Lo que esto prueba y lo que no**: el spike ejercitó `Bash` y
+  una lectura de archivo bajo el `add-dir`, ambos heredados por el subagente. No
+  ejercitó `Write`/`Edit` — la decisión 6 delega justo la parte de `implement` que
+  escribe código, y la decisión 4 depende de que los repos montados sean
+  *escribibles* para el subagente, no solo legibles. Esa mitad queda sin probar
+  aquí; se cierra con la corrida real del 3320 al terminar el hito, cuyo código vive
+  entero en `ProvidenceTMS` como `extra_dir` — si el subagente no puede escribir ahí,
+  esa corrida lo va a mostrar de inmediato. Hasta entonces, la decisión 6 se sostiene
+  sobre lectura y `Bash` verificados, con la escritura como supuesto razonable y
+  explícitamente pendiente, no como hecho comprobado.
 - **`npm test` en `ClientApp`.** La tarea de guardia de regresión del plan del 3320 lo
   necesita y no está confirmado que exista configurado.
 - **Duración.** Un plan de 21 tareas con un subagente y una revisión por tarea puede
