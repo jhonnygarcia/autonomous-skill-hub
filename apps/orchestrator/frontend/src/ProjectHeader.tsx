@@ -11,26 +11,26 @@ export function ProjectHeader({ project }: { project: Project }) {
     <div className="space-y-2">
       <div>
         <h2 className="text-xl font-semibold">{project.name}</h2>
-        <p className="text-sm text-gray-500">{project.org}/{project.project}</p>
+        <p className="text-sm text-muted-foreground">{project.org}/{project.project}</p>
       </div>
 
       <div>
-        <p className="mb-1 text-xs font-medium text-gray-600">Repos que verá el agente</p>
+        <p className="mb-1 text-xs font-medium text-foreground/70">Repos que verá el agente</p>
         <table className="text-xs">
           <tbody>
             {repos.map(r => (
               <tr key={r.path}>
-                <td className="pr-3 align-top text-gray-500">
+                <td className="pr-3 align-top text-muted-foreground">
                   {r.label || "sin descripción"}
-                  {r.primary && <span className="ml-1 text-gray-400">· principal</span>}
+                  {r.primary && <span className="ml-1 text-muted-foreground/70">· principal</span>}
                 </td>
-                <td className="font-mono text-gray-700">{r.path}</td>
+                <td className="font-mono text-foreground">{r.path}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {repos.length === 1 && (
-          <p className="mt-1 text-xs text-gray-400">
+          <p className="mt-1 text-xs text-muted-foreground/70">
             Solo un repo. Se añaden más en Ajustes.
           </p>
         )}

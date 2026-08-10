@@ -63,7 +63,7 @@ export default function App() {
   const back = () => { setDetail(null); setView({ kind: "proyecto" }) }
 
   return (
-    <div className="flex w-full gap-5 p-6">
+    <div className="mx-auto flex w-full max-w-[92rem] gap-6 p-6">
       <Sidebar projects={projects} current={current} settings={view.kind === "ajustes"}
                onSelect={n => { setCurrent(n); back() }}
                onNew={() => setView({ kind: "ajustes", nuevo: true })}

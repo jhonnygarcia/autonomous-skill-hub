@@ -1,11 +1,11 @@
 import type { ActiveRun, Fase, Ticket } from "@/api"
 
 const COLOR: Record<string, string> = {
-  registrado: "bg-gray-100 text-gray-700",
-  corriendo: "bg-blue-100 text-blue-800",
-  analizado: "bg-green-100 text-green-800",
-  planificado: "bg-violet-100 text-violet-800",
-  error: "bg-red-100 text-red-800",
+  registrado: "border-border bg-muted text-muted-foreground",
+  corriendo: "border-blue-500/50 bg-blue-500/10 text-blue-700",
+  analizado: "border-emerald-500/50 bg-emerald-500/10 text-emerald-700",
+  planificado: "border-violet-500/50 bg-violet-500/10 text-violet-700",
+  error: "border-red-500/50 bg-red-500/10 text-red-700",
 }
 const LABEL: Record<string, string> = {
   queued: "registrado", running: "corriendo", analyzed: "analizado",
@@ -16,7 +16,7 @@ const LABEL: Record<string, string> = {
  *  La corrida activa lo desambigua sin pedir nada nuevo a la API. */
 export function estado(t: Ticket, activo: ActiveRun | null) {
   const label = activo?.ticket_id === t.id ? "corriendo" : (LABEL[t.status] ?? t.status)
-  return { label, color: COLOR[label] ?? "bg-gray-100 text-gray-700" }
+  return { label, color: COLOR[label] ?? COLOR.registrado }
 }
 
 /** Motivo por el que NO se puede lanzar, o "" si sí se puede. El lock es global:

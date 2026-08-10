@@ -15,7 +15,7 @@ function Campo({ label, hint, children }: {
   return (
     <label className="block">
       <span className="text-xs font-medium">{label}</span>
-      {hint && <span className="ml-1 text-xs text-gray-500">{hint}</span>}
+      {hint && <span className="ml-1 text-xs text-muted-foreground">{hint}</span>}
       <div className="mt-1">{children}</div>
     </label>
   )
@@ -56,13 +56,13 @@ export function Projects({ projects, startNew, onChange }: {
           vista con el formulario desplegado, y dos botones para lo mismo confunden. */}
       <CardHeader><CardTitle className="text-base">Proyectos</CardTitle></CardHeader>
       <CardContent className="space-y-2">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {projects.map(p => (
           <div key={p.name} className="flex items-center gap-2 text-sm">
             <span className="font-medium">{p.name}</span>
-            <span className="text-gray-500">{p.org}/{p.project}</span>
-            <span className="text-xs text-gray-400"
+            <span className="text-muted-foreground">{p.org}/{p.project}</span>
+            <span className="text-xs text-muted-foreground/70"
                   title={p.repos.map(r => `${r.path}${r.label ? ` — ${r.label}` : ""}`).join("\n")}>
               {p.repos.length} repo{p.repos.length > 1 ? "s" : ""}
             </span>
@@ -73,7 +73,7 @@ export function Projects({ projects, startNew, onChange }: {
           </div>
         ))}
         {projects.length === 0 && !form && (
-          <p className="text-sm text-gray-500">Sin proyectos. Agrega uno para poder encolar tickets.</p>
+          <p className="text-sm text-muted-foreground">Sin proyectos. Agrega uno para poder encolar tickets.</p>
         )}
 
         {form && (
@@ -96,14 +96,14 @@ export function Projects({ projects, startNew, onChange }: {
 
             <div>
               <p className="text-xs font-medium">Repos del proyecto</p>
-              <p className="mb-2 text-xs text-gray-500">
+              <p className="mb-2 text-xs text-muted-foreground">
                 El marcado como <strong>principal</strong> es donde corre el agente y donde se
                 escribe el análisis; los demás los lee. La descripción viaja al prompt y es lo
                 que le dice cuándo mirar en cada uno.
               </p>
 
               <div className="space-y-1">
-                <div className="flex gap-2 text-[11px] uppercase tracking-wide text-gray-400">
+                <div className="flex gap-2 text-[11px] uppercase tracking-wide text-muted-foreground/70">
                   <span className="w-16 text-center">principal</span>
                   <span className="flex-1">ruta</span>
                   <span className="w-64">descripción</span>

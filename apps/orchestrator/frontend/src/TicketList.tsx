@@ -29,13 +29,15 @@ export function TicketList({ tickets, activo, onAdd, onOpen, onRun }: {
           const { label, color } = estado(t, activo)
           const motivo = bloqueo(t, activo)
           return (
-            <div key={t.id} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50">
-              <button className="font-medium hover:underline" onClick={() => onOpen(t.id)}>
+            <div key={t.id} className="flex items-center gap-3 px-3 py-2 text-sm transition-colors hover:bg-muted/40">
+              <button className="rounded font-medium hover:underline focus-visible:outline-none
+                                  focus-visible:ring-2 focus-visible:ring-ring/50"
+                      onClick={() => onOpen(t.id)}>
                 #{t.ado_id}
               </button>
               <Badge className={color}>{label}</Badge>
               {motivo && activo?.ticket_id !== t.id && (
-                <span className="text-xs text-gray-400">{motivo}</span>
+                <span className="text-xs text-muted-foreground">{motivo}</span>
               )}
               <div className="ml-auto flex gap-1">
                 <Button size="sm" variant="outline" disabled={!!motivo}
@@ -49,7 +51,7 @@ export function TicketList({ tickets, activo, onAdd, onOpen, onRun }: {
           )
         })}
         {tickets.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-gray-500">
+          <p className="px-3 py-6 text-center text-sm text-muted-foreground">
             Sin tickets en este proyecto. Escribe un id arriba para añadir el primero.
           </p>
         )}
