@@ -17,7 +17,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 |---|---|---|
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Ciclo completo verificado**, ahora con dos fases lanzables — ⏳ falta el repaso visual de la UI |
+| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables — 📐 **avance por fases + timeline diseñado, sin implementar** |
 | 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Construida y validada** (3323) — skill **v0.4.2**, n=1 |
 | 2b — Del plan al código | Ejecutar el plan: escribir código, rama, PR | 📋 Futura — la Fase 2 se quedó deliberadamente en el documento |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
@@ -95,6 +95,19 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
     llegó a significar "el subproceso no petó". Ahora la skill cierra con un sello
     (`PLAN: validado` | `sin-validar` | `no-escrito`) y el runner decide por la **última**
     coincidencia en el log. Ver "Lo aprendido" para por qué *última* y no *presente*.
+14. **El avance vive en `runs`, no en una columna de estado** (2026-08-10, spec
+    `2026-08-10-avance-por-fases-y-timeline-design.md`, **aprobado y sin implementar**).
+    El sello `PLAN:` se generaliza a `HUELLA: <ok|parcial|nada> — <ruta>` para toda fase,
+    `runs` gana la huella, `current_phase` se borra y `tickets.status` pasa a calcularse.
+    La UI del ticket se convierte en un recorrido de fases con la acción y el artefacto
+    de cada una, y el artefacto se lee dentro de la app. Revierte a propósito la decisión
+    de retirar el stepper: allí eran 6 fases apagadas en **cada fila de la lista**; aquí
+    salen una vez, en el detalle, donde el camino pendiente es contexto.
+15. **`ProvidenceTMSTenant` es el conejillo de indias** (2026-08-10). Lo que las corridas
+    dejen ahí —análisis, `openspec/`, lo que instale `openspec init` en `.claude/` y
+    `.opencode/`— **no hay que versionarlo ni revertirlo**. Se están probando el plugin y
+    el orquestador, no ese repo. Sí merece la pena **medir** la huella que dejan: eso es
+    evidencia sobre la herramienta.
 
 ## Aceptación de la Fase 1 — cerrada el 2026-08-08
 
@@ -178,24 +191,31 @@ están inventados.
 
 ## Pendientes inmediatos
 
+- [ ] **Implementar el avance por fases y el timeline** — spec aprobado en
+  `docs/superpowers/specs/2026-08-10-avance-por-fases-y-timeline-design.md`, **sin plan de
+  implementación todavía**. Es lo siguiente: sin él, la fase que escriba código producirá
+  ramas, diffs y resultados de tests que no tendrían dónde vivir en la UI.
+- [ ] **Segundo ticket para la Fase 2, y que sea el 3320.** Está aceptada con **n=1**.
+  Otro carrier del #3319 mediría repetibilidad del caso fácil: mismo padre con su
+  *Definition of Done*, mismo espejo, misma tarea de "replica esto". El **3320**
+  (*"Ready To Pay" no persiste*) es la forma opuesta — repro determinista pero **sin
+  padre rico y sin patrón que copiar**. Ahí la regla central de la skill (*toda tarea cita
+  su espejo con `archivo:línea`*) no se puede cumplir, y la salida honesta que tiene
+  escrita para ese caso **nunca se ha ejercitado**. Lo que hay que mirar: si inventa
+  espejos para cumplir la forma, o si declara las tareas como investigación pendiente.
 - [ ] **Repaso visual de la UI**: sigue sin poder verificarse (el navegador con el perfil
-  de devtools es el de Jhonny y el MCP no puede adjuntarse si ya está abierto). Recorrer
-  las tres vistas, los cinco estados vacíos, y ahora también el botón *Planificar*.
-- [ ] **Segundo ticket para la Fase 2.** Está aceptada con **n=1**, y la lección de la
-  Fase 1 fue justo esa: el 3311 salió perfecto y el fallo solo apareció con el segundo.
-  Buen candidato: otro carrier del #3319, que ejercita el mismo camino con otra forma.
+  de devtools es el de Jhonny y el MCP no puede adjuntarse si ya está abierto). Se
+  resuelve solo si el timeline se implementa y se recorre entonces.
 - [ ] **Decidir qué se hace con `Bash` en el runner.** Ver "Lo aprendido": el
   especificador no acota. Hoy `analyze` va con la lista vacía, pero la Fase 2 tiene Bash
   disponible de facto para más que `npx`.
-- [ ] **Revertir o commitear la huella de `openspec init` en `ProvidenceTMSTenant`**:
-  dejó 6 skills en `.claude/skills/openspec-*`, `.claude/commands/opsx/`, y 6 comandos
-  más `skills/` en `.opencode/`. Todo sin trackear. Es más de lo que el spec anunciaba.
 - [ ] **Quitar `organization` de `.claude/ticket-agent.json`** — duplica `ADO_ORG`,
   que no se puede eliminar porque el MCP la necesita como env var al arrancar.
-- [ ] **Deuda menor anotada** (de la revisión final, ninguna bloqueante): el `title` del
-  botón *Planificar* oculta una de las dos razones cuando coinciden; el log se lee entero
-  para quedarse con 4 KB; el `assert` de las claves de fase desaparece con `python -O`;
-  "Enviar ajuste" siempre lanza `analyze`, no hay forma de re-planificar con instrucciones.
+- [ ] **Deuda menor anotada** (de la revisión final, ninguna bloqueante): el log se lee
+  entero para quedarse con 4 KB; el `assert` de las claves de fase desaparece con
+  `python -O`; toda corrida `success` se pinta del color de "analizado". Ojo: el `title`
+  del botón *Planificar* y el "Enviar ajuste" que solo lanza `analyze` **los mata el
+  spec del timeline**, no hace falta arreglarlos aparte.
 
 ## Lo aprendido (2026-08-10)
 
@@ -299,34 +319,40 @@ están inventados.
 Prompt sugerido — abrir Claude Code en el hub
 (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md para situarte. Vamos por los pendientes en este orden:
+> Lee docs/STATUS.md para situarte. El objetivo de esta sesión es **implementar el
+> avance por fases y el timeline**, cuyo diseño ya está aprobado y committeado en
+> `docs/superpowers/specs/2026-08-10-avance-por-fases-y-timeline-design.md`.
 >
 > 1. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
->    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend
->    en `apps/orchestrator/frontend` (`npm run dev`). Antes de dar nada por bueno,
->    comprueba que el proceso del 8000 arrancó **después** de la última modificación
+>    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
+>    `apps/orchestrator/frontend` (`npm run dev`). Antes de dar nada por bueno, comprueba
+>    que el proceso que escucha en el 8000 arrancó **después** de la última modificación
 >    de `app.py` — ya nos engañó tres veces.
-> 2. **Segunda prueba de la Fase 2**, que hoy está aceptada con n=1. Elige otro carrier
->    del Feature #3319 (mismo camino, otra forma), dalo de alta, corre `analyze` y luego
->    *Planificar*. Comprueba tres cosas en el log y en el change: que
->    `openspec validate --changes` pasa, que los espejos que cita los **abrió de verdad**
->    (cuenta las lecturas, no las citas), y que lo que no se puede hacer está bajo
->    `## Bloqueado` en vez de convertido en tarea.
-> 3. Con el resultado, dime si `change-planning` necesita ajuste. Si sí: edítala,
->    **sube `version` en `plugin.json`**, `claude plugin update
->    ticket-agent@autonomous-skill-hub`, y re-corre.
-> 4. **Repaso visual de la UI**, que sigue pendiente desde el rediseño: las tres vistas,
->    los cinco estados vacíos, y el botón *Planificar* en sus cuatro situaciones
->    (sin análisis, con análisis, con corrida activa, y tras una Fase 2 fallida).
-> 5. Al cerrar, actualiza docs/STATUS.md.
+> 2. **Escribe el plan de implementación** de ese spec con la skill `writing-plans`, y
+>    déjalo en `docs/superpowers/plans/`. Ojo a dos cosas que el spec pide y son fáciles
+>    de dejarse: que `HUELLA:` se ancla en la **última** coincidencia (el cuerpo de la
+>    skill viaja en el log y contiene los sellos literalmente), y que el endpoint del
+>    visor valida la ruta de verdad — declarada por una corrida de ese ticket, resuelta
+>    con `realpath` dentro de los repos del ticket, archivo regular, tope de 512 KB.
+> 3. **Ejecútalo** con `subagent-driven-development`, tarea por tarea. Trabajamos
+>    directamente sobre `main`: te lo autorizo desde ya, no crees ramas.
+> 4. **Recorre la UI resultante** — es la comprobación visual que arrastramos desde el
+>    rediseño. Si el MCP de chrome-devtools no puede adjuntarse porque mi navegador ya
+>    está abierto, dímelo y la hago yo; no cierres mi navegador.
+> 5. Al cerrar, actualiza docs/STATUS.md y los checkboxes del plan.
+>
+> Después de esto viene el **3320** como segundo ticket de la Fase 2 — está explicado en
+> "Pendientes inmediatos" por qué ese y no otro carrier del #3319.
 
 Contexto que ya no hace falta rehacer: el plugin está instalado a nivel de usuario
 (**v0.4.2**), el TMS configurado (`ADO_ORG` en `.claude/settings.json`), y el proyecto
 dado de alta en la BD del orquestador con `ProvidenceTMSTenant` como repo principal.
-El 3322 y el 3323 ya están analizados, y el 3323 además planificado.
+El 3322 y el 3323 ya están analizados, y el 3323 además planificado con su change de
+OpenSpec validado. `ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas
+dejen ahí no hay que versionarlo ni limpiarlo (decisión 15).
 
 Cuatro trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
 plugin instalado; **no usar `uvicorn --reload`**, que deja procesos huérfanos reteniendo
 el 8000 y sirve código viejo sin avisar; el paquete de OpenSpec es **`@fission-ai/openspec`**,
 no `openspec`; y **el código de salida de `claude -p` no dice si el agente hizo algo** —
-para eso está el sello `PLAN:`.
+para eso está el sello, que este spec generaliza a `HUELLA:`.
