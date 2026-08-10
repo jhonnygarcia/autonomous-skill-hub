@@ -39,8 +39,9 @@ export function TicketList({ tickets, activo, onAdd, onOpen, onRun }: {
               )}
               <div className="ml-auto flex gap-1">
                 <Button size="sm" variant="outline" disabled={!!motivo}
-                        title={motivo || undefined} onClick={() => onRun(t.id)}>
-                  {t.status === "analyzed" || t.status === "error" ? "Re-correr" : "Correr"}
+                        title={motivo || "Lanza la Fase 1; el resto se lanza desde el detalle"}
+                        onClick={() => onRun(t.id)}>
+                  {t.status === "queued" ? "Analizar" : "Re-analizar"}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => onOpen(t.id)}>Ver</Button>
               </div>
