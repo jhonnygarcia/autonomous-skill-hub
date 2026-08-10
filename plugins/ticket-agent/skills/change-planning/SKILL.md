@@ -8,7 +8,7 @@ description: Convierte el análisis de un ticket de Azure DevOps en un plan de c
 Produce un plan que **otro agente pueda ejecutar sin volver a investigar**. No
 escribas código de producto: el entregable es el change de OpenSpec.
 
-Cuatro reglas de oro:
+Cinco reglas de oro:
 
 1. **Lo que no se pudo leer se reporta; jamás se rellena con suposiciones.**
 2. **Toda cifra ajena al work item cita su fuente** — `archivo:línea`, commit o comando.
@@ -17,6 +17,13 @@ Cuatro reglas de oro:
 4. **Lo bloqueado se declara bloqueado, no se planifica alrededor.** Si algo no se
    puede hacer todavía, va a la sección de bloqueos con su motivo y su referencia —
    nunca como una tarea que parece ejecutable y no lo es.
+5. **Decir "no existe" es una afirmación y necesita su fuente igual que una cifra.**
+   Un `Grep` por símbolos solo encuentra lo que los menciona, y el archivo gemelo casi
+   nunca menciona los símbolos del tuyo: buscar `UpdateApReadyToProcess` jamás va a
+   encontrar `UpdateArReadyToProcessCommandTest.cs`. Antes de escribir "no hay espejo",
+   **busca por forma de nombre** (`Glob`, p. ej. `**/*Command*Test*.cs`) y **nombra en
+   la tarea la búsqueda que hiciste**. Una ausencia vale lo que valga la búsqueda que la
+   respalda; sin ella no es honestidad, es una conjetura con tono humilde.
 
 ## 1. Configuración
 
@@ -53,6 +60,14 @@ código se comprueba abriéndolo, no se deduce del nombre del archivo.
 
 Si el prompt te nombra repos adicionales montados con su etiqueta, entran en el
 alcance de este paso.
+
+**Busca el espejo por parentesco, no solo por símbolos.** Antes de dar por perdido el
+ejemplo de una tarea, prueba la simetría del propio repo: si tocas AP, busca AR; si
+tocas un comando, busca el test del comando hermano; si tocas una entidad, busca la
+entidad gemela. Un `Glob` por forma de nombre (`**/*Command*Test*.cs`,
+`**/Ar*Invoice*.cs`) encuentra en un paso lo que un `Grep` por símbolos no puede
+encontrar nunca. Un repo con dos mitades simétricas es el mejor espejo que hay, y es
+justo el que se escapa buscando por contenido.
 
 ## 5. Escritura del change
 
@@ -157,6 +172,9 @@ sin escribir nada.
   `HUELLA: parcial` según haya pasado la validación.
 - `openspec validate` falla dos veces → deja el change escrito, reporta qué no pasa
   y cierra con `HUELLA: parcial`.
-- No encuentras un espejo para una tarea → dilo en la tarea. Una tarea sin espejo es
-  una tarea que el implementador tendrá que investigar, y eso hay que avisarlo (no
-  cambia el sello por sí solo).
+- No encuentras un espejo para una tarea → **primero busca por forma de nombre**
+  (regla 5): la mitad simétrica del repo suele tenerlo. Si aun así no está, dilo en la
+  tarea **citando la búsqueda que lo respalda** ("`Glob **/*Command*Test*.cs` → ningún
+  test de comando AR/AP"). Una tarea sin espejo es una tarea que el implementador
+  tendrá que investigar, y eso hay que avisarlo (no cambia el sello por sí solo). Una
+  tarea sin espejo *que sí lo tenía* es peor que una cita equivocada: nadie la revisa.

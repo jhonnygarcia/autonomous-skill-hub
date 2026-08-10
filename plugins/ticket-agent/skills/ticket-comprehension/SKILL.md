@@ -79,7 +79,7 @@ fallo de la tarea, no una variante aceptable.
 # Análisis del ticket <id>: <título>
 
 **Tipo/Estado:** ... · **Asignado:** ... · **Iteración:** ...
-**Analizado:** <fecha> por ticket-agent v0.5.1
+**Analizado:** <fecha> por ticket-agent v0.5.2
 
 ## Qué pide
 (2-6 líneas fieles al ticket, sin interpretar de más)
