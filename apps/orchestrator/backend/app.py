@@ -6,7 +6,7 @@ import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -560,3 +560,53 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
     background.add_task(execute_run, run_id, dict(t), body.instructions, body.phase)
     with db() as c:
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
+
+
+TOPE_ARTEFACTO = 512 * 1024
+
+
+@app.get("/tickets/{tid}/artefacto")
+def artefacto(tid: int, ruta: str):
+    """Lee del disco a partir de un parámetro de la petición, así que la validación no se
+    simplifica. No es un explorador de archivos: es "enséñame lo que ESTA corrida dijo
+    que escribió". Tienen que cumplirse las cuatro."""
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    with db() as c:
+        declaradas = [r["artifact_path"] for r in c.execute(
+            "SELECT artifact_path FROM runs WHERE ticket_id=? AND artifact_path IS NOT NULL "
+            "AND artifact_state IN ('ok','parcial')", (tid,))]
+
+    # 1. Declarada por una corrida DE ESTE TICKET, o un archivo BAJO un directorio
+    #    declarado — a cualquier profundidad, no solo hijo directo: `stat_huella` (Tarea
+    #    3) cuenta recursivo porque un change de OpenSpec anida `specs/<capability>/
+    #    spec.md`, y `huella.nombres` es justo la lista blanca que ofrece la UI. Admitir
+    #    solo hijos directos rechazaría con 400 los botones que el propio backend ofreció.
+    pedida = PurePosixPath(ruta.replace("\\", "/"))
+    declaradas_posix = [PurePosixPath(d.replace("\\", "/")) for d in declaradas]
+    if not any(pedida == d or d in pedida.parents for d in declaradas_posix):
+        raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
+
+    # 2. Resuelta con realpath, cae dentro del repo principal o de los extra del ticket.
+    #    resolve() sigue enlaces, así que un symlink apuntando fuera muere aquí.
+    raices = [Path(t["repo_path"]).resolve()]
+    raices += [Path(d["path"]).resolve() for d in norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
+    real = (Path(t["repo_path"]) / ruta).resolve()
+    if not any(real == r or r in real.parents for r in raices):
+        raise HTTPException(400, "Esa ruta cae fuera de los repos del ticket")
+
+    # 3. Archivo regular: ni directorio, ni dispositivo.
+    if not real.is_file():
+        raise HTTPException(400, "No es un archivo regular")
+
+    # 4. Tope. El corte va en bytes, así que hay que retroceder hasta el último byte que
+    #    NO sea de continuación (0b10xxxxxx): cortar a ciegas parte un carácter multibyte
+    #    por la mitad y el visor pinta un rombo negro donde había una tilde.
+    crudo = real.read_bytes()
+    truncado = len(crudo) > TOPE_ARTEFACTO
+    corte = TOPE_ARTEFACTO
+    while truncado and corte > 0 and (crudo[corte] & 0xC0) == 0x80:
+        corte -= 1
+    texto = (crudo[:corte] if truncado else crudo).decode("utf-8", "replace")
+    return {"ruta": ruta, "texto": texto, "bytes": len(crudo), "truncado": truncado}

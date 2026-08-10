@@ -503,3 +503,87 @@ def test_fase_en_error_lleva_el_motivo_del_sello(client, monkeypatch):
     f = client.get(f"/tickets/{tid}").json()["fases"][1]
     assert f["estado"] == "error" and "falta el análisis" in f["motivo"]
     assert "huella" not in f
+
+
+TOPE = 512 * 1024
+
+
+def _con_artefacto(client, monkeypatch, tmp_path, rel, contenido="hola"):
+    destino = tmp_path / "repo" / rel
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(contenido, encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella=f"ok — {rel}")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    return tid
+
+
+def test_artefacto_sirve_lo_declarado(client, monkeypatch, tmp_path):
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/3323-analysis.md", "# Análisis")
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "docs/tickets/3323-analysis.md"})
+    assert r.status_code == 200
+    assert r.json()["texto"] == "# Análisis" and r.json()["truncado"] is False
+
+
+def test_artefacto_sirve_un_hijo_directo_de_un_directorio_declarado(client, monkeypatch, tmp_path):
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("- [ ] uno", encoding="utf-8")
+    (d / "specs" / "pagos").mkdir(parents=True)
+    (d / "specs" / "pagos" / "spec.md").write_text("# spec de pagos", encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    r = client.get(f"/tickets/{tid}/artefacto",
+                   params={"ruta": "openspec/changes/3323-xpo/tasks.md"})
+    assert r.status_code == 200 and r.json()["texto"] == "- [ ] uno"
+    # y un nieto: `stat_huella` cuenta recursivo, así que el visor tiene que admitirlo.
+    r2 = client.get(f"/tickets/{tid}/artefacto",
+                    params={"ruta": "openspec/changes/3323-xpo/specs/pagos/spec.md"})
+    assert r2.status_code == 200 and r2.json()["texto"] == "# spec de pagos"
+
+
+def test_artefacto_rechaza_ruta_no_declarada(client, monkeypatch, tmp_path):
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    (tmp_path / "repo" / "secreto.env").write_text("TOKEN=xxx", encoding="utf-8")
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "secreto.env"})
+    assert r.status_code == 400
+
+
+def test_artefacto_rechaza_travesia(client, monkeypatch, tmp_path):
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    for ruta in ("../../etc/passwd", "docs/../../fuera.md", "docs/tickets/../../../x"):
+        assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": ruta}).status_code == 400
+
+
+def test_artefacto_rechaza_ruta_absoluta_fuera_del_repo(client, monkeypatch, tmp_path):
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    fuera = tmp_path / "fuera.md"
+    fuera.write_text("no", encoding="utf-8")
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": str(fuera)}).status_code == 400
+
+
+def test_artefacto_rechaza_un_directorio(client, monkeypatch, tmp_path):
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("x", encoding="utf-8")
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    assert client.get(f"/tickets/{tid}/artefacto",
+                      params={"ruta": "openspec/changes/3323-xpo"}).status_code == 400
+
+
+def test_artefacto_declarado_por_OTRO_ticket_no_vale(client, monkeypatch, tmp_path):
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    otro = client.post("/tickets", json={"ado_id": 9999, "project": "Demo"}).json()["id"]
+    assert client.get(f"/tickets/{otro}/artefacto",
+                      params={"ruta": "docs/tickets/a.md"}).status_code == 400
+
+
+def test_artefacto_trunca_a_512kb(client, monkeypatch, tmp_path):
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "grande.md", "á" * TOPE)
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "grande.md"}).json()
+    assert r["truncado"] is True and len(r["texto"]) <= TOPE
+    assert "�" not in r["texto"]      # no se parte un carácter multibyte al cortar
