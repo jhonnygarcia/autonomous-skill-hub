@@ -211,12 +211,40 @@ inmediato en vez de dejarla sin ejercitar.
 
 ## Riesgos e incógnitas abiertas
 
-- **Herencia de permisos por los subagentes.** No está comprobado que un subagente
-  lanzado con `Task` herede `Bash` y los `--add-dir` en headless. Si no los hereda, el
-  paso 1 del bucle se cae y el diseño cae a la variante lineal pura (enfoque A). **Es lo
-  primero que hay que verificar**, y hay que hacerlo con **el CLI real**: `fake_claude`
-  lo sustituye, así que no puede decir nada sobre cómo reparte permisos. Basta una
-  invocación suelta de medio minuto, no una corrida de fase.
+- **Herencia de permisos por los subagentes — verificado 2026-08-10: sí hereda.**
+  Spike con el CLI real (commit `045e09e`), desde `ProvidenceTMSTenant`, `claude -p`
+  con `--allowedTools ... Task Bash` y `--add-dir D:/Companies/ProvidenceSolutions/ProvidenceTMS`,
+  pidiendo al agente principal que delegara con `Task` (en el stream-json del CLI la
+  tool se llama `Agent`) un `git status --porcelain` con `cwd` en el `add-dir` y una
+  lectura de archivo ahí mismo. El agente principal delegó (no lo ejecutó él mismo, que
+  era el riesgo del spike) y el evento del `Bash` dentro del subagente trae
+  `subagent_type` y `parent_tool_use_id` apuntando a la invocación de `Task`, o sea que
+  no es una lectura ambigua a nivel del log:
+
+  ```json
+  {
+    "type": "assistant",
+    "subagent_type": "general-purpose",
+    "parent_tool_use_id": "toolu_01VmmvYrguMQE2VzuAWBZuky",
+    "tool_use": {
+      "name": "Bash",
+      "input": {
+        "command": "git -C D:/Companies/ProvidenceSolutions/ProvidenceTMS status --porcelain",
+        "description": "Show git status in ProvidenceTMS repo"
+      }
+    }
+  }
+  ```
+
+  El comando corrió y devolvió la salida real del repo (`Bash` heredado). El intento de
+  lectura del `package.json` en la raíz de `ProvidenceTMS` falló, pero con
+  `"File does not exist..."`, no con una denegación de permiso ni de directorio — el
+  archivo de verdad no está en la raíz (vive en `ProvidenceSolutions/ClientApp/`,
+  confirmado aparte); si el `--add-dir` no se hubiera heredado, el intento de acceso
+  fuera del `cwd` original habría chocado con el límite de directorio antes de
+  siquiera preguntar si el archivo existe. `permission_denials` del evento `result`
+  final salió vacío. Con esto la decisión 6 se sostiene tal como está escrita: bucle
+  con subagente por tarea.
 - **`npm test` en `ClientApp`.** La tarea de guardia de regresión del plan del 3320 lo
   necesita y no está confirmado que exista configurado.
 - **Duración.** Un plan de 21 tareas con un subagente y una revisión por tarea puede
