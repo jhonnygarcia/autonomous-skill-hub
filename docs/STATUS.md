@@ -193,10 +193,10 @@ están inventados.
 
 ## Cuarta jornada — 2026-08-10 (tarde): avance por fases, huellas y timeline
 
-**Implementado el spec entero**, con `subagent-driven-development`: 8 tareas, 16 commits
-(`8eeb632..04afa60`) más la oleada de la revisión final. Plan en
-`docs/superpowers/plans/2026-08-10-avance-por-fases-y-timeline.md`, con las casillas
-marcadas. Backend: **62 tests** (antes 18). Frontend: build y lint en verde.
+**Implementado el spec entero**, con `subagent-driven-development`: 8 tareas, 21 commits
+(`4044a91..76f6f5d`) contando la oleada de la revisión final y el arreglo del repaso
+visual. Plan en `docs/superpowers/plans/2026-08-10-avance-por-fases-y-timeline.md`, con
+las 53 casillas marcadas. Backend: **66 tests** (antes 18). Frontend: build y lint verdes.
 
 Lo que hay ahora que antes no había: las dos skills cierran con `HUELLA:`; `runs` guarda
 `artifact_state` y `artifact_path`; `current_phase` desapareció y `tickets.status` se
@@ -246,19 +246,31 @@ son inversión a futuro.
   su espejo con `archivo:línea`*) no se puede cumplir, y la salida honesta que tiene
   escrita para ese caso **nunca se ha ejercitado**. Lo que hay que mirar: si inventa
   espejos para cumplir la forma, o si declara las tareas como investigación pendiente.
-- [ ] **Repaso visual de la UI**: sigue sin poder verificarse (el navegador con el perfil
-  de devtools es el de Jhonny y el MCP no puede adjuntarse si ya está abierto). Se
-  resuelve solo si el timeline se implementa y se recorre entonces.
+- [x] ~~**Repaso visual de la UI**~~ — hecho el 2026-08-10 con el MCP de chrome-devtools,
+  al liberarse el navegador. Un defecto real (el riel del timeline), arreglado.
 - [ ] **Decidir qué se hace con `Bash` en el runner.** Ver "Lo aprendido": el
   especificador no acota. Hoy `analyze` va con la lista vacía, pero la Fase 2 tiene Bash
   disponible de facto para más que `npx`.
 - [ ] **Quitar `organization` de `.claude/ticket-agent.json`** — duplica `ADO_ORG`,
   que no se puede eliminar porque el MCP la necesita como env var al arrancar.
-- [ ] **Deuda menor anotada** (de la revisión final, ninguna bloqueante): el log se lee
-  entero para quedarse con 4 KB; el `assert` de las claves de fase desaparece con
-  `python -O`; toda corrida `success` se pinta del color de "analizado". Ojo: el `title`
-  del botón *Planificar* y el "Enviar ajuste" que solo lanza `analyze` **los mata el
-  spec del timeline**, no hace falta arreglarlos aparte.
+- [ ] **Añadir un interruptor de tema a la UI.** La paleta oscura está completa y con el
+  contraste verificado (ratio WCAG AA contra `#0a0a0a`), pero hoy solo se alcanza forzando
+  la clase `.dark` a mano: no hay forma de llegar a ella desde la app.
+
+**Deuda menor anotada** (ninguna bloqueante):
+
+- El log se lee entero para quedarse con los últimos 4 KB (`leer_huella`) y con 8 KB
+  (`log_tail`). Hoy pesan cientos de KB; con logs de MB tocaría un `seek` desde el final.
+- El `assert` que cuadra las claves de las cuatro tablas de fase desaparece con `python -O`.
+- Toda corrida `success` se pinta del color de "analizado" en el historial, aunque su fase
+  esté en rojo por no haber declarado huella. Confunde con los datos pre-contrato.
+- `leer_huella` no des-escapa comillas JSON dentro de una ruta; una reserva vacía
+  (`ruta · `) deja la ruta con el punto medio pegado. Ambos cosméticos, sin consecuencia.
+- TOCTOU teórico en el visor entre `is_file()` y `open()`. Un solo usuario local y el único
+  escritor es el propio agente; el peor caso es un 500.
+- `puedeLanzar` duplica los textos de bloqueo de `bloqueo()` en `estado.ts`.
+- Los planes de las jornadas anteriores tienen casillas sin marcar
+  (`fase-0-1`: 15/20, `orchestrator`: 31/32, `fase-2`: 30/32) pese a estar cerradas.
 
 ## Lo aprendido (2026-08-10, tarde)
 
