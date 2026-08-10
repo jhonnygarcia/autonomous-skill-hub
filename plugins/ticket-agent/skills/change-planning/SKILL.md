@@ -125,28 +125,31 @@ se puede revisar vale más que ninguno.
 - Cualquier otro valor de `autonomy` se trata como `supervised` y se avisa al
   usuario de que el valor no se reconoce.
 
-**Regla obligatoria de cierre.** La última línea del resumen —sin nada después—
-tiene que ser exactamente uno de estos tres sellos, seguido del motivo. El
-orquestador lee esta línea para decidir si la corrida queda `planned` o `error`: el
-código de salida del CLI no lo dice, porque sale en 0 aunque el agente se haya
-detenido sin escribir nada.
+**Regla obligatoria de cierre.** La última línea del resumen —sin nada después— tiene
+que ser exactamente uno de estos tres sellos, seguido de la ruta del change relativa al
+repo principal (o del motivo, en el caso de `nada`). El orquestador lee esta línea para
+decidir si la corrida vale: el código de salida del CLI no lo dice, porque sale en 0
+aunque el agente se haya detenido sin escribir nada.
 
-- `PLAN: validado` — `openspec validate --changes --no-interactive` pasó.
-- `PLAN: sin-validar` — el change se escribió pero la validación no pasó (dos
-  intentos) o no llegó a correrse.
-- `PLAN: no-escrito` — no se llegó a escribir ningún change: falta el análisis,
+- `HUELLA: ok — openspec/changes/<id>-<slug>` — el change está escrito y
+  `openspec validate --changes --no-interactive` pasó.
+- `HUELLA: parcial — openspec/changes/<id>-<slug>` — el change se escribió pero la
+  validación no pasó (dos intentos) o no llegó a correrse. Explica la reserva en el
+  resumen.
+- `HUELLA: nada — <motivo>` — no se llegó a escribir ningún change: falta el análisis,
   `npx` no está disponible, o `openspec init` falló.
 
 ## Manejo de errores
 
-- Falta el análisis → detente, pide la Fase 1 y cierra con `PLAN: no-escrito`.
+- Falta el análisis → detente, pide la Fase 1 y cierra con
+  `HUELLA: nada — falta docs/tickets/<id>-analysis.md`.
 - `npx` no disponible o `openspec init` falla → detente, repórtalo y cierra con
-  `PLAN: no-escrito`.
+  `HUELLA: nada — npx no disponible u openspec init falló`.
 - El análisis existe pero no trae el código afectado → planifica lo que puedas,
-  registra el hueco señalando que viene de la Fase 1, y cierra con `PLAN: validado`
-  o `PLAN: sin-validar` según haya pasado la validación.
+  registra el hueco señalando que viene de la Fase 1, y cierra con `HUELLA: ok` o
+  `HUELLA: parcial` según haya pasado la validación.
 - `openspec validate` falla dos veces → deja el change escrito, reporta qué no pasa
-  y cierra con `PLAN: sin-validar`.
+  y cierra con `HUELLA: parcial`.
 - No encuentras un espejo para una tarea → dilo en la tarea. Una tarea sin espejo es
   una tarea que el implementador tendrá que investigar, y eso hay que avisarlo (no
   cambia el sello por sí solo).

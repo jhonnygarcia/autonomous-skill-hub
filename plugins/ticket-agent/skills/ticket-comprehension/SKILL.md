@@ -135,6 +135,19 @@ fuente de cada cifra. Omite la sección entera si no hay trabajo empezado)
 - Cualquier otro valor de `autonomy` se trata como `supervised` y se avisa al
   usuario de que el valor no se reconoce.
 
+**Regla obligatoria de cierre.** La última línea de tu resumen —sin nada después— tiene
+que ser exactamente este sello, seguido de la ruta del análisis relativa al repo
+principal:
+
+- `HUELLA: ok — docs/tickets/<id>-analysis.md` — el análisis está escrito y completo.
+- `HUELLA: parcial — docs/tickets/<id>-analysis.md` — está escrito, pero con reservas
+  (no pudiste leer el padre, faltan adjuntos, quedó "Información faltante" con peso).
+  Explica la reserva en el resumen, no en la línea del sello.
+- `HUELLA: nada — <motivo>` — no se escribió el archivo. El motivo va detrás del guion.
+
+El orquestador lee esta línea para decidir si la corrida vale: el código de salida del
+CLI no lo dice, porque sale en 0 aunque te hayas detenido sin escribir nada.
+
 ## Manejo de errores
 
 - Ticket inexistente o sin permisos → informa la causa exacta y detente.
