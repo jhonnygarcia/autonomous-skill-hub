@@ -1,4 +1,4 @@
-import type { ActiveRun, Ticket } from "@/api"
+import type { ActiveRun, Fase, Ticket } from "@/api"
 
 const COLOR: Record<string, string> = {
   registrado: "bg-gray-100 text-gray-700",
@@ -41,11 +41,48 @@ export function duracion(desde: string | null, hasta: string | null): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`
 }
 
-/** La Fase 2 lee el análisis de la Fase 1: sin análisis no hay nada que planificar.
- *  `planned` también vale — re-planificar es legítimo si cambió el análisis. Y un
- *  ticket en `error` cuya última corrida fue `design` también: la Fase 2 falló a
- *  medias y la única salida no puede ser re-correr toda la Fase 1 de nuevo. */
-export function puedePlanificar(t: Ticket, ultimaFase?: string): boolean {
-  return t.status === "analyzed" || t.status === "planned"
-    || (t.status === "error" && ultimaFase === "design")
+/** Las seis fases del pipeline, con el nombre que se le enseña al usuario. */
+export const FASE_LABEL: Record<string, string> = {
+  analyze: "Análisis", design: "Plan", implement: "Código",
+  test: "Pruebas", guards: "Revisión", pr: "PR",
+}
+
+/** Qué se lee bajo la fila cuando la fase dejó algo. */
+export const FASE_NOUN: Record<string, string> = {
+  analyze: "análisis", design: "plan",
+}
+
+export function iconoFase(estado?: string): string {
+  return estado === "ok" ? "✓" : estado === "parcial" ? "!" : estado === "error" ? "✕"
+    : estado === "corriendo" ? "·" : "—"
+}
+
+export function colorFase(estado?: string): string {
+  return estado === "ok" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700"
+    : estado === "parcial" ? "border-amber-500/60 bg-amber-500/10 text-amber-700"
+    : estado === "error" ? "border-red-500/60 bg-red-500/10 text-red-700"
+    : estado === "corriendo" ? "border-blue-500/60 bg-blue-500/10 text-blue-700"
+    : "border-border bg-muted text-muted-foreground"
+}
+
+/**
+ * Motivo por el que NO se puede lanzar esta fase, o "" si sí se puede. Generaliza al
+ * viejo `puedePlanificar`, cuya regla —"solo con análisis hecho"— era un caso particular
+ * de esto: una fase se lanza si está disponible, no hay corrida activa, y la anterior
+ * quedó en `ok` o `parcial`. La primera fase no tiene anterior, así que siempre se puede.
+ */
+export function puedeLanzar(
+  fases: Fase[], i: number, activo: ActiveRun | null, ticketId: number,
+): string {
+  const f = fases[i]
+  if (!f.disponible) return "esta fase todavía no existe"
+  if (activo) {
+    return activo.ticket_id === ticketId ? "esta corrida ya está en marcha"
+      : `esperando a #${activo.ado_id} en ${activo.project}`
+  }
+  const previa = fases.slice(0, i).filter(p => p.disponible).pop()
+  if (previa && previa.estado !== "ok" && previa.estado !== "parcial") {
+    return `necesita ${FASE_LABEL[previa.fase]} en verde`
+  }
+  return ""
 }

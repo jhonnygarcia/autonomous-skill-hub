@@ -3,7 +3,7 @@ import type { ActiveRun, TicketDetail as Detail } from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { bloqueo, colorCorrida, duracion, estado, puedePlanificar } from "@/estado"
+import { bloqueo, colorCorrida, duracion, estado } from "@/estado"
 
 export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDelete }: {
   detail: Detail
@@ -32,10 +32,8 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
                   onClick={() => onRun()}>
             {detail.runs.length ? "Re-correr análisis" : "Correr análisis"}
           </Button>
-          <Button size="sm" variant="secondary"
-                  disabled={!!motivo || !puedePlanificar(t, detail.runs[0]?.phase)}
-                  title={motivo || (puedePlanificar(t, detail.runs[0]?.phase) ? undefined
-                                    : "Necesita un análisis: corre primero la Fase 1")}
+          <Button size="sm" variant="secondary" disabled={!!motivo}
+                  title={motivo || undefined}
                   onClick={() => onRun(undefined, "design")}>
             Planificar
           </Button>

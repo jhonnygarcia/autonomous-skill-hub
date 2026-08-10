@@ -1,12 +1,25 @@
 export type Ticket = {
   id: number; ado_id: number; org: string; project: string
-  current_phase: string; status: string; created_at: string; updated_at: string
+  status: string; created_at: string; updated_at: string
 }
 export type Run = {
   id: number; phase: string; instructions: string | null
   status: string; started_at: string | null; finished_at: string | null
+  artifact_state: string | null; artifact_path: string | null
 }
-export type TicketDetail = { ticket: Ticket; runs: Run[]; log_tail: string }
+export type Huella = {
+  ruta: string; existe: boolean; archivos: number; bytes: number; nombres: string[]
+}
+// `disponible: false` no lleva estado: una fase que no se puede lanzar no tiene nada
+// que informar. El resto de campos solo aparecen si hubo alguna corrida.
+export type Fase = {
+  fase: string; disponible: boolean
+  estado?: "pendiente" | "corriendo" | "ok" | "parcial" | "error"
+  corridas?: number; fallidas?: number
+  en?: string | null; duracion_s?: number | null; motivo?: string; huella?: Huella
+}
+export type Artefacto = { ruta: string; texto: string; bytes: number; truncado: boolean }
+export type TicketDetail = { ticket: Ticket; fases: Fase[]; runs: Run[]; log_tail: string }
 // El runner corre de uno en uno entre TODOS los proyectos: esto es lo que permite
 // explicar por qué no se puede lanzar, en vez de fallar con un 409 mudo.
 export type ActiveRun = {
@@ -35,6 +48,9 @@ export const api = {
   tickets: () => fetch("/api/tickets").then(r => json<Ticket[]>(r)),
   activeRun: () => fetch("/api/runs/active").then(r => json<ActiveRun | null>(r)),
   detail: (id: number) => fetch(`/api/tickets/${id}`).then(r => json<TicketDetail>(r)),
+  artefacto: (id: number, ruta: string) =>
+    fetch(`/api/tickets/${id}/artefacto?ruta=${encodeURIComponent(ruta)}`)
+      .then(r => json<Artefacto>(r)),
   create: (ado_id: number, project: string) =>
     fetch("/api/tickets", {
       method: "POST", headers: { "Content-Type": "application/json" },
