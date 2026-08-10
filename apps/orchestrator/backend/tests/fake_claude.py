@@ -27,7 +27,11 @@ if os.environ.get("FAKE_SKILL_LEAK") == "1":
         "HUELLA: parcial — docs/tickets/<id>-analysis.md\n"
         "HUELLA: nada — <motivo>\n"
     )
-    print('{"type":"tool_result","text":' + json.dumps(cuerpo) + '}')
+    # ensure_ascii=False: así es como el CLI real (Node) vuelca el stream-json — sin
+    # escapar el guion largo a `—`. Con el escape por defecto de json.dumps, los
+    # tres sellos de esta prosa nunca calzaban con la regex y el test de anclaje
+    # pasaba sin ejercitar nada (`hits` tenía un solo elemento: el sello real).
+    print('{"type":"tool_result","text":' + json.dumps(cuerpo, ensure_ascii=False) + '}')
 sello = os.environ.get("FAKE_HUELLA")
 if sello:
     # Simula el sello de cierre obligatorio de las skills.

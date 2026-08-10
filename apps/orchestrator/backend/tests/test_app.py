@@ -226,6 +226,24 @@ def test_sello_legado_PLAN_se_sigue_entendiendo(client, monkeypatch):
     assert app.leer_huella(log)[0] == "nada"
 
 
+def test_leer_huella_con_la_forma_real_del_stream_json(tmp_path):
+    """El log real de `claude -p --output-format stream-json` no es una línea plana:
+    el sello viaja anidado en `message.content[].text`, seguido en la misma línea por
+    `stop_reason`, `usage`, `session_id`, `uuid` y más. Con `(.+)` voraz, `leer_huella`
+    devolvía la ruta con toda esa cola pegada detrás — justo lo que la Fase de guardias
+    (Tarea 4) usaría como ruta servible."""
+    import app
+    linea = (
+        '{"type":"assistant","message":{"content":[{"type":"text",'
+        '"text":"resumen. HUELLA: ok — docs/tickets/3323-analysis.md"}],'
+        '"stop_reason":null},"session_id":"sess-1","uuid":"uuid-1",'
+        '"timestamp":"2026-08-10T00:00:00Z","request_id":"req_1"}\n'
+    )
+    log = tmp_path / "run.log"
+    log.write_text(linea, encoding="utf-8")
+    assert app.leer_huella(log) == ("ok", "docs/tickets/3323-analysis.md")
+
+
 def test_current_phase_ya_no_existe(client):
     import app
     with app.db() as c:

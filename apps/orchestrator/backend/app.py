@@ -53,8 +53,15 @@ def now() -> str:
 
 
 # El sello de cierre de las skills. Se acepta `PLAN:` como alias legado porque los logs
-# de las corridas anteriores al contrato único se escribieron así.
-SELLO = re.compile(r"(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*(.+)")
+# de las corridas anteriores al contrato único se escribieron así. El log real de
+# `claude -p --output-format stream-json` no se parsea como JSON aquí: el sello viaja
+# anidado en `message.content[].text`, seguido de `"`, `stop_reason`, `usage`,
+# `session_id`, etc. en la misma línea. Por eso el resto del sello para en el primer
+# carácter que no puede formar parte de su texto — la comilla o la barra invertida que
+# cierran el campo JSON — en vez de tragarse voraz el resto de la línea con `.+`. En un
+# log plano sin JSON (los legados con `PLAN:`) no hay comillas ni barras, así que el
+# comportamiento no cambia: la captura llega hasta el fin de línea igual que antes.
+SELLO = re.compile(r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*([^"\\]+)')
 LEGADO = {"validado": "ok", "sin-validar": "parcial", "no-escrito": "nada"}
 
 
@@ -74,16 +81,6 @@ def leer_huella(log_path: Path) -> tuple[str, str] | None:
     if not hits:
         return None
     estado, resto = hits[-1]
-    resto = resto.strip()
-    # `(.+)` es voraz y el log no está parseado como JSON: si el sello vino en una
-    # línea `{"type":"assistant","text":"...HUELLA: ..."}`, la captura se traga el
-    # `"}` de cierre del objeto. Se recorta como sufijo literal, no como conjunto de
-    # caracteres (`.strip('"')` no lo haría: el último carácter es `}`, no `"`).
-    if resto.endswith('"}'):
-        resto = resto[:-2].strip()
-    resto = resto.strip('"')
-    if resto.endswith("\\n"):
-        resto = resto[:-2]
     return LEGADO.get(estado, estado), resto.strip()
 
 
