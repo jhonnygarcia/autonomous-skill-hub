@@ -1,7 +1,7 @@
 # Estado del proyecto — Autonomous Skill Hub
 
 > Documento vivo. Actualízalo al cerrar cada hito o al tomar una decisión.
-> Última actualización: 2026-08-10 (Fase 2 construida y validada sobre el 3323)
+> Última actualización: 2026-08-10 (avance por fases, huellas y timeline — implementado)
 
 ## Propósito
 
@@ -17,7 +17,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 |---|---|---|
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables — 📐 **avance por fases + timeline diseñado, sin implementar** |
+| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables + **avance por fases, huellas y timeline implementados** (2026-08-10) — ⚠️ sin corrida real que lo ejercite todavía |
 | 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Construida y validada** (3323) — skill **v0.4.2**, n=1 |
 | 2b — Del plan al código | Ejecutar el plan: escribir código, rama, PR | 📋 Futura — la Fase 2 se quedó deliberadamente en el documento |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
@@ -92,11 +92,13 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
     es la interfaz: si sale mal, se ve en el archivo y se re-corre la Fase 1 sola.
 13. **El estado de una corrida no se deduce del código de salida** (2026-08-10).
     `claude -p` sale con 0 aunque el agente se detenga sin hacer nada, así que `planned`
-    llegó a significar "el subproceso no petó". Ahora la skill cierra con un sello
-    (`PLAN: validado` | `sin-validar` | `no-escrito`) y el runner decide por la **última**
-    coincidencia en el log. Ver "Lo aprendido" para por qué *última* y no *presente*.
+    llegó a significar "el subproceso no petó". Ahora la skill cierra con un sello y el
+    runner decide por la **última** coincidencia en el log. Ver "Lo aprendido" para por
+    qué *última* y no *presente*. **Generalizado el 2026-08-10**: el sello es
+    `HUELLA: <ok|parcial|nada> — <ruta>`, lo cierran **las dos** skills, y rige toda
+    fase. `PLAN:` se conserva solo como alias legado para no romper logs viejos.
 14. **El avance vive en `runs`, no en una columna de estado** (2026-08-10, spec
-    `2026-08-10-avance-por-fases-y-timeline-design.md`, **aprobado y sin implementar**).
+    `2026-08-10-avance-por-fases-y-timeline-design.md`, **implementado el 2026-08-10**).
     El sello `PLAN:` se generaliza a `HUELLA: <ok|parcial|nada> — <ruta>` para toda fase,
     `runs` gana la huella, `current_phase` se borra y `tickets.status` pasa a calcularse.
     La UI del ticket se convierte en un recorrido de fases con la acción y el artefacto
@@ -189,12 +191,44 @@ Estes como espejo en vez de ABF —y tenía razón: XPO es REST + OAuth como Est
 ABF no tiene token— y **leyó los 9 archivos que cita**, así que los números de línea no
 están inventados.
 
+## Cuarta jornada — 2026-08-10 (tarde): avance por fases, huellas y timeline
+
+**Implementado el spec entero**, con `subagent-driven-development`: 8 tareas, 16 commits
+(`8eeb632..04afa60`) más la oleada de la revisión final. Plan en
+`docs/superpowers/plans/2026-08-10-avance-por-fases-y-timeline.md`, con las casillas
+marcadas. Backend: **62 tests** (antes 18). Frontend: build y lint en verde.
+
+Lo que hay ahora que antes no había: las dos skills cierran con `HUELLA:`; `runs` guarda
+`artifact_state` y `artifact_path`; `current_phase` desapareció y `tickets.status` se
+**calcula** de las corridas; `GET /tickets/{id}` devuelve `fases`; hay un visor de
+artefactos (`GET /tickets/{tid}/artefacto`) y un `Timeline.tsx` que pinta el recorrido con
+el artefacto legible dentro de la app.
+
+**Lo que más costó no fue construirlo, fue que la revisión lo tumbara tres veces.** El
+visor de artefactos necesitó **tres rondas** de arreglo, cada una cerrando un agujero que
+la anterior había abierto: (1) `..` sin normalizar dejaba leer `.env` y `.git/config` del
+repo del cliente y de los repos hermanos; (2) al resolver las rutas para cerrar eso, una
+declarada que resuelve a la raíz se volvió comodín (`HUELLA: ok — ..` es alcanzable); (3)
+el predicado que arreglaba eso fundía dos preguntas en un `any` y volvía a fallar con
+raíces anidadas (un `extra_dir` que contiene al `repo_path`). Cerrado y verificado con
+**638 vectores** contra el endpoint real —seis configuraciones de raíces, junctions NTFS,
+ADS, nombres 8.3, UNC y comodines de toda grafía—: cero fugas, y los 30 casos legítimos
+siguen sirviendo.
+
+**Falta la prueba de fuego.** Ninguna `HUELLA:` real ha pasado nunca por la tubería: todo
+lo verificado del contrato de cierre viene de `fake_claude.py`. Ver "Pendientes".
+
 ## Pendientes inmediatos
 
-- [ ] **Implementar el avance por fases y el timeline** — spec aprobado en
-  `docs/superpowers/specs/2026-08-10-avance-por-fases-y-timeline-design.md`, **sin plan de
-  implementación todavía**. Es lo siguiente: sin él, la fase que escriba código producirá
-  ramas, diffs y resultados de tests que no tendrían dónde vivir en la UI.
+- [ ] **Una corrida real con el plugin v0.5.1** sobre `ProvidenceTMSTenant`. Es lo único
+  que prueba que el agente de verdad estampa el sello como última línea y que el recorrido
+  skill → log → BD → API → UI → visor se cierra fuera del laboratorio. Hoy los 5 logs
+  históricos son **anteriores al contrato** y no contienen ningún sello, así que el 3322 y
+  el 3323 salen legítimamente en rojo y **sin artefacto que abrir** — el visor no se puede
+  ejercitar con los datos que hay.
+- [ ] **Repaso visual del timeline.** Sigue sin poder verificarse: el MCP de
+  chrome-devtools no puede adjuntarse porque el perfil ya lo tiene abierto el navegador de
+  Jhonny (pide `--isolated`). Se resuelve solo cuando haya una corrida real que mirar.
 - [ ] **Segundo ticket para la Fase 2, y que sea el 3320.** Está aceptada con **n=1**.
   Otro carrier del #3319 mediría repetibilidad del caso fácil: mismo padre con su
   *Definition of Done*, mismo espejo, misma tarea de "replica esto". El **3320**
@@ -217,7 +251,38 @@ están inventados.
   del botón *Planificar* y el "Enviar ajuste" que solo lanza `analyze` **los mata el
   spec del timeline**, no hace falta arreglarlos aparte.
 
-## Lo aprendido (2026-08-10)
+## Lo aprendido (2026-08-10, tarde)
+
+- **Un test verde no es una prueba; a veces es una coartada.** Salieron **cinco** tests
+  placebo, todos con la misma forma: el montaje no puede producir el fallo que el test
+  dice prevenir. El de anclaje del sello pasaba igual con `hits[0]` porque
+  `json.dumps` escapaba el guion largo a `—` y los sellos señuelo nunca casaban. La
+  batería de travesía de rutas montaba un **archivo** declarado, contra el que la travesía
+  era imposible por construcción — el caso peligroso (directorio declarado) no lo tocaba
+  ninguno de los 8 tests, y por eso 50 tests pasaron en verde con un agujero que dejaba
+  leer `.env`. `test_current_phase_ya_no_existe` corría sobre una BD recién creada, cuyo
+  `CREATE TABLE` nunca tuvo esa columna, así que jamás ejecutaba el `DROP COLUMN` que
+  decía proteger. **La pregunta que los destapa: ¿qué tendría que romperse para que este
+  test fallara?** Si no hay respuesta concreta, el test no prueba nada.
+- **Arreglar un agujero abre el siguiente si arreglas la grafía y no la propiedad.** El
+  visor necesitó tres rondas. La segunda cerró `''` filtrando esa cadena en el SQL y
+  **amplió** el comodín a `'.'`, `'..'` y `'x/..'`. La que funcionó no filtra grafías:
+  exige que la ruta declarada, ya resuelta, quede **estrictamente dentro** de una raíz.
+  Filtrar cadenas es jugar al gato y al ratón; afirmar una propiedad se acaba.
+- **La revisión adversarial encuentra lo que la revisión amable no.** Los tres agujeros
+  del visor salieron de pedirle al revisor que *atacara* el endpoint con vectores
+  concretos, no que lo leyera. El que solo leyó el código dio Spec ✅.
+- **Los huecos viven en las costuras, y ninguna revisión por tarea los ve.** La Tarea 1
+  escribió en las skills "explica la reserva en el resumen, **no** en la línea del sello";
+  las Tareas 3 y 6 necesitaban esa reserva para mostrarla, como pedía el diseño. Cada
+  tarea era correcta por separado. Solo la revisión de la rama entera lo vio.
+- **El plan es una hipótesis, no una verdad.** Dos bloques de código que escribí en el
+  plan estaban mal y los tests del propio plan los habrían tapado: un `.strip("\n")` que
+  trata su argumento como conjunto de caracteres, y una expresión que producía la ruta de
+  un directorio cuando la huella tenía un solo archivo dentro. Un implementador que copia
+  el plan al pie de la letra hereda sus bugs.
+
+## Lo aprendido (2026-08-10, mañana)
 
 - **Una comprobación puede encontrarse a sí misma.** El runner decidía si hubo plan
   buscando el sello `PLAN: validado` en los últimos 4 KB del log. Pero el cuerpo de la
@@ -296,8 +361,11 @@ están inventados.
   ni el 3311 ni el 3322 tienen. Hace falta un ticket con captura.
 - **El stepper de fases se retiró de la UI** al rediseñarla: mostraba 6 fases con 5
   apagadas en cada fila. Vuelve cuando las fases 2-4 existan de verdad.
-- **Las columnas de fase del orquestador ya no están deshabilitadas: no están.**
-  Al llegar la Fase 2 hay que decidir cómo se representa el avance por fases.
+- **El contrato del sello nunca ha corrido de verdad.** Todo lo que sabemos de él viene de
+  `fake_claude.py`. Que el agente estampe `HUELLA:` como última línea, con `/` y no `\`,
+  es una instrucción en un markdown: hasta que una corrida real lo demuestre, es una
+  hipótesis. Si declara la ruta con barras invertidas, la regex captura solo el primer
+  segmento y el visor pasa a servir todo ese directorio, sin fallar de forma visible.
 - **Permisos del runner**: corre con `--permission-mode acceptEdits` más una lista
   explícita de `--allowedTools` (sin ella el MCP se auto-deniega en headless), ahora
   ramificada por fase (`PHASE_ALLOWED_TOOLS`; `analyze` va con la lista vacía).
@@ -319,40 +387,39 @@ están inventados.
 Prompt sugerido — abrir Claude Code en el hub
 (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md para situarte. El objetivo de esta sesión es **implementar el
-> avance por fases y el timeline**, cuyo diseño ya está aprobado y committeado en
-> `docs/superpowers/specs/2026-08-10-avance-por-fases-y-timeline-design.md`.
+> Lee docs/STATUS.md para situarte. El avance por fases y el timeline **ya están
+> implementados**; lo que falta es **ejercitarlos con una corrida real**, porque hasta
+> ahora todo el contrato del sello se ha verificado solo contra el doble de tests.
 >
-> 1. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
+> 1. **Actualiza el plugin instalado a la v0.5.1** (`claude plugin update`) y comprueba
+>    que la versión efectiva subió: si no cambia, el cambio committeado aquí no llega.
+> 2. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
 >    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
->    `apps/orchestrator/frontend` (`npm run dev`). Antes de dar nada por bueno, comprueba
->    que el proceso que escucha en el 8000 arrancó **después** de la última modificación
->    de `app.py` — ya nos engañó tres veces.
-> 2. **Escribe el plan de implementación** de ese spec con la skill `writing-plans`, y
->    déjalo en `docs/superpowers/plans/`. Ojo a dos cosas que el spec pide y son fáciles
->    de dejarse: que `HUELLA:` se ancla en la **última** coincidencia (el cuerpo de la
->    skill viaja en el log y contiene los sellos literalmente), y que el endpoint del
->    visor valida la ruta de verdad — declarada por una corrida de ese ticket, resuelta
->    con `realpath` dentro de los repos del ticket, archivo regular, tope de 512 KB.
-> 3. **Ejecútalo** con `subagent-driven-development`, tarea por tarea. Trabajamos
->    directamente sobre `main`: te lo autorizo desde ya, no crees ramas.
-> 4. **Recorre la UI resultante** — es la comprobación visual que arrastramos desde el
->    rediseño. Si el MCP de chrome-devtools no puede adjuntarse porque mi navegador ya
->    está abierto, dímelo y la hago yo; no cierres mi navegador.
-> 5. Al cerrar, actualiza docs/STATUS.md y los checkboxes del plan.
->
-> Después de esto viene el **3320** como segundo ticket de la Fase 2 — está explicado en
-> "Pendientes inmediatos" por qué ese y no otro carrier del #3319.
+>    `apps/orchestrator/frontend` (`npm run dev`). Comprueba que el proceso que escucha en
+>    el 8000 arrancó **después** de la última modificación de `app.py` — nos ha engañado
+>    cuatro veces ya, la última en esta misma sesión.
+> 3. **Corre la Fase 1 sobre el 3322** desde la UI. Cuando termine, comprueba en el log
+>    que el agente estampó `HUELLA: ok — docs/tickets/3322-analysis.md` como **última
+>    línea**, y con separador `/`. Es la prueba que nunca se ha hecho.
+> 4. **Recorre el timeline**: seis filas con las cuatro últimas apagadas, la fase de
+>    análisis en verde con su hora y su huella, y el artefacto abriéndose dentro de la
+>    app al pulsar su nombre. Si el MCP de chrome-devtools no puede adjuntarse porque mi
+>    navegador ya está abierto, dímelo y lo miro yo; **no cierres mi navegador**.
+> 5. Si eso pasa, encadena la **Fase 2 sobre el 3320** — el segundo ticket que la Fase 2
+>    necesita, explicado en "Pendientes inmediatos" por qué ese y no otro del #3319.
 
-Contexto que ya no hace falta rehacer: el plugin está instalado a nivel de usuario
-(**v0.4.2**), el TMS configurado (`ADO_ORG` en `.claude/settings.json`), y el proyecto
-dado de alta en la BD del orquestador con `ProvidenceTMSTenant` como repo principal.
-El 3322 y el 3323 ya están analizados, y el 3323 además planificado con su change de
-OpenSpec validado. `ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas
-dejen ahí no hay que versionarlo ni limpiarlo (decisión 15).
+Contexto que ya no hace falta rehacer: el TMS está configurado (`ADO_ORG` en
+`.claude/settings.json`) y el proyecto dado de alta en la BD del orquestador con
+`ProvidenceTMSTenant` como repo principal. El 3322 y el 3323 están analizados, y el 3323
+además planificado con su change de OpenSpec validado — pero **sus corridas son anteriores
+al contrato del sello**, así que en el timeline salen en rojo y sin artefacto. Eso es
+correcto, no es un bug: el backfill leyó sus logs y no había ningún sello que recuperar.
+`ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas dejen ahí no hay que
+versionarlo ni limpiarlo (decisión 15).
 
-Cuatro trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
+Cinco trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
 plugin instalado; **no usar `uvicorn --reload`**, que deja procesos huérfanos reteniendo
 el 8000 y sirve código viejo sin avisar; el paquete de OpenSpec es **`@fission-ai/openspec`**,
-no `openspec`; y **el código de salida de `claude -p` no dice si el agente hizo algo** —
-para eso está el sello, que este spec generaliza a `HUELLA:`.
+no `openspec`; **el código de salida de `claude -p` no dice si el agente hizo algo** —
+para eso está el sello `HUELLA:`; y **un test verde puede ser una coartada**: antes de
+fiarte de uno, pregúntale qué tendría que romperse para que fallara.

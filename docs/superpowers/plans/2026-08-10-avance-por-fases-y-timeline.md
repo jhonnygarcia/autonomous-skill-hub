@@ -1,6 +1,15 @@
 # Avance por fases, huellas y timeline — Plan de implementación
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Ejecutado el 2026-08-10** con `subagent-driven-development`, 8 tareas, 16 commits
+> (`8eeb632..04afa60`) más la oleada de arreglos de la revisión final. Las casillas están
+> marcadas; lo que se desvió del texto de abajo está anotado en `docs/STATUS.md`, sección
+> "Lo aprendido". Dos correcciones que este documento arrastra y que el código **no**
+> sigue: el `leer_huella` de la Tarea 2 tenía un `.strip("\n")` que trata su argumento
+> como conjunto de caracteres, y la expresión de `rutas` de la Tarea 6 producía la ruta
+> del directorio cuando la huella tenía un solo archivo dentro. Ambas se arreglaron en
+> ejecución; el código manda sobre este plan.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Que cada corrida declare qué artefacto dejó, que el backend derive de esas
 declaraciones el avance del ticket, y que la UI lo muestre como un recorrido de fases con
@@ -64,7 +73,7 @@ shadcn (frontend), oxlint. Markdown para las skills del plugin.
 - Produces: el formato literal `HUELLA: <ok|parcial|nada> — <ruta o motivo>` que la Tarea 2
   parsea con la expresión regular `r"HUELLA: (ok|parcial|nada)\s*[—-]\s*(.+)"`.
 
-- [ ] **Step 1: Añadir el sello a `ticket-comprehension`**
+- [x] **Step 1: Añadir el sello a `ticket-comprehension`**
 
 En `plugins/ticket-agent/skills/ticket-comprehension/SKILL.md`, justo **después** del
 bloque `## 4. Cierre según autonomía` y **antes** de `## Manejo de errores`, insertar:
@@ -84,7 +93,7 @@ El orquestador lee esta línea para decidir si la corrida vale: el código de sa
 CLI no lo dice, porque sale en 0 aunque te hayas detenido sin escribir nada.
 ```
 
-- [ ] **Step 2: Cambiar el sello de `change-planning`**
+- [x] **Step 2: Cambiar el sello de `change-planning`**
 
 En `plugins/ticket-agent/skills/change-planning/SKILL.md`, en la sección
 `**Regla obligatoria de cierre.**` de §7, sustituir el párrafo introductorio y las tres
@@ -106,7 +115,7 @@ aunque el agente se haya detenido sin escribir nada.
   `npx` no está disponible, o `openspec init` falló.
 ```
 
-- [ ] **Step 3: Actualizar las cuatro referencias al sello viejo en "Manejo de errores"**
+- [x] **Step 3: Actualizar las cuatro referencias al sello viejo en "Manejo de errores"**
 
 En el mismo archivo, en `## Manejo de errores`, sustituir cada mención:
 
@@ -117,12 +126,12 @@ En el mismo archivo, en `## Manejo de errores`, sustituir cada mención:
 | `cierra con \`PLAN: validado\` o \`PLAN: sin-validar\` según haya pasado la validación` | `cierra con \`HUELLA: ok\` o \`HUELLA: parcial\` según haya pasado la validación` |
 | `cierra con \`PLAN: sin-validar\`` (validate falla dos veces) | `cierra con \`HUELLA: parcial\`` |
 
-- [ ] **Step 4: Subir la versión del plugin**
+- [x] **Step 4: Subir la versión del plugin**
 
 En `plugins/ticket-agent/.claude-plugin/plugin.json`, cambiar `"version": "0.4.2"` por
 `"version": "0.5.0"`.
 
-- [ ] **Step 5: Verificar que no queda ningún `PLAN:` en las skills y que el plugin valida**
+- [x] **Step 5: Verificar que no queda ningún `PLAN:` en las skills y que el plugin valida**
 
 ```bash
 cd D:/Companies/Jorge.Gutierrez/autonomous-skill-hub
@@ -131,7 +140,7 @@ grep -rn "HUELLA:" plugins/ticket-agent/skills/ # esperado: 3 en cada SKILL.md +
 claude plugin validate .                        # esperado: OK
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/ticket-agent
@@ -158,7 +167,7 @@ git commit -m "feat(ticket-agent): las dos skills cierran con el sello HUELLA (v
   - La columna `tickets.current_phase` deja de existir.
   - Helper de test `_use_fake_claude(monkeypatch, fail=False, huella=None, skill_leak=False)`.
 
-- [ ] **Step 1: Enseñar a `fake_claude.py` a emitir el sello nuevo**
+- [x] **Step 1: Enseñar a `fake_claude.py` a emitir el sello nuevo**
 
 Sustituir en `apps/orchestrator/backend/tests/fake_claude.py` el bloque
 `FAKE_SKILL_LEAK` y el bloque `sello` por:
@@ -182,7 +191,7 @@ if sello:
     print('{"type":"assistant","text":"resumen del cierre. HUELLA: ' + sello + '"}')
 ```
 
-- [ ] **Step 2: Adaptar el helper de tests**
+- [x] **Step 2: Adaptar el helper de tests**
 
 En `apps/orchestrator/backend/tests/test_app.py`, sustituir `_use_fake_claude` por:
 
@@ -198,7 +207,7 @@ def _use_fake_claude(monkeypatch, fail=False, huella=None, skill_leak=False):
         monkeypatch.setenv("FAKE_HUELLA", huella)
 ```
 
-- [ ] **Step 3: Escribir los tests que fallan (los cuatro casos del sello, en ambas fases)**
+- [x] **Step 3: Escribir los tests que fallan (los cuatro casos del sello, en ambas fases)**
 
 Sustituir en `test_app.py` los siete tests que hoy hablan de `plan_sello`/`PLAN:`
 (`test_run_design_deja_el_ticket_planned`, `test_design_sello_validado_deja_planned`,
@@ -285,7 +294,7 @@ def test_current_phase_ya_no_existe(client):
 Además, en `test_create_and_list_ticket` (línea 13) **quitar** `and t["current_phase"] == "analyze"`
 del assert, que si no falla al desaparecer la columna.
 
-- [ ] **Step 4: Correr los tests y ver que fallan**
+- [x] **Step 4: Correr los tests y ver que fallan**
 
 ```bash
 cd apps/orchestrator/backend
@@ -293,7 +302,7 @@ cd apps/orchestrator/backend
 ```
 Esperado: FAIL — `KeyError: 'artifact_state'` y `AttributeError: module 'app' has no attribute 'leer_huella'`.
 
-- [ ] **Step 5: Añadir las columnas y borrar `current_phase`**
+- [x] **Step 5: Añadir las columnas y borrar `current_phase`**
 
 En `apps/orchestrator/backend/app.py`, dentro de `init_db`, ampliar la tupla del bucle
 `for alter in (...)`:
@@ -326,7 +335,7 @@ añadir tras `log_path TEXT,`:
               artifact_path TEXT,
 ```
 
-- [ ] **Step 6: Escribir `leer_huella` y aplicarla a toda fase**
+- [x] **Step 6: Escribir `leer_huella` y aplicarla a toda fase**
 
 En `app.py`, sustituir la función `now()` por `now()` seguida de (es decir, insertar
 justo después de `now()`):
@@ -373,7 +382,7 @@ dos últimas líneas) por:
         set_ticket(ticket["id"])   # solo toca updated_at: el estado se calcula al leer
 ```
 
-- [ ] **Step 7: Dejar de escribir `tickets.status` como si fuera fuente**
+- [x] **Step 7: Dejar de escribir `tickets.status` como si fuera fuente**
 
 `set_ticket` ya rellena `updated_at` solo, así que basta con quitarle el `status` a las
 otras dos llamadas. En `execute_run`, cambiar `set_ticket(ticket["id"], status="running")`
@@ -387,7 +396,7 @@ def set_ticket(tid: int, **fields):
     fuente es una fuente que algún día miente."""
 ```
 
-- [ ] **Step 8: Backfill de las corridas que ya existen**
+- [x] **Step 8: Backfill de las corridas que ya existen**
 
 Al final de `init_db`, dentro del mismo `with db() as c:`:
 
@@ -406,7 +415,7 @@ Al final de `init_db`, dentro del mismo `with db() as c:`:
 
 `leer_huella` tiene que quedar **definida antes** de `init_db` en el archivo.
 
-- [ ] **Step 9: Correr toda la batería**
+- [x] **Step 9: Correr toda la batería**
 
 ```bash
 cd apps/orchestrator/backend
@@ -418,7 +427,7 @@ comprueban el argv o el log, no el estado del ticket, así que no deberían toca
 los que afirmen `status == "analyzed"`, que ahora exige sello: pásales
 `huella="ok — docs/tickets/x.md"` en su `_use_fake_claude`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/orchestrator/backend
@@ -444,7 +453,7 @@ git commit -m "feat(orchestrator): runs guarda la huella declarada; el sello rig
   - `ticket["status"]` sale calculado en detalle y en lista, con las mismas etiquetas de
     siempre (`queued|running|analyzed|planned|error`).
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir al final de `apps/orchestrator/backend/tests/test_app.py`:
 
@@ -534,7 +543,7 @@ def test_fase_en_error_lleva_el_motivo_del_sello(client, monkeypatch):
     assert "huella" not in f
 ```
 
-- [ ] **Step 2: Correr los tests y ver que fallan**
+- [x] **Step 2: Correr los tests y ver que fallan**
 
 ```bash
 cd apps/orchestrator/backend
@@ -542,7 +551,7 @@ cd apps/orchestrator/backend
 ```
 Esperado: FAIL con `KeyError: 'fases'`.
 
-- [ ] **Step 3: Escribir el plegado**
+- [x] **Step 3: Escribir el plegado**
 
 En `app.py`, insertar antes de `@app.get("/tickets")`:
 
@@ -615,7 +624,7 @@ def ticket_out(t: sqlite3.Row, fases: list[dict]) -> dict:
     return {**dict(t), "status": status_plegado(fases)}
 ```
 
-- [ ] **Step 4: Cablearlo en los dos endpoints**
+- [x] **Step 4: Cablearlo en los dos endpoints**
 
 Sustituir `list_tickets` y `get_ticket` por:
 
@@ -646,7 +655,7 @@ def get_ticket(tid: int):
     return {"ticket": ticket_out(t, fases), "fases": fases, "runs": runs, "log_tail": tail}
 ```
 
-- [ ] **Step 5: Correr toda la batería**
+- [x] **Step 5: Correr toda la batería**
 
 ```bash
 cd apps/orchestrator/backend
@@ -654,7 +663,7 @@ cd apps/orchestrator/backend
 ```
 Esperado: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/backend
@@ -675,7 +684,7 @@ git commit -m "feat(orchestrator): el avance se pliega de runs; tickets.status p
   `{"ruta": str, "texto": str, "bytes": int, "truncado": bool}`. Cualquier ruta que no
   pase las cuatro validaciones devuelve `400` **sin leer nada**.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Añadir al final de `test_app.py`:
 
@@ -703,13 +712,13 @@ def test_artefacto_sirve_lo_declarado(client, monkeypatch, tmp_path):
 def test_artefacto_sirve_un_hijo_directo_de_un_directorio_declarado(client, monkeypatch, tmp_path):
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
-    (d / "tasks.md").write_text("- [ ] uno", encoding="utf-8")
+    (d / "tasks.md").write_text("- [x] uno", encoding="utf-8")
     _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     r = client.get(f"/tickets/{tid}/artefacto",
                    params={"ruta": "openspec/changes/3323-xpo/tasks.md"})
-    assert r.status_code == 200 and r.json()["texto"] == "- [ ] uno"
+    assert r.status_code == 200 and r.json()["texto"] == "- [x] uno"
 
 
 def test_artefacto_rechaza_ruta_no_declarada(client, monkeypatch, tmp_path):
@@ -758,7 +767,7 @@ def test_artefacto_trunca_a_512kb(client, monkeypatch, tmp_path):
     assert "\ufffd" not in r["texto"]      # no se parte un carácter multibyte al cortar
 ```
 
-- [ ] **Step 2: Correr los tests y ver que fallan**
+- [x] **Step 2: Correr los tests y ver que fallan**
 
 ```bash
 cd apps/orchestrator/backend
@@ -766,7 +775,7 @@ cd apps/orchestrator/backend
 ```
 Esperado: FAIL con `404` (el endpoint no existe).
 
-- [ ] **Step 3: Escribir el endpoint**
+- [x] **Step 3: Escribir el endpoint**
 
 Añadir al final de `app.py`:
 
@@ -820,7 +829,7 @@ def artefacto(tid: int, ruta: str):
 Añadir `PurePosixPath` al import de `pathlib` en la cabecera:
 `from pathlib import Path, PurePosixPath`. `codecs` sigue importado: lo usa `execute_run`.
 
-- [ ] **Step 4: Correr los tests**
+- [x] **Step 4: Correr los tests**
 
 ```bash
 cd apps/orchestrator/backend
@@ -828,7 +837,7 @@ cd apps/orchestrator/backend
 ```
 Esperado: PASS en todos, incluidos los 8 de `artefacto`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/backend
@@ -853,7 +862,7 @@ git commit -m "feat(orchestrator): visor de artefactos con validación de ruta e
     `""` si se puede lanzar).
   - `puedePlanificar` **desaparece**.
 
-- [ ] **Step 1: Añadir los tipos y la llamada en `api.ts`**
+- [x] **Step 1: Añadir los tipos y la llamada en `api.ts`**
 
 Sustituir el bloque de tipos `Ticket`/`Run`/`TicketDetail` por:
 
@@ -890,7 +899,7 @@ Y añadir al objeto `api`, tras `detail`:
       .then(r => json<Artefacto>(r)),
 ```
 
-- [ ] **Step 2: Sustituir `puedePlanificar` por la regla general en `estado.ts`**
+- [x] **Step 2: Sustituir `puedePlanificar` por la regla general en `estado.ts`**
 
 Borrar la función `puedePlanificar` entera (líneas 44-51) y añadir en su lugar:
 
@@ -958,7 +967,7 @@ Y ampliar el import de la primera línea del archivo:
 import type { ActiveRun, Fase, Ticket } from "@/api"
 ```
 
-- [ ] **Step 3: Dejar `TicketDetail.tsx` compilando (arreglo mínimo, se rehace en la Tarea 6)**
+- [x] **Step 3: Dejar `TicketDetail.tsx` compilando (arreglo mínimo, se rehace en la Tarea 6)**
 
 En `apps/orchestrator/frontend/src/TicketDetail.tsx`, quitar `puedePlanificar` del import
 de la línea 6 y sustituir el botón *Planificar* (líneas 35-41) por:
@@ -971,7 +980,7 @@ de la línea 6 y sustituir el botón *Planificar* (líneas 35-41) por:
           </Button>
 ```
 
-- [ ] **Step 4: Comprobar que compila y pasa el lint**
+- [x] **Step 4: Comprobar que compila y pasa el lint**
 
 ```bash
 cd apps/orchestrator/frontend
@@ -980,7 +989,7 @@ npm run lint
 ```
 Esperado: ambos en verde, sin errores de tipos.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src
@@ -1001,7 +1010,7 @@ git commit -m "feat(orchestrator-ui): tipos de fase y la regla general de habili
 - Produces: `<Timeline fases activo ticketId onRun />` donde
   `onRun: (fase: string, instructions?: string) => void`.
 
-- [ ] **Step 1: Crear `Timeline.tsx`**
+- [x] **Step 1: Crear `Timeline.tsx`**
 
 ```tsx
 import { useState } from "react"
@@ -1182,7 +1191,7 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
 }
 ```
 
-- [ ] **Step 2: Reescribir `TicketDetail.tsx`**
+- [x] **Step 2: Reescribir `TicketDetail.tsx`**
 
 Sustituir el archivo entero por:
 
@@ -1278,7 +1287,7 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
 }
 ```
 
-- [ ] **Step 3: Compilar, lint y comprobación manual**
+- [x] **Step 3: Compilar, lint y comprobación manual**
 
 ```bash
 cd apps/orchestrator/frontend
@@ -1293,7 +1302,7 @@ y comprobar en pantalla:
 - pulsar un nombre de archivo abre el contenido debajo, y volver a pulsarlo lo cierra;
 - `▾` abre la caja de ajuste **de esa fase**.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src
@@ -1312,7 +1321,7 @@ git commit -m "feat(orchestrator-ui): timeline de fases con visor de artefactos"
 - Consumes: `ticket.status` ya plegado por el backend (Tarea 3).
 - Produces: nada nuevo hacia otras tareas.
 
-- [ ] **Step 1: Que el botón de la lista diga la verdad**
+- [x] **Step 1: Que el botón de la lista diga la verdad**
 
 El botón de la fila lanza siempre `analyze`, y su rótulo se decide con `t.status`. Ahora
 que `status` es un plegado de todas las fases, `planned` haría que dijera "Correr" para
@@ -1330,7 +1339,7 @@ una fase ya corrida. Sustituir el bloque de botones (líneas 40-47) de
               </div>
 ```
 
-- [ ] **Step 2: Compilar y lint**
+- [x] **Step 2: Compilar y lint**
 
 ```bash
 cd apps/orchestrator/frontend
@@ -1338,12 +1347,12 @@ npm run build && npm run lint
 ```
 Esperado: verde.
 
-- [ ] **Step 3: Comprobar en pantalla**
+- [x] **Step 3: Comprobar en pantalla**
 
 En la lista del proyecto, un ticket con plan hecho tiene que salir como **planificado**, y
 seguir saliendo así después de re-correr el análisis — es el defecto que este diseño mata.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src
@@ -1369,7 +1378,7 @@ oscuro, y los componentes la ignoran usando `gray-500`/`gray-100` a mano. El res
 que el tema existe y no se ve. Esta tarea hace que se vea; no añade dependencias ni
 cambia ninguna regla de negocio.
 
-- [ ] **Step 1: Que las insignias de estado usen la paleta y no grises fijos**
+- [x] **Step 1: Que las insignias de estado usen la paleta y no grises fijos**
 
 En `estado.ts`, sustituir el objeto `COLOR` por:
 
@@ -1383,7 +1392,7 @@ const COLOR: Record<string, string> = {
 }
 ```
 
-- [ ] **Step 2: Dar aire y jerarquía al contenedor**
+- [x] **Step 2: Dar aire y jerarquía al contenedor**
 
 En `App.tsx`, sustituir la línea 66 por:
 
@@ -1391,13 +1400,13 @@ En `App.tsx`, sustituir la línea 66 por:
     <div className="mx-auto flex w-full max-w-[92rem] gap-6 p-6">
 ```
 
-- [ ] **Step 3: Cambiar los grises fijos de `ProjectHeader` por tokens**
+- [x] **Step 3: Cambiar los grises fijos de `ProjectHeader` por tokens**
 
 En `ProjectHeader.tsx`, sustituir `text-gray-500` → `text-muted-foreground`,
 `text-gray-600` → `text-foreground/70`, `text-gray-700` → `text-foreground`,
 `text-gray-400` → `text-muted-foreground/70`.
 
-- [ ] **Step 4: Un solo retoque tipográfico global**
+- [x] **Step 4: Un solo retoque tipográfico global**
 
 Al final de `index.css`, dentro del `@layer base` existente, añadir dentro de la regla
 `body`:
@@ -1409,7 +1418,7 @@ Al final de `index.css`, dentro del `@layer base` existente, añadir dentro de l
     }
 ```
 
-- [ ] **Step 5: Compilar, lint y mirar**
+- [x] **Step 5: Compilar, lint y mirar**
 
 ```bash
 cd apps/orchestrator/frontend
@@ -1417,7 +1426,7 @@ npm run build && npm run lint
 ```
 Esperado: verde. Luego recorrer la app: lista, detalle con timeline, ajustes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src
@@ -1428,11 +1437,11 @@ git commit -m "style(orchestrator-ui): la UI usa los tokens del tema en vez de g
 
 ## Verificación final
 
-- [ ] `cd apps/orchestrator/backend && .venv/Scripts/python -m pytest tests/ -v` — todos verdes
-- [ ] `cd apps/orchestrator/frontend && npm run build && npm run lint` — verdes
-- [ ] `claude plugin validate .` desde la raíz del hub — OK
-- [ ] `grep -rn "current_phase\|puedePlanificar\|PLAN:" apps/ plugins/` — sin resultados
-- [ ] Reiniciar el backend **sin `--reload`** y comprobar que el proceso que escucha en el
+- [x] `cd apps/orchestrator/backend && .venv/Scripts/python -m pytest tests/ -v` — todos verdes
+- [x] `cd apps/orchestrator/frontend && npm run build && npm run lint` — verdes
+- [x] `claude plugin validate .` desde la raíz del hub — OK
+- [x] `grep -rn "current_phase\|puedePlanificar\|PLAN:" apps/ plugins/` — sin resultados
+- [x] Reiniciar el backend **sin `--reload`** y comprobar que el proceso que escucha en el
       8000 arrancó **después** de la última modificación de `app.py`
-- [ ] Recorrer el ticket 3323 en la UI: seis fases, artefactos legibles, `▾` por fase
-- [ ] Actualizar `docs/STATUS.md` y marcar los checkboxes de este plan
+- [x] Recorrer el ticket 3323 en la UI: seis fases, artefactos legibles, `▾` por fase
+- [x] Actualizar `docs/STATUS.md` y marcar los checkboxes de este plan
