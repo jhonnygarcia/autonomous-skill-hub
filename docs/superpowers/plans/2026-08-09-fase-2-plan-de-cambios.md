@@ -51,7 +51,7 @@ El backend va entero en `app.py` porque así está hecho el orquestador: un solo
 - Consumes: nada de tareas anteriores.
 - Produces: `POST /tickets/{tid}/run` acepta `{"instructions": str|null, "phase": str}` con `phase` por defecto `"analyze"`. Devuelve `400` si la fase no es ejecutable. Constantes `PHASE_COMMANDS: dict[str,str]` y `PHASE_DONE: dict[str,str]`. La Tarea 2 consume el campo `phase` desde el frontend.
 
-- [ ] **Step 1: Escribir las pruebas que fallan**
+- [x] **Step 1: Escribir las pruebas que fallan**
 
 Añadir en `tests/test_app.py`, justo después de `test_run_success_writes_log_and_states`:
 
@@ -103,12 +103,12 @@ def test_bash_va_acotado_a_openspec(client, monkeypatch):
     assert " Bash " not in log        # nunca Bash a secas
 ```
 
-- [ ] **Step 2: Correr las pruebas y verificar que fallan**
+- [x] **Step 2: Correr las pruebas y verificar que fallan**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "design or fase or acotado or sin_fase" -v`
 Expected: FAIL. `test_run_design_invoca_el_comando_plan` falla porque el log trae `/ticket-agent:analyze`; `test_fase_declarada_pero_no_ejecutable_da_400` falla con `202` en vez de `400`.
 
-- [ ] **Step 3: Añadir las constantes de fase**
+- [x] **Step 3: Añadir las constantes de fase**
 
 Reemplazar la línea 16 de `app.py`:
 
@@ -131,7 +131,7 @@ PHASE_COMMANDS = {
 PHASE_DONE = {"analyze": "analyzed", "design": "planned"}
 ```
 
-- [ ] **Step 4: Aceptar la fase en el cuerpo de la petición**
+- [x] **Step 4: Aceptar la fase en el cuerpo de la petición**
 
 En `app.py`, reemplazar:
 
@@ -148,7 +148,7 @@ class RunIn(BaseModel):
     phase: str = "analyze"  # por defecto, para no romper a quien ya llamaba sin ella
 ```
 
-- [ ] **Step 5: Derivar el comando y el estado final de la fase**
+- [x] **Step 5: Derivar el comando y el estado final de la fase**
 
 En `execute_run`, cambiar la firma:
 
@@ -202,7 +202,7 @@ por:
         set_ticket(ticket["id"], status=PHASE_DONE[phase] if ok else "error")
 ```
 
-- [ ] **Step 6: Validar la fase y propagarla al runner**
+- [x] **Step 6: Validar la fase y propagarla al runner**
 
 En `run_ticket`, insertar la validación justo después de comprobar que el ticket existe, y propagar la fase. La función queda así:
 
@@ -232,17 +232,17 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
 ```
 
-- [ ] **Step 7: Correr las pruebas nuevas y verificar que pasan**
+- [x] **Step 7: Correr las pruebas nuevas y verificar que pasan**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "design or fase or acotado or sin_fase" -v`
 Expected: PASS, 5 pruebas.
 
-- [ ] **Step 8: Correr la suite entera y verificar que no se rompió nada**
+- [x] **Step 8: Correr la suite entera y verificar que no se rompió nada**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: PASS, 24 pruebas (19 previas + 5 nuevas).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -263,7 +263,7 @@ git commit -m "feat(orchestrator): la fase de la corrida decide qué comando se 
 - Consumes: de la Tarea 1, `POST /tickets/{id}/run` con `{instructions, phase}`.
 - Produces: `api.run(id: number, instructions?: string, phase?: string)` y `puedePlanificar(t: Ticket): boolean` exportada desde `estado.ts`.
 
-- [ ] **Step 1: `run()` acepta la fase**
+- [x] **Step 1: `run()` acepta la fase**
 
 En `src/api.ts`, reemplazar:
 
@@ -285,7 +285,7 @@ por:
     }).then(r => json<Run>(r)),
 ```
 
-- [ ] **Step 2: Etiqueta de `planned` y regla de cuándo se puede planificar**
+- [x] **Step 2: Etiqueta de `planned` y regla de cuándo se puede planificar**
 
 En `src/estado.ts`, añadir a los dos diccionarios:
 
@@ -313,7 +313,7 @@ export function puedePlanificar(t: Ticket): boolean {
 }
 ```
 
-- [ ] **Step 3: El botón en el detalle**
+- [x] **Step 3: El botón en el detalle**
 
 En `src/TicketDetail.tsx`, cambiar el import de `@/estado`:
 
@@ -339,7 +339,7 @@ y añadir el botón dentro del `<div className="ml-auto flex gap-2">`, entre el 
           </Button>
 ```
 
-- [ ] **Step 4: Pasar la fase desde App.tsx**
+- [x] **Step 4: Pasar la fase desde App.tsx**
 
 En `src/App.tsx`, reemplazar la línea 102:
 
@@ -353,7 +353,7 @@ por:
                         onRun={(ins, phase) => act(() => api.run(detail.ticket.id, ins, phase))}
 ```
 
-- [ ] **Step 5: Mostrar la fase en el historial de corridas**
+- [x] **Step 5: Mostrar la fase en el historial de corridas**
 
 Con dos fases lanzables, una lista donde todas las corridas se ven iguales deja de
 poder leerse. En `src/TicketDetail.tsx`, dentro del `<li>` del historial, añadir la
@@ -367,19 +367,22 @@ fase justo después del badge de estado:
 `r.phase` ya viene del backend y ya está en el tipo `Run` de `api.ts:5-8`: no hay que
 tocar la API.
 
-- [ ] **Step 6: Verificar tipos y lint**
+- [x] **Step 6: Verificar tipos y lint**
 
 Run: `npm run build && npm run lint`
 Expected: ambos en verde. `npm run build` corre `tsc -b`, así que un `onRun` mal tipado sale aquí.
 
-- [ ] **Step 7: Verificarlo en la UI**
+- [ ] **Step 7: Verificarlo en la UI** — **NO HECHO.** El MCP de chrome-devtools no puede
+      adjuntarse porque el perfil ya está en uso por el navegador de Jhonny, y no se cierra.
+      Verificado por API que el backend sirve el código nuevo y devuelve `400` en una fase no
+      ejecutable, pero el recorrido visual sigue pendiente (ver "Pendientes inmediatos" de STATUS).
 
 Reiniciar el backend **sin `--reload`** (`.venv/Scripts/uvicorn app:app --port 8000`) y con `npm run dev` abrir un ticket. Comprobar:
 - ticket en `queued` → *Planificar* deshabilitado, con el título explicando que falta el análisis;
 - ticket en `analyzed` → habilitado;
 - con una corrida activa en cualquier proyecto → deshabilitado, con el motivo del bloqueo.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src
@@ -399,7 +402,7 @@ git commit -m "feat(orchestrator): botón Planificar, disponible solo con análi
 - Consumes: de la Tarea 1, que el runner lance `/ticket-agent:plan <id>` para la fase `design`.
 - Produces: el comando `/ticket-agent:plan`, que la Tarea 4 ejecuta de verdad.
 
-- [ ] **Step 1: Crear el comando**
+- [x] **Step 1: Crear el comando**
 
 Crear `plugins/ticket-agent/commands/plan.md`:
 
@@ -421,7 +424,7 @@ No escribas código de producto: el entregable de esta fase es el plan.
 Si "$ARGUMENTS" está vacío o no es un número de work item, pide el ID y detente.
 ```
 
-- [ ] **Step 2: Crear la skill**
+- [x] **Step 2: Crear la skill**
 
 Crear `plugins/ticket-agent/skills/change-planning/SKILL.md`:
 
@@ -552,25 +555,25 @@ En ambos casos, la última línea del resumen dice dónde quedó el change.
   una tarea que el implementador tendrá que investigar, y eso hay que avisarlo.
 ````
 
-- [ ] **Step 3: Subir la versión del plugin**
+- [x] **Step 3: Subir la versión del plugin**
 
 En `plugins/ticket-agent/.claude-plugin/plugin.json`, cambiar `"version": "0.3.0"` por `"version": "0.4.0"`.
 
 Sin esto el cambio no llega al plugin instalado por más que se commitee: la versión es la clave de cache de `claude plugin update`.
 
-- [ ] **Step 4: Validar el plugin**
+- [x] **Step 4: Validar el plugin**
 
 Run: `claude plugin validate .` desde la raíz del repo.
 Expected: sin errores. Si se queja del `name` de la skill, comprobar que la carpeta se llama igual que el `name` del frontmatter (`change-planning`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugins/ticket-agent
 git commit -m "feat(ticket-agent): skill change-planning — del análisis al change de OpenSpec"
 ```
 
-- [ ] **Step 6: Actualizar el plugin instalado**
+- [x] **Step 6: Actualizar el plugin instalado**
 
 Run: `claude plugin update ticket-agent@autonomous-skill-hub`
 Expected: trae la 0.4.0. Comprobar con:
@@ -596,7 +599,7 @@ Esta tarea no escribe código: ejerce lo construido y decide si la skill sirve. 
 - Consumes: las tres tareas anteriores, ya commiteadas y con el plugin actualizado.
 - Produces: el veredicto sobre si la skill necesita otro ajuste.
 
-- [ ] **Step 1: Comprobar que el backend sirve el código actual**
+- [x] **Step 1: Comprobar que el backend sirve el código actual**
 
 El backend no recarga solo y ya ha servido código viejo tres veces. Comprobar que el proceso que escucha en el 8000 arrancó **después** de la última modificación de `app.py`:
 
@@ -606,25 +609,25 @@ powershell -NoProfile -Command "$c = (Get-NetTCPConnection -LocalPort 8000 -Stat
 
 Expected: `CreationDate` posterior al `LastWriteTime` de `app.py`, y `CommandLine` **sin** `--reload`. Si no, matar el proceso y relanzar `.venv/Scripts/uvicorn app:app --port 8000`.
 
-- [ ] **Step 2: Dar de alta el ticket 3323**
+- [x] **Step 2: Dar de alta el ticket 3323**
 
 El 3323 es solo backend, así que el proyecto debe tener `ProvidenceTMSTenant` como repo **principal** — el análisis se escribe en el cwd de la corrida. Verificar en la UI (o en `GET /projects`) que es así antes de crear el ticket, y crearlo desde la UI.
 
 Expected: el ticket queda en `queued` con `repo_path` = `.../ProvidenceTMSTenant`.
 
-- [ ] **Step 3: Correr la Fase 1**
+- [x] **Step 3: Correr la Fase 1**
 
 Su análisis no existe todavía. Desde la UI, botón *Correr análisis*.
 
 Expected: estado `analyzed` y `docs/tickets/3323-analysis.md` escrito en `ProvidenceTMSTenant`. Comprobar que el análisis recogió el Feature padre **#3319** — ahí vive la Definition of Done y el inventario. Si no lo abrió, la Fase 2 no tendrá material y el fallo es de la Fase 1.
 
-- [ ] **Step 4: Correr la Fase 2**
+- [x] **Step 4: Correr la Fase 2**
 
 Botón *Planificar*.
 
 Expected: estado `planned`, sin excepciones en el log.
 
-- [ ] **Step 5: Los tres criterios de aceptación**
+- [x] **Step 5: Los tres criterios de aceptación**
 
 ```bash
 cd D:/Companies/ProvidenceSolutions/ProvidenceTMSTenant
@@ -638,19 +641,19 @@ ls openspec/changes/
 
 El punto 3 es el examen. Mide lo mismo que midió leer de verdad `ProvidenceTMSTenant` en la Fase 1: si el agente admite un hueco o lo tapa.
 
-- [ ] **Step 6: Contar lecturas del espejo en el log**
+- [x] **Step 6: Contar lecturas del espejo en el log**
 
 Igual que se hizo con el 3322, contar en el log de la corrida las invocaciones de `Read` sobre `PTMS.CarrierGateway/Carriers/Abf/`. Una skill que escribe "espejo: `AbfRateCall.cs:1-140`" **sin haber abierto el archivo** está inventando el número de líneas.
 
 Expected: al menos una lectura por cada archivo espejo citado en `tasks.md`.
 
-- [ ] **Step 7: Veredicto**
+- [x] **Step 7: Veredicto**
 
 Si los tres criterios pasan, la Fase 2 queda aceptada con n=1 y hace falta un segundo ticket para confirmarla — lo aprendido en la Fase 1 fue justo eso.
 
 Si falla el punto 3, el ajuste va en la regla de oro 4 de `SKILL.md`, y **hay que subir `version` a 0.4.1** y re-correr. Si falla el punto 2, el ajuste va en la sección 4 (estudio del patrón).
 
-- [ ] **Step 8: Actualizar el estado del proyecto**
+- [x] **Step 8: Actualizar el estado del proyecto**
 
 Actualizar `docs/STATUS.md`: la fila de la Fase 2 en el roadmap, la decisión de adoptar OpenSpec con su porqué, lo aprendido en esta corrida, y marcar los checkboxes de este plan. Actualizar también la sección "Cómo retomar en una sesión nueva".
 

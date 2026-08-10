@@ -1,7 +1,7 @@
 # Estado del proyecto — Autonomous Skill Hub
 
 > Documento vivo. Actualízalo al cerrar cada hito o al tomar una decisión.
-> Última actualización: 2026-08-09 (Fase 1 con n=2; orquestador con ciclo completo)
+> Última actualización: 2026-08-10 (Fase 2 construida y validada sobre el 3323)
 
 ## Propósito
 
@@ -17,8 +17,9 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 |---|---|---|
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Ciclo completo verificado** (3322 en 5m33s) — ⏳ falta el repaso visual de la UI |
-| 2 — Diseño e implementación | Del análisis al código (evaluar OpenSpec como formato) | 📋 Futura — se diseña tras validar Fase 1 |
+| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Ciclo completo verificado**, ahora con dos fases lanzables — ⏳ falta el repaso visual de la UI |
+| 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Construida y validada** (3323) — skill **v0.4.2**, n=1 |
+| 2b — Del plan al código | Ejecutar el plan: escribir código, rama, PR | 📋 Futura — la Fase 2 se quedó deliberadamente en el documento |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
 | 4 — Guards | Agents revisores read-only + hooks deterministas | 📋 Futura |
 | 5 — Aprendizaje por proyecto | Memoria local que alimenta las skills | 📋 Futura (OpenSpec también candidato aquí) |
@@ -53,8 +54,10 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 3. **SQLite sin ORM, un ticket a la vez** (lock global): cola local transitoria.
 4. **El estado del pipeline vive en el orquestador; el análisis vive en el repo
    del proyecto** (`docs/tickets/<id>-analysis.md`) — una fuente de verdad por cosa.
-5. **OpenSpec**: no adoptado aún; candidato firme como formato de salida en Fase 2
-   y como memoria viva en Fase 5 (registrado en el spec de fase 0-1).
+5. **OpenSpec: adoptado** (2026-08-10) como formato de salida de la Fase 2, con su
+   carpeta en el **repo destino**, no aquí. El paquete es `@fission-ai/openspec` — *no*
+   `openspec`, que es otro y no existe como ejecutable. Sigue siendo candidato para la
+   memoria viva de la Fase 5.
 6. **Un ticket abarca N repos, pero escribe en uno** (2026-08-08). El 3311 manda los
    arreglos de backend a `ProvidenceTMSTenant`, repo hermano del primario. Un proyecto
    declara un `repo_path` (cwd de la corrida, donde se escribe el análisis) y
@@ -79,6 +82,19 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
     `2026-08-09-orchestrator-ui-navegacion-design.md`): barra lateral de proyectos,
     cabecera que muestra qué repos verá el agente, y el panel derecho pasa a ser el
     ticket al elegirlo. Tres vistas con `useState`, sin router.
+11. **La Fase 2 entrega un documento, no código** (2026-08-10, spec
+    `2026-08-09-fase-2-plan-de-cambios-design.md`). El plan se escribe **para el agente
+    que lo implemente**: destino, espejo con `archivo:línea`, y cómo se comprueba. Eso
+    deja la corrida en solo lectura + escribir markdown, así que no hay ramas ni
+    permisos de escritura que resolver todavía. Escribir el código es una fase aparte.
+12. **Dos skills encadenadas, no una con dos modos** (2026-08-10). `change-planning`
+    consume `docs/tickets/<id>-analysis.md` y **se detiene si no existe**. El análisis
+    es la interfaz: si sale mal, se ve en el archivo y se re-corre la Fase 1 sola.
+13. **El estado de una corrida no se deduce del código de salida** (2026-08-10).
+    `claude -p` sale con 0 aunque el agente se detenga sin hacer nada, así que `planned`
+    llegó a significar "el subproceso no petó". Ahora la skill cierra con un sello
+    (`PLAN: validado` | `sin-validar` | `no-escrito`) y el runner decide por la **última**
+    coincidencia en el log. Ver "Lo aprendido" para por qué *última* y no *presente*.
 
 ## Aceptación de la Fase 1 — cerrada el 2026-08-08
 
@@ -133,24 +149,84 @@ que "todo estaba en una misma pantalla y no era intuitivo". Además: repos como 
 plana con principal marcado por el usuario, nombre de proyecto editable, un único
 botón de alta y ancho completo.
 
+## Tercera jornada — 2026-08-10
+
+**La v0.3.0 pasó su prueba de fuego.** Re-corrido el 3322 con la instrucción de ajuste:
+**26 invocaciones con ruta dentro de `ProvidenceTMSTenant`** (antes 0), cero apariciones
+de "no inspeccionado", 24 archivos `.cs` citados frente a 5. Y respondió la pregunta: el
+recorte está en `BaseProviderGroupService.cs:1559-1575`, donde a un rol cliente que no es
+*pricing owner* se le borran las excepciones de categoría `Audit` — y Rate Change (311)
+es Audit. Montar un repo no basta; **nombrárselo en el prompt con su etiqueta, sí**.
+
+**Fase 2 construida y validada sobre el 3323** (*Carrier API V2 Migration - XPO*), en
+cuatro tareas con revisión por subagente entre cada una. Los tres criterios de aceptación
+en verde en la segunda corrida: `openspec validate --changes` pasa, 10 de 15 espejos
+citan `archivo:línea`, y **GetDocs aparece bajo `## Bloqueado` con cero tareas asociadas**.
+
+El plan que produjo tiene 21 tareas y 5 bloqueos, y **encontró dos huecos del gateway que
+no estaban en el análisis**, comparando código: `ApiRateService.V2.cs:103-108` fuerza
+`AuthType.Basic` con `TokenUri: null`, así que el Rate de XPO viajaría sin bearer; y el
+adaptador V2 de Track anula el `AuditTrackingResponse` que el legacy de XPO **sí** genera,
+documentado como *"Gap B: verified equal"* porque se evaluó contra ABF, que no lo genera.
+
+**El 3323 resultó mejor candidato que el 3320.** Su Feature padre **#3319** trae un
+inventario verificado con la *Definition of Done* por carrier, y el patrón a replicar ya
+está escrito dos veces en el repo (`Carriers/Abf/`, `Carriers/Estes/`). El agente eligió
+Estes como espejo en vez de ABF —y tenía razón: XPO es REST + OAuth como Estes, mientras
+ABF no tiene token— y **leyó los 9 archivos que cita**, así que los números de línea no
+están inventados.
+
 ## Pendientes inmediatos
 
-- [ ] **Re-correr el 3322 con las descripciones puestas** — la prueba de fuego de
-  la skill v0.3.0. En la corrida anterior el agente tenía `ProvidenceTMSTenant`
-  montado, lo mencionó 15 veces y **no lo abrió ni una**; escribió "fuera de este
-  repo, no inspeccionado". Ahora el runner le nombra los repos con su etiqueta.
-  Instrucción sugerida en "Ajustar y re-correr": *"confirma en el backend qué
-  devuelve el payload del load board para un rol cliente"*.
-- [ ] **Repaso visual de la UI**: es lo único del spec que no se pudo verificar
-  (el navegador con el perfil de devtools es el de Jhonny). Recorrer las tres
-  vistas y los cinco estados vacíos.
-- [ ] **Diseñar la Fase 2.** Usar como candidato un ticket **pequeño y
-  autocontenido** (el 3322, 1 punto, o el 3320) — **no el 3311**: son 60 puntos,
-  15 fases, y Jhonny ya lo está implementando a mano (la rama `jhonny/quote-v2`
-  iba por 19 commits el 2026-08-09). Diseñar "del análisis al código" contra esa
-  épica sería sobre-ajustar a un monstruo que ningún agente va a implementar.
+- [ ] **Repaso visual de la UI**: sigue sin poder verificarse (el navegador con el perfil
+  de devtools es el de Jhonny y el MCP no puede adjuntarse si ya está abierto). Recorrer
+  las tres vistas, los cinco estados vacíos, y ahora también el botón *Planificar*.
+- [ ] **Segundo ticket para la Fase 2.** Está aceptada con **n=1**, y la lección de la
+  Fase 1 fue justo esa: el 3311 salió perfecto y el fallo solo apareció con el segundo.
+  Buen candidato: otro carrier del #3319, que ejercita el mismo camino con otra forma.
+- [ ] **Decidir qué se hace con `Bash` en el runner.** Ver "Lo aprendido": el
+  especificador no acota. Hoy `analyze` va con la lista vacía, pero la Fase 2 tiene Bash
+  disponible de facto para más que `npx`.
+- [ ] **Revertir o commitear la huella de `openspec init` en `ProvidenceTMSTenant`**:
+  dejó 6 skills en `.claude/skills/openspec-*`, `.claude/commands/opsx/`, y 6 comandos
+  más `skills/` en `.opencode/`. Todo sin trackear. Es más de lo que el spec anunciaba.
 - [ ] **Quitar `organization` de `.claude/ticket-agent.json`** — duplica `ADO_ORG`,
   que no se puede eliminar porque el MCP la necesita como env var al arrancar.
+- [ ] **Deuda menor anotada** (de la revisión final, ninguna bloqueante): el `title` del
+  botón *Planificar* oculta una de las dos razones cuando coinciden; el log se lee entero
+  para quedarse con 4 KB; el `assert` de las claves de fase desaparece con `python -O`;
+  "Enviar ajuste" siempre lanza `analyze`, no hay forma de re-planificar con instrucciones.
+
+## Lo aprendido (2026-08-10)
+
+- **Una comprobación puede encontrarse a sí misma.** El runner decidía si hubo plan
+  buscando el sello `PLAN: validado` en los últimos 4 KB del log. Pero el cuerpo de la
+  skill viaja en el log y contiene los tres sellos literalmente — el último `PLAN:
+  validado` está a 393 caracteres del final de `SKILL.md`. En una corrida que aborta
+  pronto, la ventana se tragaba la §7 de la propia skill y la corrida se daba por buena:
+  el bug que el mecanismo venía a matar, reconstruido por dentro. **Anclar en la última
+  coincidencia, no en la presencia.** Lo encontró la revisión final, no los tests.
+- **`--allowedTools` con un especificador no acota: habilita.** Poner
+  `Bash(npx openspec:*)` no restringió Bash a ese comando — dejó correr `ls`, `find` y
+  `git remote -v` en el repo del cliente, y a la vez **bloqueó** la invocación correcta
+  del CLI por no empezar con esa cadena literal. Lo peor de las dos cosas. Y como la
+  lista se construía sin mirar la fase, la Fase 1 —declarada solo lectura— pasó a
+  ejecutar shell sin que nadie lo decidiera. Hoy hay una tabla `PHASE_ALLOWED_TOOLS` y
+  `analyze` lleva la lista vacía.
+- **El código de salida de `claude -p` no dice nada.** Sale con 0 aunque el agente se
+  haya detenido sin hacer nada. Cualquier estado que se derive de él es una mentira
+  esperando a ocurrir: `planned` llegó a significar "el subproceso no petó".
+- **El nombre del paquete no se adivina.** `npx openspec` no existe; es
+  `@fission-ai/openspec`. Costó una corrida entera de 8 minutos descubrirlo.
+- **El agente fue más honesto que mi regla.** La skill le mandaba detenerse si el CLI
+  fallaba. No se detuvo: escribió el plan igual y abrió su resumen con *"Falta la
+  validación: npx está bloqueado por permisos"*, con sección propia y el diagnóstico de
+  la causa. Tirar un plan de 21 tareas por no poder validarlo habría sido peor. La regla
+  se quedó; lo que se añadió fue el sello, para que el **estado** no pueda mentir aunque
+  el agente decida seguir.
+- **Un espejo citado sin abrir es un número inventado.** Por eso se cuentan las lecturas
+  en el log, no solo las citas en el documento: el 3323 citó 9 archivos de Estes y los
+  leyó los 9.
 
 ## Lo aprendido (2026-08-09)
 
@@ -203,10 +279,17 @@ botón de alta y ancho completo.
 - **Las columnas de fase del orquestador ya no están deshabilitadas: no están.**
   Al llegar la Fase 2 hay que decidir cómo se representa el avance por fases.
 - **Permisos del runner**: corre con `--permission-mode acceptEdits` más una lista
-  explícita de `--allowedTools` (sin ella el MCP se auto-deniega en headless). Hoy
-  la Fase 1 es solo lectura + escribir el análisis; al llegar la Fase 2 (escribir
-  código) hay que revisar qué modo, qué tools y qué guards corresponden — y que los
-  `extra_dirs` son de lectura, no sitios donde el agente deba escribir.
+  explícita de `--allowedTools` (sin ella el MCP se auto-deniega en headless), ahora
+  ramificada por fase (`PHASE_ALLOWED_TOOLS`; `analyze` va con la lista vacía).
+  **El especificador `Bash(...)` habilita la herramienta, no la acota al comando** —
+  verificado en corrida real. Al llegar la fase que escriba código hay que revisar qué
+  modo, qué tools y qué guards corresponden, y recordar que los `extra_dirs` son de
+  lectura, no sitios donde el agente deba escribir.
+- **`openspec init` deja más huella de la esperada** en el repo destino: además de
+  `openspec/`, instala 6 skills en `.claude/skills/openspec-*`, `.claude/commands/opsx/`
+  y comandos en `.opencode/`. En `ProvidenceTMSTenant` está todo sin trackear, pendiente
+  de decidir si se commitea o se revierte.
+- **La Fase 2 está aceptada con n=1.** La Fase 1 enseñó que eso es aceptar poco.
 - **El orquestador es v1 delgado**: sin SSE, sin corridas paralelas, columnas de
   fases 2-4 deshabilitadas — crecen junto con las fases del agente.
 - **Actualizar este documento** y los checkboxes de los planes al cerrar hitos.
@@ -221,26 +304,29 @@ Prompt sugerido — abrir Claude Code en el hub
 > 1. **Levanta el orquestador**: backend en `apps/orchestrator/backend`
 >    (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend
 >    en `apps/orchestrator/frontend` (`npm run dev`). Antes de dar nada por bueno,
->    comprueba que el backend sirve el código actual — ya nos engañó tres veces.
-> 2. **Prueba de fuego de la skill v0.3.0**: desde la UI, "Ajustar y re-correr" el
->    ticket 3322 con la instrucción *"confirma en el backend qué devuelve el
->    payload del load board para un rol cliente"*. Luego mira el log y dime si el
->    agente **abrió de verdad** `ProvidenceTMSTenant` (cuenta lecturas de archivo
->    dentro de esa ruta) o si volvió a declararlo "no inspeccionado". Ese era el
->    fallo que v0.3.0 intenta arreglar.
-> 3. Con el resultado, dime si la skill necesita otro ajuste. Si sí: edítala en
->    `plugins/ticket-agent/skills/ticket-comprehension/SKILL.md`, **sube `version`
->    en `plugin.json`**, `claude plugin update ticket-agent@autonomous-skill-hub`,
->    y re-corre.
-> 4. Después, arrancamos el **diseño de la Fase 2** (del análisis al código) usando
->    como candidato el 3322 o el 3320 — pequeños y autocontenidos. No el 3311.
+>    comprueba que el proceso del 8000 arrancó **después** de la última modificación
+>    de `app.py` — ya nos engañó tres veces.
+> 2. **Segunda prueba de la Fase 2**, que hoy está aceptada con n=1. Elige otro carrier
+>    del Feature #3319 (mismo camino, otra forma), dalo de alta, corre `analyze` y luego
+>    *Planificar*. Comprueba tres cosas en el log y en el change: que
+>    `openspec validate --changes` pasa, que los espejos que cita los **abrió de verdad**
+>    (cuenta las lecturas, no las citas), y que lo que no se puede hacer está bajo
+>    `## Bloqueado` en vez de convertido en tarea.
+> 3. Con el resultado, dime si `change-planning` necesita ajuste. Si sí: edítala,
+>    **sube `version` en `plugin.json`**, `claude plugin update
+>    ticket-agent@autonomous-skill-hub`, y re-corre.
+> 4. **Repaso visual de la UI**, que sigue pendiente desde el rediseño: las tres vistas,
+>    los cinco estados vacíos, y el botón *Planificar* en sus cuatro situaciones
+>    (sin análisis, con análisis, con corrida activa, y tras una Fase 2 fallida).
 > 5. Al cerrar, actualiza docs/STATUS.md.
 
-Contexto que ya no hace falta rehacer: el plugin está instalado a nivel de usuario,
-el TMS configurado (`.claude/ticket-agent.json` + `ADO_ORG` en
-`.claude/settings.json`), y el proyecto dado de alta en la BD del orquestador con
-sus tres repos etiquetados.
+Contexto que ya no hace falta rehacer: el plugin está instalado a nivel de usuario
+(**v0.4.2**), el TMS configurado (`ADO_ORG` en `.claude/settings.json`), y el proyecto
+dado de alta en la BD del orquestador con `ProvidenceTMSTenant` como repo principal.
+El 3322 y el 3323 ya están analizados, y el 3323 además planificado.
 
-Dos trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega
-al plugin instalado; y **no usar `uvicorn --reload`**, que deja procesos huérfanos
-reteniendo el puerto 8000 y sirve código viejo sin avisar.
+Cuatro trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
+plugin instalado; **no usar `uvicorn --reload`**, que deja procesos huérfanos reteniendo
+el 8000 y sirve código viejo sin avisar; el paquete de OpenSpec es **`@fission-ai/openspec`**,
+no `openspec`; y **el código de salida de `claude -p` no dice si el agente hizo algo** —
+para eso está el sello `PLAN:`.
