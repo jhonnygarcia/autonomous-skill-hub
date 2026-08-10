@@ -73,6 +73,10 @@ Cuatro archivos:
 - Impacto: [rompe o no rompe, a quién afecta]
 ```
 
+Cierra `proposal.md` con una sección de primer nivel, `## Información faltante`, con
+lo que el análisis de la Fase 1 no trae y hace falta para planificar bien. Si no hay
+nada que registrar, omite la sección — no la dejes vacía.
+
 **`tasks.md`** — la checklist ejecutable. Cada tarea lleva destino, espejo con
 líneas, y cómo se comprueba:
 
