@@ -17,19 +17,19 @@ if os.environ.get("FAKE_FAIL") == "1":
     print("boom", file=sys.stderr)
     sys.exit(1)
 if os.environ.get("FAKE_SKILL_LEAK") == "1":
-    # Imita el cuerpo de change-planning/SKILL.md colándose en el log (el
-    # tool_result de cargar la skill): trae los tres sellos en prosa, ANTES
-    # del sello de cierre real, tal como pasa con la corrida de verdad.
+    # Imita el cuerpo de un SKILL.md colándose en el log (el tool_result de cargar la
+    # skill): trae los tres sellos en prosa, ANTES del sello de cierre real, tal como
+    # pasa en la corrida de verdad.
     cuerpo = (
-        "## 7. Cierre\n"
+        "## Cierre\n"
         "Termina siempre con una de estas tres líneas exactas:\n"
-        "PLAN: validado\n"
-        "PLAN: sin-validar\n"
-        "PLAN: no-escrito\n"
+        "HUELLA: ok — docs/tickets/<id>-analysis.md\n"
+        "HUELLA: parcial — docs/tickets/<id>-analysis.md\n"
+        "HUELLA: nada — <motivo>\n"
     )
     print('{"type":"tool_result","text":' + json.dumps(cuerpo) + '}')
-sello = os.environ.get("FAKE_PLAN_SELLO")
+sello = os.environ.get("FAKE_HUELLA")
 if sello:
-    # Simula el sello de cierre obligatorio de change-planning/SKILL.md §7.
-    print('{"type":"assistant","text":"resumen del cierre. PLAN: ' + sello + '"}')
+    # Simula el sello de cierre obligatorio de las skills.
+    print('{"type":"assistant","text":"resumen del cierre. HUELLA: ' + sello + '"}')
 print('{"type":"result","subtype":"success"}')

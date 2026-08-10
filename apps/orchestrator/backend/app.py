@@ -52,6 +52,41 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# El sello de cierre de las skills. Se acepta `PLAN:` como alias legado porque los logs
+# de las corridas anteriores al contrato único se escribieron así.
+SELLO = re.compile(r"(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*(.+)")
+LEGADO = {"validado": "ok", "sin-validar": "parcial", "no-escrito": "nada"}
+
+
+def leer_huella(log_path: Path) -> tuple[str, str] | None:
+    """`(estado, ruta-o-motivo)` de la ÚLTIMA coincidencia del log, o None si no hay.
+
+    La ÚLTIMA, no la presencia: el cuerpo del SKILL.md viaja en el log (el tool_result
+    de cargarlo) y contiene los tres sellos literalmente, así que comprobar presencia
+    hace que la comprobación se encuentre a sí misma y dé por buena una corrida que
+    cerró con `nada`. Ya se pagó una vez."""
+    if not log_path.exists():
+        return None
+    # ponytail: se lee el archivo entero para quedarse con la cola; con logs de MB
+    # tocaría un seek desde el final. Hoy pesan KB.
+    cola = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+    hits = SELLO.findall(cola)
+    if not hits:
+        return None
+    estado, resto = hits[-1]
+    resto = resto.strip()
+    # `(.+)` es voraz y el log no está parseado como JSON: si el sello vino en una
+    # línea `{"type":"assistant","text":"...HUELLA: ..."}`, la captura se traga el
+    # `"}` de cierre del objeto. Se recorta como sufijo literal, no como conjunto de
+    # caracteres (`.strip('"')` no lo haría: el último carácter es `}`, no `"`).
+    if resto.endswith('"}'):
+        resto = resto[:-2].strip()
+    resto = resto.strip('"')
+    if resto.endswith("\\n"):
+        resto = resto[:-2]
+    return LEGADO.get(estado, estado), resto.strip()
+
+
 def norm_dirs(items: list) -> list[dict]:
     """Los repos extra fueron una lista de rutas antes de llevar etiqueta. Se
     normaliza al leer para que las filas viejas no rompan; sanan al siguiente guardado."""
@@ -125,7 +160,6 @@ def init_db() -> None:
               project TEXT NOT NULL,
               repo_path TEXT NOT NULL,
               extra_dirs TEXT NOT NULL DEFAULT '[]',
-              current_phase TEXT NOT NULL DEFAULT 'analyze',
               status TEXT NOT NULL DEFAULT 'queued',
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
@@ -137,6 +171,8 @@ def init_db() -> None:
               instructions TEXT,
               status TEXT NOT NULL DEFAULT 'queued',
               log_path TEXT,
+              artifact_state TEXT,
+              artifact_path TEXT,
               started_at TEXT,
               finished_at TEXT
             );
@@ -147,11 +183,27 @@ def init_db() -> None:
         for alter in (
             "ALTER TABLE tickets ADD COLUMN extra_dirs TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE projects ADD COLUMN repo_label TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE runs ADD COLUMN artifact_state TEXT",
+            "ALTER TABLE runs ADD COLUMN artifact_path TEXT",
+            # Existía desde el primer commit, se inicializaba a 'analyze' y nada la
+            # escribió jamás: un sitio previsto para esto que solo confundía. El avance
+            # se calcula de `runs`.
+            "ALTER TABLE tickets DROP COLUMN current_phase",
         ):
             try:
                 c.execute(alter)
             except sqlite3.OperationalError:
                 pass
+        # Las corridas anteriores a este contrato tienen las columnas vacías y saldrían
+        # como "no declaró huella" en el timeline. El sello está en su log: se lee una
+        # vez, al migrar, en vez de en cada lectura.
+        for r in c.execute(
+            "SELECT id, log_path FROM runs WHERE artifact_state IS NULL AND log_path IS NOT NULL"
+        ).fetchall():
+            h = leer_huella(Path(r["log_path"]))
+            if h:
+                c.execute("UPDATE runs SET artifact_state=?, artifact_path=? WHERE id=?",
+                          (h[0], h[1], r["id"]))
 
 
 app = FastAPI(title="ticket-orchestrator")
@@ -313,6 +365,9 @@ def set_run(run_id: int, **fields):
 
 
 def set_ticket(tid: int, **fields):
+    """La columna `status` sigue en la tabla por las BDs viejas, pero ya no se escribe
+    ni se lee: el estado del ticket se pliega de `runs` en `ticket_out`. Una segunda
+    fuente es una fuente que algún día miente."""
     fields["updated_at"] = now()
     cols = ", ".join(f"{k}=?" for k in fields)
     with db() as c:
@@ -323,7 +378,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
     async with RUN_LOCK:  # ponytail: lock global, por-repo si algún día duele
         log_path = LOGS_DIR / f"{run_id}.log"
         set_run(run_id, status="running", log_path=str(log_path), started_at=now())
-        set_ticket(ticket["id"], status="running")
+        set_ticket(ticket["id"])
         prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
         noun = PHASE_NOUN[phase]
         extras = norm_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
@@ -386,22 +441,16 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         except Exception as exc:  # el error queda en el log, jamás tumba el server
             with open(log_path, "a", encoding="utf-8") as log:
                 log.write(f"\n[orchestrator] excepción: {exc}\n")
-        if phase == "design" and ok:
-            # `claude -p` sale con 0 aunque el agente se haya detenido sin escribir
-            # nada: el código de salida no basta para saber si hay plan. El sello de
-            # cierre de la skill (change-planning/SKILL.md §7) es el único contrato
-            # fiable — sin él, o con "no-escrito", se trata como error aunque el
-            # proceso no haya fallado. Se ancla en la ÚLTIMA coincidencia, no en la
-            # mera presencia: el propio cuerpo de la skill viaja en el log (el
-            # tool_result de cargarla) y contiene los tres sellos en prosa, así que
-            # buscar solo "está el string" se encuentra a sí mismo y da la corrida
-            # por buena aunque el cierre real sea "no-escrito".
-            cola = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
-            sellos = re.findall(r"PLAN: (validado|sin-validar|no-escrito)", cola)
-            if not sellos or sellos[-1] == "no-escrito":
-                ok = False
-        set_run(run_id, status="success" if ok else "error", finished_at=now())
-        set_ticket(ticket["id"], status=PHASE_DONE[phase] if ok else "error")
+        # El código de salida no basta: `claude -p` sale con 0 aunque el agente se haya
+        # detenido sin escribir nada. El sello de cierre de la skill es el único
+        # contrato fiable, y ahora lo cumplen todas las fases.
+        huella = leer_huella(log_path) if ok else None
+        estado_h, resto = huella or ("nada", "la corrida no declaró huella")
+        if estado_h == "nada":
+            ok = False
+        set_run(run_id, status="success" if ok else "error", finished_at=now(),
+                artifact_state=estado_h, artifact_path=resto)
+        set_ticket(ticket["id"])   # solo toca updated_at: el estado se calcula al leer
 
 
 @app.post("/tickets/{tid}/run", status_code=202)
@@ -423,7 +472,7 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
             (tid, body.phase, body.instructions),
         )
         run_id = cur.lastrowid
-    set_ticket(tid, status="queued")
+    set_ticket(tid)
     background.add_task(execute_run, run_id, dict(t), body.instructions, body.phase)
     with db() as c:
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
