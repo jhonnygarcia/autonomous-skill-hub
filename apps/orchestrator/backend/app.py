@@ -295,7 +295,8 @@ def create_ticket(body: TicketIn):
             (body.ado_id, proj["org"], proj["project"], proj["repo_path"],
              proj["extra_dirs"], ts, ts),
         )
-    return dict(ticket_row(cur.lastrowid))
+    t = ticket_row(cur.lastrowid)
+    return ticket_out(t, fases_de(t, [], con_huella=False))
 
 
 def segundos(desde: str | None, hasta: str | None) -> int | None:
@@ -307,15 +308,27 @@ def segundos(desde: str | None, hasta: str | None) -> int | None:
 def stat_huella(repo: str, rel: str) -> dict:
     """Tamaño y número de archivos de lo que la corrida declaró haber escrito. Una ruta
     declarada que no existe NO se oculta: se informa `existe: False`. Es la regla de oro
-    de las skills aplicada al orquestador."""
+    de las skills aplicada al orquestador.
+
+    Recursiva: un change de OpenSpec anida `specs/<capability>/spec.md`, así que mirar
+    solo los hijos directos subrepresenta el entregable más común. `nombres` lleva la
+    ruta relativa al directorio de la huella (no el basename) porque es exactamente la
+    lista que la Tarea 4 usará como lista blanca del visor — "bajo el directorio
+    declarado", no "hijo directo" — y siempre con `/`, también en Windows: ese valor
+    viaja a la UI y de ahí al endpoint del visor, que trabaja con rutas POSIX."""
     p = Path(repo) / rel
     if not p.exists():
         return {"ruta": rel, "existe": False, "archivos": 0, "bytes": 0, "nombres": []}
-    hijos = sorted(x for x in p.iterdir() if x.is_file()) if p.is_dir() else [p]
+    if p.is_dir():
+        hijos = sorted(x for x in p.rglob("*") if x.is_file())
+        nombres = [x.relative_to(p).as_posix() for x in hijos]
+    else:
+        hijos = [p]
+        nombres = [p.name]
     return {"ruta": rel, "existe": True, "archivos": len(hijos),
             "bytes": sum(x.stat().st_size for x in hijos),
             # ponytail: 12 nombres bastan para el timeline; un change tiene 4.
-            "nombres": [x.name for x in hijos[:12]]}
+            "nombres": nombres[:12]}
 
 
 def fases_de(t: sqlite3.Row, runs: list[dict], con_huella: bool = True) -> list[dict]:

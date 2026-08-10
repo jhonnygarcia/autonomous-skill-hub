@@ -468,6 +468,24 @@ def test_huella_de_un_directorio_cuenta_y_lista_sus_archivos(client, monkeypatch
     assert sorted(h["nombres"]) == ["design.md", "proposal.md", "tasks.md"]
 
 
+def test_huella_de_un_directorio_baja_a_subdirectorios(client, monkeypatch, tmp_path):
+    """Un change de OpenSpec anida `specs/<capability>/spec.md`. Mirar solo los hijos
+    directos deja ese archivo fuera de la cuenta, de los bytes y de `nombres` — justo el
+    caso más común del entregable de `design`."""
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    (d / "specs" / "pagos").mkdir(parents=True)
+    (d / "proposal.md").write_text("ab")
+    (d / "tasks.md").write_text("cde")
+    (d / "specs" / "pagos" / "spec.md").write_text("fghij")
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    h = client.get(f"/tickets/{tid}").json()["fases"][1]["huella"]
+    assert h["archivos"] == 3
+    assert h["bytes"] == 2 + 3 + 5
+    assert "specs/pagos/spec.md" in h["nombres"]
+
+
 def test_ruta_declarada_que_no_existe_en_disco_no_se_oculta(client, monkeypatch):
     _use_fake_claude(monkeypatch, huella="ok — docs/tickets/fantasma.md")
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
