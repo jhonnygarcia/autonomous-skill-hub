@@ -84,8 +84,13 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
 
         return (
           <li key={f.fase} className={`relative pl-9 ${f.disponible ? "" : "opacity-60"}`}>
-            {/* la línea que une las fases; no se dibuja bajo la última */}
-            {!ultima && <span aria-hidden className="absolute left-[11px] top-8 bottom-0 w-px bg-border" />}
+            {/* La línea que une las fases; no se dibuja bajo la última. Arranca detrás
+                del nodo (`top-7`, que el nodo tapa al pintarse después) y **sobresale
+                6px por debajo de la fila** hasta donde empieza el nodo siguiente
+                (`top-1.5` = 6px). Con `bottom-0` se quedaba dentro de su propia fila:
+                en las fases apagadas, que miden 36px, medía 4px y el recorrido se veía
+                como círculos sueltos justo donde el camino pendiente es todo el mensaje. */}
+            {!ultima && <span aria-hidden className="absolute left-[11px] top-7 -bottom-1.5 w-px bg-border" />}
             <span
               className={`absolute left-0 top-1.5 flex h-6 w-6 items-center justify-center
                           rounded-full border text-[11px] font-semibold shadow-sm transition-colors
