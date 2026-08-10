@@ -70,7 +70,7 @@ export default function App() {
                onSettings={() => setView({ kind: "ajustes" })} />
 
       <main className="min-w-0 flex-1 space-y-4">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {view.kind === "ajustes" && (
           // el `key` fuerza remontaje al pulsar "+ Nuevo" estando ya en Ajustes
@@ -79,7 +79,7 @@ export default function App() {
         )}
 
         {view.kind !== "ajustes" && !project && (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             Aún no hay proyectos.{" "}
             <button className="underline" onClick={() => setView({ kind: "ajustes" })}>
               Agrega uno

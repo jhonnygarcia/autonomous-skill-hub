@@ -2,10 +2,10 @@ import type { ActiveRun, Fase, Ticket } from "@/api"
 
 const COLOR: Record<string, string> = {
   registrado: "border-border bg-muted text-muted-foreground",
-  corriendo: "border-blue-500/50 bg-blue-500/10 text-blue-700",
-  analizado: "border-emerald-500/50 bg-emerald-500/10 text-emerald-700",
-  planificado: "border-violet-500/50 bg-violet-500/10 text-violet-700",
-  error: "border-red-500/50 bg-red-500/10 text-red-700",
+  corriendo: "border-blue-500/60 bg-blue-500/10 text-blue-700 dark:text-blue-500",
+  analizado: "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-500",
+  planificado: "border-violet-500/60 bg-violet-500/10 text-violet-700 dark:text-violet-500",
+  error: "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-500",
 }
 const LABEL: Record<string, string> = {
   queued: "registrado", running: "corriendo", analyzed: "analizado",
@@ -72,10 +72,10 @@ export function iconoFase(estado?: string): string {
 }
 
 export function colorFase(estado?: string): string {
-  return estado === "ok" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700"
-    : estado === "parcial" ? "border-amber-500/60 bg-amber-500/10 text-amber-700"
-    : estado === "error" ? "border-red-500/60 bg-red-500/10 text-red-700"
-    : estado === "corriendo" ? "border-blue-500/60 bg-blue-500/10 text-blue-700"
+  return estado === "ok" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-500"
+    : estado === "parcial" ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-500"
+    : estado === "error" ? "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-500"
+    : estado === "corriendo" ? "border-blue-500/60 bg-blue-500/10 text-blue-700 dark:text-blue-500"
     : "border-border bg-muted text-muted-foreground"
 }
 
