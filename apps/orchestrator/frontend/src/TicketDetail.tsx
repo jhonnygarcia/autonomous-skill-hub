@@ -3,14 +3,14 @@ import type { ActiveRun, TicketDetail as Detail } from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { bloqueo, colorCorrida, duracion, estado } from "@/estado"
+import { bloqueo, colorCorrida, duracion, estado, puedePlanificar } from "@/estado"
 
 export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDelete }: {
   detail: Detail
   activo: ActiveRun | null
   projectName: string
   onBack: () => void
-  onRun: (instructions?: string) => void
+  onRun: (instructions?: string, phase?: string) => void
   onDelete: () => void
 }) {
   const [instructions, setInstructions] = useState("")
@@ -31,6 +31,13 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
           <Button size="sm" disabled={!!motivo} title={motivo || undefined}
                   onClick={() => onRun()}>
             {detail.runs.length ? "Re-correr análisis" : "Correr análisis"}
+          </Button>
+          <Button size="sm" variant="secondary"
+                  disabled={!!motivo || !puedePlanificar(t)}
+                  title={motivo || (puedePlanificar(t) ? undefined
+                                    : "Necesita un análisis: corre primero la Fase 1")}
+                  onClick={() => onRun(undefined, "design")}>
+            Planificar
           </Button>
           <Button size="sm" variant="destructive" onClick={onDelete}>Borrar</Button>
         </div>
@@ -54,6 +61,7 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
           {detail.runs.map(r => (
             <li key={r.id} className="flex items-center gap-2">
               <Badge className={colorCorrida(r.status)}>{r.status}</Badge>
+              <span className="text-xs text-gray-500">{r.phase}</span>
               <span className="text-gray-500">{r.started_at ?? "en cola"}</span>
               <span className="text-gray-400">{duracion(r.started_at, r.finished_at)}</span>
               {r.instructions && (

@@ -40,10 +40,10 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ado_id, project }),
     }).then(r => json<Ticket>(r)),
-  run: (id: number, instructions?: string) =>
+  run: (id: number, instructions?: string, phase = "analyze") =>
     fetch(`/api/tickets/${id}/run`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instructions: instructions || null }),
+      body: JSON.stringify({ instructions: instructions || null, phase }),
     }).then(r => json<Run>(r)),
   remove: (id: number) => fetch(`/api/tickets/${id}`, { method: "DELETE" }).then(r => json<void>(r)),
 }

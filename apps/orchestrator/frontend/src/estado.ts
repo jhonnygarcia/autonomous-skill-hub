@@ -4,10 +4,12 @@ const COLOR: Record<string, string> = {
   registrado: "bg-gray-100 text-gray-700",
   corriendo: "bg-blue-100 text-blue-800",
   analizado: "bg-green-100 text-green-800",
+  planificado: "bg-violet-100 text-violet-800",
   error: "bg-red-100 text-red-800",
 }
 const LABEL: Record<string, string> = {
-  queued: "registrado", running: "corriendo", analyzed: "analizado", error: "error",
+  queued: "registrado", running: "corriendo", analyzed: "analizado",
+  planned: "planificado", error: "error",
 }
 
 /** `queued` significa dos cosas en el backend — recién añadido y a punto de correr.
@@ -37,4 +39,10 @@ export function duracion(desde: string | null, hasta: string | null): string {
   if (!desde || !hasta) return ""
   const s = Math.round((Date.parse(hasta) - Date.parse(desde)) / 1000)
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`
+}
+
+/** La Fase 2 lee el análisis de la Fase 1: sin análisis no hay nada que planificar.
+ *  `planned` también vale — re-planificar es legítimo si cambió el análisis. */
+export function puedePlanificar(t: Ticket): boolean {
+  return t.status === "analyzed" || t.status === "planned"
 }
