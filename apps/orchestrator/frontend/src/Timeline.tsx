@@ -2,7 +2,7 @@ import { useRef, useState } from "react"
 import { api, type ActiveRun, type Artefacto, type Fase } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { colorFase, FASE_LABEL, hora, iconoFase, puedeLanzar, tamaño } from "@/estado"
+import { colorFase, duracionTexto, FASE_LABEL, hora, iconoFase, puedeLanzar, tamaño } from "@/estado"
 
 // Estilo compartido de foco/hover para los <button> nativos del visor: los botones de
 // shadcn ya traen su propio anillo, pero estos son planos (chips de archivo, cerrar,
@@ -79,10 +79,7 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
         if (!f.disponible) metaParts.push("no disponible aún")
         else if (f.estado === "pendiente") metaParts.push("sin corridas")
         if (f.en) metaParts.push(hora(f.en))
-        if (f.duracion_s != null) {
-          metaParts.push(f.duracion_s < 60 ? `${f.duracion_s}s`
-            : `${Math.floor(f.duracion_s / 60)}m${String(f.duracion_s % 60).padStart(2, "0")}s`)
-        }
+        if (f.duracion_s != null) metaParts.push(duracionTexto(f.duracion_s))
         if (f.corridas) metaParts.push(`${f.corridas} ${f.corridas === 1 ? "corrida" : "corridas"}`)
 
         return (
@@ -139,6 +136,13 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
 
               {f.estado === "error" && f.motivo && (
                 <p className="pb-2 text-xs text-destructive">{f.motivo}</p>
+              )}
+
+              {/* La reserva de un `parcial`: la huella se declaró, pero con matices
+                  (p.ej. `openspec validate` no pasó). Va junto a la huella, en el mismo
+                  ámbar que ya usa este estado — no reemplaza la fila del artefacto. */}
+              {f.estado === "parcial" && f.motivo && (
+                <p className="pb-2 text-xs text-amber-600 dark:text-amber-500">{f.motivo}</p>
               )}
 
               {h && (

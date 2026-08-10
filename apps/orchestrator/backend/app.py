@@ -64,6 +64,27 @@ def now() -> str:
 SELLO = re.compile(r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*([^"\\]+)')
 LEGADO = {"validado": "ok", "sin-validar": "parcial", "no-escrito": "nada"}
 
+# Separador entre la ruta y la reserva en un sello `parcial`: "HUELLA: parcial —
+# <ruta> · <reserva>". Espacio, punto medio (U+00B7), espacio — así lo piden las dos
+# skills en su regla de cierre.
+RESERVA_SEP = " · "
+
+MOTIVO_SIN_HUELLA = "la corrida no declaró huella"
+# Las 5 corridas históricas de antes de este contrato salieron con status=success (el
+# CLI cerró en 0) y sin sello: decir "falló" ahí sería mentir sobre lo que pasó.
+MOTIVO_SIN_HUELLA_HISTORICA = "corrida anterior a este contrato: terminó bien, pero " + MOTIVO_SIN_HUELLA
+
+
+def partir_reserva(estado: str, resto: str) -> tuple[str, str | None]:
+    """De un sello `parcial` con reserva, separa la ruta (para `artifact_path`, que
+    tiene que seguir siendo una ruta limpia: es la lista blanca del visor) de la
+    reserva (para `artifact_note`). Un `parcial` sin ` · ` no tiene reserva y `resto`
+    entero es la ruta, igual que antes de este cambio."""
+    if estado == "parcial" and RESERVA_SEP in resto:
+        ruta, nota = resto.split(RESERVA_SEP, 1)
+        return ruta.strip(), nota.strip()
+    return resto, None
+
 
 def leer_huella(log_path: Path) -> tuple[str, str] | None:
     """`(estado, ruta-o-motivo)` de la ÚLTIMA coincidencia del log, o None si no hay.
@@ -182,6 +203,9 @@ def init_db() -> None:
             "ALTER TABLE projects ADD COLUMN repo_label TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE runs ADD COLUMN artifact_state TEXT",
             "ALTER TABLE runs ADD COLUMN artifact_path TEXT",
+            # La reserva de un sello `parcial` (lo que sigue a ` · `), aparte de la
+            # ruta: `artifact_path` tiene que seguir siendo una ruta limpia.
+            "ALTER TABLE runs ADD COLUMN artifact_note TEXT",
             # Existía desde el primer commit, se inicializaba a 'analyze' y nada la
             # escribió jamás: un sitio previsto para esto que solo confundía. El avance
             # se calcula de `runs`.
@@ -199,8 +223,10 @@ def init_db() -> None:
         ).fetchall():
             h = leer_huella(Path(r["log_path"]))
             if h:
-                c.execute("UPDATE runs SET artifact_state=?, artifact_path=? WHERE id=?",
-                          (h[0], h[1], r["id"]))
+                ruta, nota = partir_reserva(*h)
+                c.execute(
+                    "UPDATE runs SET artifact_state=?, artifact_path=?, artifact_note=? WHERE id=?",
+                    (h[0], ruta, nota, r["id"]))
 
 
 app = FastAPI(title="ticket-orchestrator")
@@ -355,9 +381,17 @@ def fases_de(t: sqlite3.Row, runs: list[dict], con_huella: bool = True) -> list[
         e["en"] = u["finished_at"] or u["started_at"]
         e["duracion_s"] = segundos(u["started_at"], u["finished_at"])
         if e["estado"] == "error":
-            e["motivo"] = u["artifact_path"] or "la corrida falló sin declarar huella"
-        elif e["estado"] in ("ok", "parcial") and u["artifact_path"] and con_huella:
-            e["huella"] = stat_huella(t["repo_path"], u["artifact_path"])
+            if u["artifact_path"]:
+                e["motivo"] = u["artifact_path"]
+            elif u["status"] == "success":
+                e["motivo"] = MOTIVO_SIN_HUELLA_HISTORICA
+            else:
+                e["motivo"] = MOTIVO_SIN_HUELLA
+        else:
+            if e["estado"] == "parcial" and u.get("artifact_note"):
+                e["motivo"] = u["artifact_note"]
+            if e["estado"] in ("ok", "parcial") and u["artifact_path"] and con_huella:
+                e["huella"] = stat_huella(t["repo_path"], u["artifact_path"])
         out.append(e)
     return out
 
@@ -529,11 +563,12 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # detenido sin escribir nada. El sello de cierre de la skill es el único
         # contrato fiable, y ahora lo cumplen todas las fases.
         huella = leer_huella(log_path) if ok else None
-        estado_h, resto = huella or ("nada", "la corrida no declaró huella")
+        estado_h, resto = huella or ("nada", MOTIVO_SIN_HUELLA)
         if estado_h == "nada":
             ok = False
+        ruta, nota = partir_reserva(estado_h, resto)
         set_run(run_id, status="success" if ok else "error", finished_at=now(),
-                artifact_state=estado_h, artifact_path=resto)
+                artifact_state=estado_h, artifact_path=ruta, artifact_note=nota)
         set_ticket(ticket["id"])   # solo toca updated_at: el estado se calcula al leer
 
 
@@ -592,7 +627,15 @@ def artefacto(tid: int, ruta: str):
     # `.parents` y colaba como si fuera un descendiente real de un directorio
     # declarado. Resolver antes cierra eso, la asimetría absoluta/relativa y la
     # insensibilidad a mayúsculas de Windows.
-    real = (Path(t["repo_path"]) / ruta).resolve()
+    #
+    # `ruta` sale tal cual de la query string: un byte nulo o una ruta absurdamente
+    # larga hace que `resolve()` reviente con `ValueError`/`OSError` sin capturar, y
+    # sin capturarla eso era un 500 en vez del 400 que le corresponde a una entrada
+    # inválida del cliente.
+    try:
+        real = (Path(t["repo_path"]) / ruta).resolve()
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, f"Ruta inválida: {exc}")
 
     # 1. Declarada por una corrida DE ESTE TICKET, o un archivo BAJO un directorio
     #    declarado — a cualquier profundidad, no solo hijo directo: `stat_huella` (Tarea

@@ -60,7 +60,10 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
                 <span className="text-muted-foreground">{r.started_at ?? "en cola"}</span>
                 <span className="text-muted-foreground">{duracion(r.started_at, r.finished_at)}</span>
                 {r.artifact_path && (
-                  <span className="truncate font-mono text-xs text-muted-foreground"
+                  // Monoespaciada solo cuando de verdad es una ruta: en `nada`,
+                  // `artifact_path` guarda el motivo en prosa, no un archivo.
+                  <span className={`truncate text-xs text-muted-foreground ${
+                    r.artifact_state === "nada" ? "" : "font-mono"}`}
                         title={r.artifact_path}>
                     {r.artifact_state}: {r.artifact_path}
                   </span>

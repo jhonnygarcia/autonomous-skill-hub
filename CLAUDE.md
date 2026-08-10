@@ -83,12 +83,27 @@ Pedir una fase que no está en `PHASE_COMMANDS` devuelve `400` sin lanzar subpro
 El runner pasa `--allowedTools` con el MCP: en headless, `--permission-mode acceptEdits`
 **no** auto-aprueba las tools MCP y sin esa bandera el agente no puede leer el work item.
 
-**El código de salida no basta para saber si hubo plan**: `claude -p` sale con 0 aunque
-el agente se haya detenido sin hacer nada. Por eso `change-planning` está obligada a
-cerrar con un sello (`PLAN: validado` | `sin-validar` | `no-escrito`) y el runner decide
-por la **última** coincidencia en el log — anclar en la última no es un detalle: el
-cuerpo de la skill viaja en el log y contiene los tres sellos literalmente, así que
-comprobar la mera presencia hace que la comprobación se encuentre a sí misma.
+**El código de salida no basta para saber si hubo entregable**: `claude -p` sale con 0
+aunque el agente se haya detenido sin hacer nada. Por eso las dos skills están
+obligadas a cerrar con un sello (`HUELLA: ok|parcial|nada — <ruta>`, con la reserva de
+un `parcial` tras ` · ` en la misma línea) y el runner lo exige a toda fase, no solo a
+`design`. Decide por la **última** coincidencia en el log — anclar en la última no es
+un detalle: el cuerpo de la skill viaja en el log y contiene los tres sellos
+literalmente, así que comprobar la mera presencia hace que la comprobación se
+encuentre a sí misma.
+
+**El avance se pliega de `runs`, no se guarda aparte.** `GET /tickets/{id}` devuelve
+`fases`: una entrada por nombre de `PHASES` con el estado de su corrida más reciente.
+`tickets.status` ya no es una columna fuente — se calcula plegando esas fases en cada
+lectura — y `current_phase` desapareció de la tabla: existía desde el primer commit,
+se inicializaba a `analyze` y nada la escribió jamás. `Timeline.tsx` es la vista de
+detalle que pinta ese recorrido, con el botón de lanzar cada fase junto a su huella.
+
+**`GET /tickets/{tid}/artefacto?ruta=...`** sirve lo que una corrida declaró haber
+escrito, no un explorador de archivos: exige las cuatro a la vez — la ruta la declaró
+una corrida de ESTE ticket (o cae bajo un directorio que sí declaró, a cualquier
+profundidad), cae dentro del repo principal o un extra del ticket, es un archivo
+regular, y se trunca a 512 KB sin partir un carácter multibyte.
 
 Overrides por env var (los tests los usan): `ORCH_DB`, `ORCH_LOGS`,
 `ORCH_CLAUDE_CMD` (JSON con el argv del CLI — `tests/fake_claude.py` lo sustituye).

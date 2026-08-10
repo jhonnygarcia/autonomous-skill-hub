@@ -19,12 +19,19 @@ export function estado(t: Ticket, activo: ActiveRun | null) {
   return { label, color: COLOR[label] ?? COLOR.registrado }
 }
 
+/** Motivo por el que hay una corrida activa que bloquea, o "" si no la hay. Compartido
+ *  por `bloqueo` y `puedeLanzar`: las dos frases ("esta corrida ya está en marcha" /
+ *  "esperando a #N en proyecto") vivían duplicadas literalmente en ambas. */
+function motivoCorridaActiva(activo: ActiveRun | null, ticketId: number): string {
+  if (!activo) return ""
+  if (activo.ticket_id === ticketId) return "esta corrida ya está en marcha"
+  return `esperando a #${activo.ado_id} en ${activo.project}`
+}
+
 /** Motivo por el que NO se puede lanzar, o "" si sí se puede. El lock es global:
  *  lo que bloquea puede estar en un proyecto que ni siquiera estás mirando. */
 export function bloqueo(t: Ticket, activo: ActiveRun | null): string {
-  if (!activo) return ""
-  if (activo.ticket_id === t.id) return "esta corrida ya está en marcha"
-  return `esperando a #${activo.ado_id} en ${activo.project}`
+  return motivoCorridaActiva(activo, t.id)
 }
 
 /** Los estados de una corrida son los suyos (queued/running/success/error), no los del ticket. */
@@ -35,21 +42,21 @@ export function colorCorrida(status: string): string {
     : COLOR.registrado
 }
 
+/** `Xm00s` o `Xs`: la misma expresión que usaban por separado `duracion` (a partir de
+ *  dos ISO) y `Timeline.tsx` (a partir de `duracion_s`, ya calculado por el backend). */
+export function duracionTexto(s: number): string {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`
+}
+
 export function duracion(desde: string | null, hasta: string | null): string {
   if (!desde || !hasta) return ""
-  const s = Math.round((Date.parse(hasta) - Date.parse(desde)) / 1000)
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`
+  return duracionTexto(Math.round((Date.parse(hasta) - Date.parse(desde)) / 1000))
 }
 
 /** Las seis fases del pipeline, con el nombre que se le enseña al usuario. */
 export const FASE_LABEL: Record<string, string> = {
   analyze: "Análisis", design: "Plan", implement: "Código",
   test: "Pruebas", guards: "Revisión", pr: "PR",
-}
-
-/** Qué se lee bajo la fila cuando la fase dejó algo. */
-export const FASE_NOUN: Record<string, string> = {
-  analyze: "análisis", design: "plan",
 }
 
 /** Tamaño legible de un artefacto: bytes, KB o MB. */
@@ -90,10 +97,8 @@ export function puedeLanzar(
 ): string {
   const f = fases[i]
   if (!f.disponible) return "esta fase todavía no existe"
-  if (activo) {
-    return activo.ticket_id === ticketId ? "esta corrida ya está en marcha"
-      : `esperando a #${activo.ado_id} en ${activo.project}`
-  }
+  const m = motivoCorridaActiva(activo, ticketId)
+  if (m) return m
   const previa = fases.slice(0, i).filter(p => p.disponible).pop()
   if (previa && previa.estado !== "ok" && previa.estado !== "parcial") {
     return `necesita ${FASE_LABEL[previa.fase]} en verde`

@@ -79,7 +79,7 @@ fallo de la tarea, no una variante aceptable.
 # Análisis del ticket <id>: <título>
 
 **Tipo/Estado:** ... · **Asignado:** ... · **Iteración:** ...
-**Analizado:** <fecha> por ticket-agent v0.5.0
+**Analizado:** <fecha> por ticket-agent v0.5.1
 
 ## Qué pide
 (2-6 líneas fieles al ticket, sin interpretar de más)
@@ -137,12 +137,18 @@ fuente de cada cifra. Omite la sección entera si no hay trabajo empezado)
 
 **Regla obligatoria de cierre.** La última línea de tu resumen —sin nada después— tiene
 que ser exactamente este sello, seguido de la ruta del análisis relativa al repo
-principal:
+principal — **siempre con `/` como separador, nunca `\`, aunque el repo esté en
+Windows**: el orquestador la usa tal cual para leer el archivo del disco y como lista
+blanca de su visor, y una barra invertida rompe la regex que la extrae del log:
 
 - `HUELLA: ok — docs/tickets/<id>-analysis.md` — el análisis está escrito y completo.
-- `HUELLA: parcial — docs/tickets/<id>-analysis.md` — está escrito, pero con reservas
-  (no pudiste leer el padre, faltan adjuntos, quedó "Información faltante" con peso).
-  Explica la reserva en el resumen, no en la línea del sello.
+- `HUELLA: parcial — docs/tickets/<id>-analysis.md · <reserva en una línea>` — está
+  escrito, pero con reservas (no pudiste leer el padre, faltan adjuntos, quedó
+  "Información faltante" con peso). La reserva va EN la línea del sello, tras la ruta,
+  separada por ` · ` (espacio, punto medio, espacio) — no en el resumen: es lo único
+  que el orquestador guarda y muestra junto a la huella. Ejemplo:
+  `HUELLA: parcial — docs/tickets/3323-analysis.md · quedó "Información faltante" con
+  el padre sin leer`.
 - `HUELLA: nada — <motivo>` — no se escribió el archivo. El motivo va detrás del guion.
 
 El orquestador lee esta línea para decidir si la corrida vale: el código de salida del

@@ -127,15 +127,22 @@ se puede revisar vale más que ninguno.
 
 **Regla obligatoria de cierre.** La última línea del resumen —sin nada después— tiene
 que ser exactamente uno de estos tres sellos, seguido de la ruta del change relativa al
-repo principal (o del motivo, en el caso de `nada`). El orquestador lee esta línea para
-decidir si la corrida vale: el código de salida del CLI no lo dice, porque sale en 0
-aunque el agente se haya detenido sin escribir nada.
+repo principal (o del motivo, en el caso de `nada`) — **siempre con `/` como separador,
+nunca `\`, aunque el repo esté en Windows**: el orquestador la usa tal cual para leer el
+archivo del disco y como lista blanca de su visor, y una barra invertida rompe la regex
+que la extrae del log. El orquestador lee esta línea para decidir si la corrida vale: el
+código de salida del CLI no lo dice, porque sale en 0 aunque el agente se haya detenido
+sin escribir nada.
 
 - `HUELLA: ok — openspec/changes/<id>-<slug>` — el change está escrito y
   `openspec validate --changes --no-interactive` pasó.
-- `HUELLA: parcial — openspec/changes/<id>-<slug>` — el change se escribió pero la
-  validación no pasó (dos intentos) o no llegó a correrse. Explica la reserva en el
-  resumen.
+- `HUELLA: parcial — openspec/changes/<id>-<slug> · <reserva en una línea>` — el change
+  se escribió pero la validación no pasó (dos intentos) o no llegó a correrse. La
+  reserva va EN la línea del sello, tras la ruta, separada por ` · ` (espacio, punto
+  medio, espacio) — no en el resumen: es lo único que el orquestador guarda y muestra
+  junto a la huella. Ejemplo: `HUELLA: parcial —
+  openspec/changes/3323-carrier-api-v2-migration-xpo · openspec validate no pasó tras
+  dos intentos`.
 - `HUELLA: nada — <motivo>` — no se llegó a escribir ningún change: falta el análisis,
   `npx` no está disponible, o `openspec init` falló.
 

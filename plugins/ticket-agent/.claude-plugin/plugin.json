@@ -2,7 +2,7 @@
   "name": "ticket-agent",
   "displayName": "Ticket Agent",
   "description": "Agente que comprende tickets de Azure DevOps: work item, relaciones, adjuntos, comentarios, wiki y reglas del proyecto anfitrión → análisis estructurado en markdown",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Jhonny Garcia"
   },

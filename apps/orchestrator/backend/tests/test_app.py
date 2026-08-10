@@ -171,11 +171,38 @@ def test_huella_ok_deja_la_corrida_bien(client, monkeypatch):
 
 
 def test_huella_parcial_la_corrida_vale_y_conserva_la_reserva(client, monkeypatch):
+    """La reserva de un `parcial` viaja EN el sello, tras ` · ` — no en el resumen. El
+    runner la separa de la ruta: `artifact_path` se queda limpio (lista blanca del
+    visor) y la reserva sale por `fases_de` como `motivo`, igual que ya hace `error`."""
+    _use_fake_claude(
+        monkeypatch,
+        huella="parcial — openspec/changes/3323-xpo · openspec validate no pasó",
+    )
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    run = detail["runs"][0]
+    assert run["status"] == "success" and run["artifact_state"] == "parcial"
+    # la ruta queda limpia, sin la reserva colgando detrás
+    assert run["artifact_path"] == "openspec/changes/3323-xpo"
+    fase = detail["fases"][1]
+    assert fase["estado"] == "parcial"
+    assert fase["motivo"] == "openspec validate no pasó"
+
+
+def test_huella_parcial_sin_reserva_sigue_funcionando(client, monkeypatch):
+    """Un `parcial` sin ` · ` no tiene reserva: tiene que seguir funcionando igual que
+    antes de este cambio, sin `motivo`."""
     _use_fake_claude(monkeypatch, huella="parcial — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    detail = client.get(f"/tickets/{tid}").json()
+    run = detail["runs"][0]
     assert run["status"] == "success" and run["artifact_state"] == "parcial"
+    assert run["artifact_path"] == "openspec/changes/3323-xpo"
+    fase = detail["fases"][1]
+    assert fase["estado"] == "parcial"
+    assert "motivo" not in fase
 
 
 def test_huella_nada_deja_la_corrida_en_error(client, monkeypatch):
@@ -244,13 +271,53 @@ def test_leer_huella_con_la_forma_real_del_stream_json(tmp_path):
     assert app.leer_huella(log) == ("ok", "docs/tickets/3323-analysis.md")
 
 
-def test_current_phase_ya_no_existe(client):
-    import app
+def test_current_phase_ya_no_existe(tmp_path, monkeypatch):
+    """Antes este test corría sobre una BD recién creada por el fixture `client`, cuyo
+    `CREATE TABLE` nunca incluyó `current_phase`: pasaba sin ejecutar jamás el
+    `ALTER TABLE ... DROP COLUMN` que decía proteger — placebo puro. Aquí se arma a
+    mano una BD con el esquema VIEJO (con `current_phase`, sin `artifact_state` ni
+    `artifact_path`) y se deja que `init_db` migre de verdad."""
+    import sqlite3 as sq
+
+    db_path = tmp_path / "vieja.db"
+    conn = sq.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE projects(
+          name TEXT PRIMARY KEY, org TEXT NOT NULL, project TEXT NOT NULL,
+          repo_path TEXT NOT NULL, repo_label TEXT NOT NULL DEFAULT '',
+          extra_dirs TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE tickets(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, ado_id INTEGER NOT NULL,
+          org TEXT NOT NULL, project TEXT NOT NULL, repo_path TEXT NOT NULL,
+          extra_dirs TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'queued',
+          current_phase TEXT NOT NULL DEFAULT 'analyze',
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE runs(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          phase TEXT NOT NULL, instructions TEXT, status TEXT NOT NULL DEFAULT 'queued',
+          log_path TEXT, started_at TEXT, finished_at TEXT
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("ORCH_DB", str(db_path))
+    monkeypatch.setenv("ORCH_LOGS", str(tmp_path / "logs"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    if "app" in sys.modules:
+        del sys.modules["app"]
+    import app  # ejecuta init_db() al importar, contra la BD vieja de arriba
+
     with app.db() as c:
-        cols = {r["name"] for r in c.execute("PRAGMA table_info(tickets)")}
-    assert "current_phase" not in cols
-    assert {"artifact_state", "artifact_path"} <= {
-        r["name"] for r in app.db().execute("PRAGMA table_info(runs)")}
+        cols_tickets = {r["name"] for r in c.execute("PRAGMA table_info(tickets)")}
+        cols_runs = {r["name"] for r in c.execute("PRAGMA table_info(runs)")}
+    assert "current_phase" not in cols_tickets
+    assert {"artifact_state", "artifact_path", "artifact_note"} <= cols_runs
 
 
 def test_fase_declarada_pero_no_ejecutable_da_400(client, monkeypatch):
@@ -274,13 +341,27 @@ def test_run_sin_fase_sigue_siendo_analyze(client, monkeypatch):
 
 def test_bash_va_acotado_a_openspec(client, monkeypatch):
     """La Fase 2 necesita invocar `@fission-ai/openspec`; nada más. Bash suelto sería
-    otra cosa."""
+    otra cosa.
+
+    Se comprueba sobre los argumentos REALES del subproceso, no sobre una subcadena
+    del log: `assert " Bash " not in log` buscaba "Bash" rodeado de espacios por los
+    dos lados, y un "Bash" pelado al FINAL de la lista de `--allowedTools` queda
+    seguido de un salto de línea, no de un espacio — la comprobación no lo veía ahí."""
     _use_fake_claude(monkeypatch)
+    import asyncio
+
+    capturado = {}
+    original = asyncio.create_subprocess_exec
+
+    async def espia(*args, **kwargs):
+        capturado["argv"] = args
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", espia)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    log = client.get(f"/tickets/{tid}").json()["log_tail"]
-    assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in log
-    assert " Bash " not in log        # nunca Bash a secas
+    assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in capturado["argv"]
+    assert "Bash" not in capturado["argv"]       # nunca Bash a secas, como argumento exacto
 
 
 def test_bash_incluye_las_dos_formas_de_invocar_openspec_en_design(client, monkeypatch):
@@ -505,6 +586,31 @@ def test_fase_en_error_lleva_el_motivo_del_sello(client, monkeypatch):
     assert "huella" not in f
 
 
+def test_corrida_historica_success_sin_huella_no_dice_que_fallo(client, monkeypatch):
+    """Las 5 corridas históricas de antes de este contrato salieron con status=success
+    (el CLI cerró en 0) y sin sello — no fallaron. `fases_de` las pinta como `error`
+    porque no puede confiar en un artefacto sin declarar, pero el motivo no puede decir
+    "falló" ahí: sería mentir sobre lo que de verdad pasó."""
+    import os
+    import sqlite3 as sq
+
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    conn = sq.connect(os.environ["ORCH_DB"])
+    conn.execute(
+        "INSERT INTO runs(ticket_id, phase, status, started_at, finished_at) "
+        "VALUES(?, 'analyze', 'success', '2026-01-01T00:00:00+00:00', "
+        "'2026-01-01T00:01:00+00:00')",
+        (tid,),
+    )
+    conn.commit()
+    conn.close()
+    f = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert f["estado"] == "error"
+    assert "falló" not in f["motivo"]
+    assert "no declaró huella" in f["motivo"]
+    assert "anterior a este contrato" in f["motivo"]
+
+
 TOPE = 512 * 1024
 
 
@@ -523,6 +629,26 @@ def test_artefacto_sirve_lo_declarado(client, monkeypatch, tmp_path):
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "docs/tickets/3323-analysis.md"})
     assert r.status_code == 200
     assert r.json()["texto"] == "# Análisis" and r.json()["truncado"] is False
+
+
+def test_artefacto_sirve_lo_declarado_por_una_corrida_parcial_con_reserva(
+    client, monkeypatch, tmp_path
+):
+    """Regresión del hallazgo A: separar la reserva de la ruta en `artifact_path` no
+    puede ensuciar la lista blanca del visor — un `parcial` con reserva se sigue
+    sirviendo exactamente igual que uno sin ella."""
+    d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    d.mkdir(parents=True)
+    (d / "proposal.md").write_text("propuesta", encoding="utf-8")
+    _use_fake_claude(
+        monkeypatch,
+        huella="parcial — openspec/changes/3323-xpo · openspec validate no pasó",
+    )
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    r = client.get(f"/tickets/{tid}/artefacto",
+                   params={"ruta": "openspec/changes/3323-xpo/proposal.md"})
+    assert r.status_code == 200 and r.json()["texto"] == "propuesta"
 
 
 def test_artefacto_sirve_un_hijo_directo_de_un_directorio_declarado(client, monkeypatch, tmp_path):
@@ -554,6 +680,20 @@ def test_artefacto_rechaza_travesia(client, monkeypatch, tmp_path):
     tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
     for ruta in ("../../etc/passwd", "docs/../../fuera.md", "docs/tickets/../../../x"):
         assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": ruta}).status_code == 400
+
+
+def test_artefacto_ruta_con_byte_nulo_da_400_no_500(client, monkeypatch, tmp_path):
+    """`ruta` llega tal cual de la query string. Un byte nulo hace que `Path(...).resolve()`
+    reviente con `ValueError` sin capturar — eso era un 500 en vez del 400 que le
+    corresponde a una entrada inválida del cliente."""
+    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    import app
+
+    try:
+        app.artefacto(tid, "docs\x00tickets/a.md")
+        assert False, "debía levantar HTTPException"
+    except app.HTTPException as exc:
+        assert exc.status_code == 400
 
 
 def test_artefacto_rechaza_ruta_absoluta_fuera_del_repo(client, monkeypatch, tmp_path):
