@@ -145,6 +145,53 @@ def test_run_success_writes_log_and_states(client, monkeypatch):
     assert "/ticket-agent:analyze 3311" in detail["log_tail"]
 
 
+def test_run_design_invoca_el_comando_plan(client, monkeypatch):
+    """La fase decide el comando: design NO puede lanzar el analyze."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert "/ticket-agent:plan 3323" in detail["log_tail"]
+    assert "/ticket-agent:analyze" not in detail["log_tail"]
+    assert detail["runs"][0]["phase"] == "design"
+
+
+def test_run_design_deja_el_ticket_planned(client, monkeypatch):
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["status"] == "planned"
+
+
+def test_fase_declarada_pero_no_ejecutable_da_400(client, monkeypatch):
+    """implement está en PHASES pero no existe: se rechaza sin lanzar subproceso."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert r.status_code == 400 and "implement" in r.json()["detail"]
+    assert client.get(f"/tickets/{tid}").json()["runs"] == []
+
+
+def test_run_sin_fase_sigue_siendo_analyze(client, monkeypatch):
+    """Compatibilidad: quien ya llamaba sin fase no se entera del cambio."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["runs"][0]["phase"] == "analyze"
+    assert "/ticket-agent:analyze 3311" in detail["log_tail"]
+
+
+def test_bash_va_acotado_a_openspec(client, monkeypatch):
+    """La Fase 2 necesita `npx openspec`; nada más. Bash suelto sería otra cosa."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "Bash(npx openspec:*)" in log
+    assert " Bash " not in log        # nunca Bash a secas
+
+
 def test_run_sobrevive_a_una_linea_gigante(client, monkeypatch):
     """El stream-json pasa de 64 KiB en una sola línea cuando el agente escribe un
     archivo grande. Leer por líneas reventaba ahí y marcaba `error` una corrida buena."""

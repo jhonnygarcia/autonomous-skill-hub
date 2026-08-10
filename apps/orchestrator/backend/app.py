@@ -14,7 +14,16 @@ BASE = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("ORCH_DB", BASE / "orchestrator.db"))
 LOGS_DIR = Path(os.environ.get("ORCH_LOGS", BASE / "logs"))
 
-PHASES = ["analyze", "design", "implement", "test", "guards", "pr"]  # v1: solo analyze ejecutable
+PHASES = ["analyze", "design", "implement", "test", "guards", "pr"]
+
+# Declarar una fase no es implementarla. Solo estas dos se pueden lanzar; el resto
+# están en PHASES para que la UI sepa que existen, y se rechazan con 400.
+PHASE_COMMANDS = {
+    "analyze": "/ticket-agent:analyze",
+    "design": "/ticket-agent:plan",
+}
+# En qué deja al ticket una corrida que sale bien.
+PHASE_DONE = {"analyze": "analyzed", "design": "planned"}
 
 
 def now() -> str:
@@ -147,6 +156,7 @@ class TicketIn(BaseModel):
 
 class RunIn(BaseModel):
     instructions: str | None = None
+    phase: str = "analyze"  # por defecto, para no romper a quien ya llamaba sin ella
 
 
 def ticket_row(tid: int) -> sqlite3.Row | None:
@@ -287,12 +297,12 @@ def set_ticket(tid: int, **fields):
         c.execute(f"UPDATE tickets SET {cols} WHERE id=?", (*fields.values(), tid))
 
 
-async def execute_run(run_id: int, ticket: dict, instructions: str | None):
+async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase: str):
     async with RUN_LOCK:  # ponytail: lock global, por-repo si algún día duele
         log_path = LOGS_DIR / f"{run_id}.log"
         set_run(run_id, status="running", log_path=str(log_path), started_at=now())
         set_ticket(ticket["id"], status="running")
-        prompt = f"/ticket-agent:analyze {ticket['ado_id']}"
+        prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
         extras = norm_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
         if extras:
             # Montarlos con --add-dir no basta: en la corrida del 3322 el agente tenía
@@ -316,7 +326,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
             "--permission-mode", "acceptEdits",
             # En headless, acceptEdits NO auto-aprueba las tools del MCP: se
             # deniegan solas y el agente se queda sin poder leer el work item.
+            # Bash va acotado por comando: la Fase 2 necesita `npx openspec init` y
+            # `validate`, y nada más. Un Bash suelto en el repo de un cliente es otra
+            # conversación.
             "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
+            "Bash(npx openspec:*)",
         ]
         for e in extras:
             cmd += ["--add-dir", e["path"]]
@@ -352,7 +366,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None):
             with open(log_path, "a", encoding="utf-8") as log:
                 log.write(f"\n[orchestrator] excepción: {exc}\n")
         set_run(run_id, status="success" if ok else "error", finished_at=now())
-        set_ticket(ticket["id"], status="analyzed" if ok else "error")
+        set_ticket(ticket["id"], status=PHASE_DONE[phase] if ok else "error")
 
 
 @app.post("/tickets/{tid}/run", status_code=202)
@@ -360,6 +374,8 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
     t = ticket_row(tid)
     if not t:
         raise HTTPException(404)
+    if body.phase not in PHASE_COMMANDS:
+        raise HTTPException(400, f"La fase '{body.phase}' no es ejecutable todavía")
     with db() as c:
         active = c.execute(
             "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued','running')", (tid,)
@@ -369,10 +385,10 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
     with db() as c:
         cur = c.execute(
             "INSERT INTO runs(ticket_id, phase, instructions, status) VALUES(?,?,?,'queued')",
-            (tid, "analyze", body.instructions),
+            (tid, body.phase, body.instructions),
         )
         run_id = cur.lastrowid
     set_ticket(tid, status="queued")
-    background.add_task(execute_run, run_id, dict(t), body.instructions)
+    background.add_task(execute_run, run_id, dict(t), body.instructions, body.phase)
     with db() as c:
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
