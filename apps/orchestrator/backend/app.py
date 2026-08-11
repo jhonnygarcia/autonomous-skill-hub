@@ -73,6 +73,63 @@ def settings_de(phase: str) -> list[str]:
     return ["--settings", json.dumps(cfg)]
 
 
+def texto_repos(phase: str, extras: list[dict], noun: str) -> str:
+    """El bloque del prompt que le presenta al agente los repos extra del ticket.
+
+    Montarlos con `--add-dir` no basta: en la corrida del 3322 el agente tenía
+    ProvidenceTMSTenant accesible, lo mencionó 15 veces y no lo abrió ni una. Hay que
+    nombrárselos, y la etiqueta es lo que le dice cuándo mirar ahí.
+
+    Se ramifica por fase igual que las tools y `settings_de`, y por un motivo que no es
+    cosmético: la decisión 4 del diseño dice que en `implement` **todo repo montado del
+    ticket es escribible**, y la skill `change-implementation` instruye al agente a que,
+    si el mapa del plan y el prompt difieren, mande el prompt. Un texto único que dice
+    "legibles" y "se escribe en el principal" es, en `implement`, la instrucción
+    equivocada con prioridad máxima — y deja sin implementar justo al 3320, cuyo código
+    vive entero en un `extra_dir`.
+    """
+    if not extras:
+        return ""
+    listado = "; ".join(
+        e["path"] + (f" — {e['label']}" if e["label"] else "") for e in extras)
+    if phase == "implement":
+        return (
+            f"\n\nRepos adicionales montados además del principal, y en esta fase todos "
+            f"ellos son escribibles: {listado}. El runner ya preparó la rama de trabajo "
+            "en cada uno. Escribe el código en el repo que el plan señale como sitio del "
+            "cambio, no forzosamente en el principal, y commitea en cada repo lo que le "
+            "toque."
+        )
+    return (
+        f"\n\nRepos adicionales montados y legibles además del principal: {listado}. "
+        "Léelos cuando el ticket apunte a comportamiento que no vive en el repo "
+        f"principal; {noun} se sigue escribiendo en el principal."
+    )
+
+
+def texto_ajuste(phase: str, noun: str, instructions: str | None) -> str:
+    """Las instrucciones de ajuste del usuario, también por fase.
+
+    En `analyze` y `design` el entregable es UN archivo y re-correr es regenerarlo. En
+    `implement` no hay "el archivo" que regenerar: el entregable es el código, y el
+    único archivo que la fase reescribe es `tasks.md`, que es el registro de avance —
+    regenerarlo borraría precisamente lo que permite retomar la corrida.
+    """
+    if not instructions:
+        return ""
+    if phase == "implement":
+        return (
+            f"\n\nInstrucciones de ajuste del usuario para esta corrida de {noun} "
+            "(aplícalas a las tareas que queden por hacer; `tasks.md` es el registro de "
+            "avance de esta fase: se marca según avanzas, no se regenera ni se "
+            f"reabren las casillas ya cerradas): {instructions}"
+        )
+    return (
+        f"\n\nInstrucciones de ajuste del usuario para re-trabajar {noun} "
+        f"(aplícalas y regenera el archivo): {instructions}"
+    )
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -207,6 +264,31 @@ def preparar_rama(repo: str, ado_id: int) -> str:
     if r.returncode != 0:
         raise HTTPException(409, f"No se pudo preparar la rama en {repo}: {r.stderr.strip()}")
     return nombre
+
+
+def repos_del_ticket(t) -> list[str]:
+    """Los repos que el ticket monta: el principal primero, luego los extra. Ese es el
+    orden en que se comprueban y se ramifican, y vale igual para una fila de SQLite que
+    para el `dict` que viaja a la tarea de fondo."""
+    return [t["repo_path"]] + [
+        e["path"] for e in norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
+
+
+def preparar_repos(repos: list[str], ado_id: int) -> str | None:
+    """Guarda de árbol limpio en TODOS y, solo si todos pasan, la rama en todos.
+
+    Los dos pasos van en este orden y no entremezclados repo a repo: si se comprobara y
+    ramificara uno, luego el siguiente, un segundo repo sucio dejaría al primero ya
+    cambiado de rama sin corrida que lo explique.
+
+    Se ramifican todos, incluidos los que el plan acabe no tocando: el runner no parsea
+    el plan, y una rama sin commits es ruido que se borra solo.
+    """
+    check_limpios(repos)
+    rama = None
+    for r in repos:
+        rama = preparar_rama(r, ado_id)
+    return rama
 
 
 def split_repos(repos: list) -> tuple:
@@ -575,25 +657,40 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         log_path = LOGS_DIR / f"{run_id}.log"
         set_run(run_id, status="running", log_path=str(log_path), started_at=now())
         set_ticket(ticket["id"])
+        # La preparación del repo va AQUÍ, bajo el lock y justo antes de lanzar el
+        # subproceso, y no solo en el POST. La del POST sigue existiendo —es la que da el
+        # 409 inmediato sin gastar nada— pero no puede ser la autoritativa por dos
+        # motivos reales: (1) su chequeo de corrida activa filtra por `ticket_id`, así
+        # que dos tickets distintos sobre el MISMO repo físico la pasan los dos y se
+        # cambian la rama el uno al otro mientras el agente del primero trabaja; (2)
+        # entre el POST y el arranque puede pasar media hora esperando el lock, y el
+        # usuario puede haber editado archivos en ese hueco.
+        rama = None
+        if phase == "implement":
+            try:
+                rama = preparar_repos(repos_del_ticket(ticket), ticket["ado_id"])
+            except Exception as exc:
+                # Estamos dentro de una tarea de fondo: una excepción aquí no la recibe
+                # nadie y dejaría la corrida colgada en `running` para siempre. Se cierra
+                # como error con el motivo legible, por el mismo camino que ya usa una
+                # corrida sin sello (`artifact_state='nada'`, motivo en `artifact_path`,
+                # que es de donde `fases_de` lo saca para la UI).
+                motivo = "no se pudo preparar el repositorio: " + str(
+                    getattr(exc, "detail", None) or exc)
+                with open(log_path, "w", encoding="utf-8") as log:
+                    log.write(f"[orchestrator] {motivo}\n")
+                set_run(run_id, status="error", finished_at=now(),
+                        artifact_state="nada", artifact_path=motivo)
+                set_ticket(ticket["id"])
+                return
+            # La rama que se guarda es la que se preparó bajo el lock, no una que el POST
+            # dedujo antes de esperar.
+            set_run(run_id, branch=rama)
         prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
         noun = PHASE_NOUN[phase]
         extras = norm_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
-        if extras:
-            # Montarlos con --add-dir no basta: en la corrida del 3322 el agente tenía
-            # ProvidenceTMSTenant accesible, lo mencionó 15 veces y no lo abrió ni una.
-            # Hay que nombrárselos, y la etiqueta es lo que le dice cuándo mirar ahí.
-            listado = "; ".join(
-                e["path"] + (f" — {e['label']}" if e["label"] else "") for e in extras)
-            prompt += (
-                f"\n\nRepos adicionales montados y legibles además del principal: {listado}. "
-                "Léelos cuando el ticket apunte a comportamiento que no vive en el repo "
-                f"principal; {noun} se sigue escribiendo en el principal."
-            )
-        if instructions:
-            prompt += (
-                f"\n\nInstrucciones de ajuste del usuario para re-trabajar {noun} "
-                f"(aplícalas y regenera el archivo): {instructions}"
-            )
+        prompt += texto_repos(phase, extras, noun)
+        prompt += texto_ajuste(phase, noun, instructions)
         cmd = claude_cmd() + [
             "-p", prompt,
             "--output-format", "stream-json", "--verbose",
@@ -664,28 +761,17 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         ).fetchone()
     if active:
         raise HTTPException(409, "Este ticket ya tiene una corrida activa")
-    rama = None
     if body.phase == "implement":
-        # Los tres pasos deterministas del diseño, antes de gastar un subproceso.
-        repos = [t["repo_path"]] + [e["path"] for e in
-                                    norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
-        check_limpios(repos)
-        for r in repos:
-            # En todos, incluidos los que el plan acabe no tocando: el runner no
-            # parsea el plan, y una rama sin commits es ruido que se borra solo.
-            # ponytail: si `preparar_rama` falla a mitad del bucle (guarda ya pasada,
-            # así que no es un repo sucio: p. ej. un `git switch` que revienta por otra
-            # razón), los repos anteriores quedan en `ticket-agent/<id>` sin que se
-            # llegue a insertar la corrida que la explique. No se deshace: revertir la
-            # rama de vuelta es más maquinaria de la que este caso raro merece, y la
-            # rama en sí no es destructiva (no toca el árbol de trabajo). Se acepta
-            # como inconsistencia menor, visible con `git branch` si hace falta.
-            rama = preparar_rama(r, t["ado_id"])
+        # La guarda, aquí: es la que devuelve el 409 inmediato sin gastar un subproceso
+        # ni dejar una corrida encolada, y esa propiedad la pide el diseño. Lo que NO se
+        # hace aquí es cambiar de rama: eso ocurre en `execute_run`, bajo el lock (ver
+        # allí el porqué). Esta comprobación es un filtro temprano, no la autoritativa.
+        check_limpios(repos_del_ticket(t))
     with db() as c:
         cur = c.execute(
-            "INSERT INTO runs(ticket_id, phase, instructions, status, branch) "
-            "VALUES(?,?,?,'queued',?)",
-            (tid, body.phase, body.instructions, rama),
+            "INSERT INTO runs(ticket_id, phase, instructions, status) "
+            "VALUES(?,?,?,'queued')",
+            (tid, body.phase, body.instructions),
         )
         run_id = cur.lastrowid
     set_ticket(tid)

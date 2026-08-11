@@ -393,6 +393,14 @@ def _espiar_argv(monkeypatch):
 
 
 def test_implement_lleva_bash_pelado_y_settings(client, monkeypatch, tmp_path):
+    """El hook no vale por estar mencionado, vale por su forma: se parsea el JSON de
+    `--settings` y se afirma sobre su estructura.
+
+    Buscar la subcadena `deny_push.py` en el argumento dejaba pasar cuatro mutaciones
+    que anulan el hook por completo, verificadas una a una: `PreToolUse`→`PostToolUse`
+    (correría DESPUÉS del push, con el `exit 2` ya sin nada que impedir), otro
+    `matcher` (no se dispararía con Bash), otro `type` (Claude no lo ejecuta) y una
+    ruta de script que no existe en disco."""
     import app
     _use_fake_claude(monkeypatch)
     cap = _espiar_argv(monkeypatch)
@@ -403,7 +411,19 @@ def test_implement_lleva_bash_pelado_y_settings(client, monkeypatch, tmp_path):
     argv = cap["argv"]
     assert "Bash" in argv                      # pelado, no un especificador
     assert "--settings" in argv
-    assert "deny_push.py" in argv[argv.index("--settings") + 1]
+
+    cfg = json.loads(argv[argv.index("--settings") + 1])
+    # ANTES del push, o no es una contención: es una crónica.
+    assert list(cfg["hooks"]) == ["PreToolUse"]
+    [entrada] = cfg["hooks"]["PreToolUse"]
+    assert entrada["matcher"] == "Bash"        # la única tool que puede empujar nada
+    [gancho] = entrada["hooks"]
+    assert gancho["type"] == "command"
+    # El comando es `"<python>" "<script>"`: la última cadena entrecomillada es el hook,
+    # y tiene que ser un archivo que exista de verdad — un `--settings` que apunte a un
+    # script inexistente es un hook que no corre.
+    ruta = Path(gancho["command"].split('"')[-2])
+    assert ruta.name == "deny_push.py" and ruta.is_file()
 
 
 def test_analyze_no_lleva_settings_ni_bash(client, monkeypatch):
@@ -415,6 +435,77 @@ def test_analyze_no_lleva_settings_ni_bash(client, monkeypatch):
     client.post(f"/tickets/{tid}/run", json={})
     assert "--settings" not in cap["argv"]
     assert "Bash" not in cap["argv"]
+
+
+def _prompt_de(cap):
+    """El `-p` real del subproceso, que es lo único que el agente llega a leer."""
+    argv = cap["argv"]
+    return argv[argv.index("-p") + 1]
+
+
+def test_prompt_de_implement_declara_escribibles_los_repos_extra(client, monkeypatch, tmp_path):
+    """Decisión 4 del diseño: en `implement` TODO repo montado del ticket es escribible.
+
+    No es un matiz de redacción: la skill `change-implementation` (sección 3) manda al
+    agente obedecer al prompt cuando el mapa del plan y el prompt difieren, así que un
+    prompt que dice "legibles / se escribe en el principal" es la instrucción
+    equivocada con prioridad máxima — y el 3320 tiene todo su código en un `extra_dir`.
+    """
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    prompt = _prompt_de(cap)
+    assert "backend-repo" in prompt            # el extra se sigue nombrando
+    assert "escribibles" in prompt
+    assert "legibles" not in prompt
+    assert "se sigue escribiendo en el principal" not in prompt
+
+
+def test_prompt_de_analyze_mantiene_los_repos_extra_como_legibles(client, monkeypatch):
+    """El otro lado de la ramificación. Un test que solo mirara `implement` pasaría
+    igual con el texto de escritura viajando en TODAS las fases — que es exactamente el
+    defecto simétrico: la Fase 1 es de solo lectura."""
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    prompt = _prompt_de(cap)
+    assert "backend-repo" in prompt
+    assert "legibles" in prompt
+    assert "el análisis se sigue escribiendo en el principal" in prompt
+    assert "escribibles" not in prompt
+
+
+def test_ajuste_en_implement_no_manda_regenerar_el_archivo(client, monkeypatch, tmp_path):
+    """En `implement` no hay "el archivo" que regenerar: el entregable es el código, y
+    el único archivo que la fase reescribe es `tasks.md`, el registro de avance.
+    Mandarle regenerarlo es mandarle borrar lo que permite retomar la corrida."""
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run",
+                json={"phase": "implement", "instructions": "usa el patrón del handler"})
+    prompt = _prompt_de(cap)
+    assert "usa el patrón del handler" in prompt
+    assert "regenera el archivo" not in prompt
+    assert "tasks.md" in prompt
+
+
+def test_ajuste_en_design_sigue_mandando_regenerar_el_archivo(client, monkeypatch):
+    """El otro lado: donde el entregable SÍ es un archivo, re-correr es regenerarlo."""
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run",
+                json={"phase": "design", "instructions": "acota el alcance"})
+    prompt = _prompt_de(cap)
+    assert "acota el alcance" in prompt
+    assert "regenera el archivo" in prompt
 
 
 def test_las_cuatro_tablas_incluyen_implement():
@@ -1111,6 +1202,25 @@ def test_preparar_rama_dos_veces_no_falla(tmp_path, monkeypatch):
     assert ramas.count("ticket-agent/3320") == 1
 
 
+def test_preparar_rama_no_confunde_un_tag_con_la_rama(tmp_path, monkeypatch):
+    """El `rev-parse` lleva `refs/heads/` a propósito. Sin ese prefijo —`rev-parse
+    --verify -q ticket-agent/3320`— un TAG homónimo resuelve igual de bien que una
+    rama, el runner cree que la rama ya existe y hace `git switch <tag>`, que git
+    rechaza ("a branch is expected"): la fase queda inlanzable con un 409.
+
+    Una rama y un tag homónimos son lo único que distingue los dos casos; con solo
+    ramas de por medio, quitar `refs/heads/` deja la suite entera en verde."""
+    app = _app(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    subprocess.run(["git", "tag", "ticket-agent/3320"], cwd=repo, check=True)
+    assert app.preparar_rama(str(repo), 3320) == "ticket-agent/3320"
+    actual = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
+                            capture_output=True, text=True).stdout.strip()
+    assert actual == "ticket-agent/3320"
+
+
 def test_runs_tiene_columna_branch(client):
     import app
     with app.db() as c:
@@ -1242,3 +1352,82 @@ def test_implement_con_un_solo_repo_prepara_la_rama(client, monkeypatch, tmp_pat
     assert r.status_code == 202
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
     assert run["branch"] == "ticket-agent/3320"
+
+
+def _encolar_sin_correr(monkeypatch):
+    """Deja la corrida encolada sin ejecutarla y devuelve un `correr()` que la ejecuta
+    de verdad, cuando el test quiera.
+
+    `TestClient` corre las background tasks DENTRO del `client.post(...)`, así que sin
+    esto no hay hueco donde meterse entre "el POST pasó la guarda" y "la corrida
+    arranca" — que es justo el hueco que estos dos tests ejercitan. `run_ticket` resuelve
+    `execute_run` como global del módulo al ejecutarse, así que sustituirlo funciona."""
+    import app
+    import asyncio
+    pendientes = []
+    real = app.execute_run
+    monkeypatch.setattr(app, "execute_run", lambda *a: pendientes.append(a))
+    return lambda: asyncio.run(real(*pendientes[0]))
+
+
+def test_un_arbol_que_se_ensucia_tras_el_post_no_llega_a_lanzar_el_subproceso(
+    client, monkeypatch, tmp_path
+):
+    """La guarda del POST se evalúa al encolar, pero la corrida puede arrancar mucho
+    después, esperando el lock. Si el usuario edita archivos en ese hueco —o si otro
+    ticket sobre el MISMO repo físico se coló por la guarda, que filtra por `ticket_id`—
+    el agente arrancaría sobre un árbol que ya no es el validado y commitearía trabajo
+    ajeno como suyo. Falla si la comprobación tardía desaparece de `execute_run`: el
+    subproceso se lanzaría igual."""
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    correr = _encolar_sin_correr(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert r.status_code == 202          # con el árbol limpio, el POST encola
+
+    # El usuario edita mientras la corrida espera el lock.
+    (tmp_path / "repo" / "seed.txt").write_text("v2\n", encoding="utf-8")
+    correr()
+
+    assert "argv" not in cap             # nunca se lanzó el CLI
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "error"
+    assert run["branch"] is None         # ni se cambió de rama
+    assert (tmp_path / "repo").as_posix() in run["artifact_path"]
+    # y la fase lo cuenta con un motivo legible, no con "no declaró huella"
+    fase = [f for f in client.get(f"/tickets/{tid}").json()["fases"]
+            if f["fase"] == "implement"][0]
+    assert fase["estado"] == "error" and "sin commitear" in fase["motivo"]
+    # el repo sigue donde estaba: la corrida no lo movió antes de rendirse
+    actual = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / "repo",
+                            capture_output=True, text=True).stdout.strip()
+    assert actual != "ticket-agent/3320"
+
+
+def test_la_rama_de_la_corrida_es_la_que_se_preparo_bajo_el_lock(
+    client, monkeypatch, tmp_path
+):
+    """El mismo camino tardío, pero saliendo bien. La fila queda con la rama y el estado
+    correctos aunque el POST no haya preparado nada: falla si `execute_run` deja de
+    ramificar o deja de escribir `branch`, y también si la rama volviera a salir del
+    POST (aquí la corrida está encolada y el POST ya devolvió `branch=None`)."""
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3320-x/tasks.md")
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    correr = _encolar_sin_correr(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    encolada = client.post(f"/tickets/{tid}/run", json={"phase": "implement"}).json()
+    assert encolada["branch"] is None    # el POST ya no ramifica
+
+    correr()
+
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["branch"] == "ticket-agent/3320"
+    assert run["status"] == "success"
+    for d in ("repo", "backend-repo"):   # los DOS repos, no solo el principal
+        actual = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / d,
+                                capture_output=True, text=True).stdout.strip()
+        assert actual == "ticket-agent/3320"
