@@ -943,11 +943,18 @@ import subprocess
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
-def _app():
+def _app(monkeypatch, tmp_path):
     """`app` se importa DENTRO de cada test porque conftest lo saca de `sys.modules`
-    para que relea `ORCH_DB`. Y el `sys.path` lo pone el fixture `client`, que estos
-    tests no usan: sin esta línea pasarían o fallarían según el orden de ejecución."""
+    para que relea `ORCH_DB`. Estos tests no usan el fixture `client`, así que replican
+    a mano su aislamiento (ver `test_current_phase_ya_no_existe`, línea ~312): sin fijar
+    `ORCH_DB`/`ORCH_LOGS` y sin sacar `app` de `sys.modules`, un primer import real
+    dispara `init_db()` contra la BD y los logs reales del backend — y lo que acaba en
+    disco depende de qué test corrió primero."""
+    monkeypatch.setenv("ORCH_DB", str(tmp_path / "orch_test.db"))
+    monkeypatch.setenv("ORCH_LOGS", str(tmp_path / "logs"))
     sys.path.insert(0, str(BACKEND_DIR))
+    if "app" in sys.modules:
+        del sys.modules["app"]
     import app
     return app
 
@@ -962,36 +969,36 @@ def _git_init(path):
     subprocess.run(["git", "commit", "-qm", "seed"], cwd=path, check=True)
 
 
-def test_guarda_bloquea_un_trackeado_modificado(tmp_path):
+def test_guarda_bloquea_un_trackeado_modificado(tmp_path, monkeypatch):
     """Sin esto, `git switch -c` arrastra tu trabajo sin commitear a la rama del
     agente y el agente lo commitea como suyo."""
-    app = _app()
+    app = _app(monkeypatch, tmp_path)
     _git_init(tmp_path)
     (tmp_path / "seed.txt").write_text("v2\n", encoding="utf-8")
     assert app.sucio(str(tmp_path)) is True
 
 
-def test_guarda_tolera_los_no_trackeados(tmp_path):
+def test_guarda_tolera_los_no_trackeados(tmp_path, monkeypatch):
     """El caso que hace la fase lanzable: el repo principal SIEMPRE tiene
     `openspec/` y `docs/tickets/` sin trackear, que son artefactos del agente.
     Si este test falla, la fase implement es inlanzable para siempre."""
-    app = _app()
+    app = _app(monkeypatch, tmp_path)
     _git_init(tmp_path)
     (tmp_path / "openspec").mkdir()
     (tmp_path / "openspec" / "changes.md").write_text("x", encoding="utf-8")
     assert app.sucio(str(tmp_path)) is False
 
 
-def test_guarda_ve_lo_que_esta_en_stage(tmp_path):
-    app = _app()
+def test_guarda_ve_lo_que_esta_en_stage(tmp_path, monkeypatch):
+    app = _app(monkeypatch, tmp_path)
     _git_init(tmp_path)
     (tmp_path / "nuevo.txt").write_text("x", encoding="utf-8")
     subprocess.run(["git", "add", "nuevo.txt"], cwd=tmp_path, check=True)
     assert app.sucio(str(tmp_path)) is True
 
 
-def test_check_limpios_nombra_los_repos_sucios(tmp_path):
-    app = _app()
+def test_check_limpios_nombra_los_repos_sucios(tmp_path, monkeypatch):
+    app = _app(monkeypatch, tmp_path)
     from fastapi import HTTPException
     limpio, sucio_ = tmp_path / "a", tmp_path / "b"
     limpio.mkdir(); sucio_.mkdir()
@@ -1004,10 +1011,21 @@ def test_check_limpios_nombra_los_repos_sucios(tmp_path):
     assert str(limpio) not in e.value.detail
 
 
-def test_un_directorio_que_no_es_git_da_409(tmp_path):
-    app = _app()
+def test_un_directorio_que_no_es_git_da_409(tmp_path, monkeypatch):
+    app = _app(monkeypatch, tmp_path)
     from fastapi import HTTPException
     (tmp_path / "pelado").mkdir()
     with pytest.raises(HTTPException) as e:
         app.check_limpios([str(tmp_path / "pelado")])
+    assert e.value.status_code == 409
+
+
+def test_un_directorio_que_no_existe_da_409(tmp_path, monkeypatch):
+    """No ya "no es un repo git": una ruta que ni siquiera está en disco. `cwd=repo`
+    en `subprocess.run` lanza `FileNotFoundError` sin capturar si no se atrapa —
+    eso sería un 500, no el 409 limpio que espera `check_limpios`."""
+    app = _app(monkeypatch, tmp_path)
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as e:
+        app.sucio(str(tmp_path / "no_existe"))
     assert e.value.status_code == 409
