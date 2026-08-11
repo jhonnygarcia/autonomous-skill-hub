@@ -1032,6 +1032,43 @@ def test_un_directorio_que_no_es_git_da_409(tmp_path, monkeypatch):
     assert e.value.status_code == 409
 
 
+def test_preparar_rama_la_crea_y_se_situa_en_ella(tmp_path, monkeypatch):
+    app = _app(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    nombre = app.preparar_rama(str(repo), 3320)
+    assert nombre == "ticket-agent/3320"
+    actual = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
+                            capture_output=True, text=True).stdout.strip()
+    assert actual == "ticket-agent/3320"
+
+
+def test_preparar_rama_dos_veces_no_falla(tmp_path, monkeypatch):
+    """Retomar una corrida parcial tiene que aterrizar en la MISMA rama. Con
+    `switch -c` a secas, la segunda llamada peta con 'already exists'."""
+    app = _app(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    app.preparar_rama(str(repo), 3320)
+    subprocess.run(["git", "switch", "-q", "-"], cwd=repo, check=True)
+    assert app.preparar_rama(str(repo), 3320) == "ticket-agent/3320"
+    actual = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
+                            capture_output=True, text=True).stdout.strip()
+    assert actual == "ticket-agent/3320"
+    ramas = subprocess.run(["git", "branch", "--list"], cwd=repo,
+                           capture_output=True, text=True).stdout
+    assert ramas.count("ticket-agent/3320") == 1
+
+
+def test_runs_tiene_columna_branch(client):
+    import app
+    with app.db() as c:
+        cols = [r[1] for r in c.execute("PRAGMA table_info(runs)")]
+    assert "branch" in cols
+
+
 def test_un_directorio_que_no_existe_da_409(tmp_path, monkeypatch):
     """No ya "no es un repo git": una ruta que ni siquiera está en disco. `sucio`
     comprueba `Path.is_dir()` antes de invocar `git`, así que esto da el mismo 409

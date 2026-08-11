@@ -165,6 +165,26 @@ def check_limpios(repos: list[str]) -> None:
                               "delante tu trabajo a medias.")
 
 
+RAMA_FMT = "ticket-agent/{ado_id}"
+
+
+def preparar_rama(repo: str, ado_id: int) -> str:
+    """Crea la rama de la fase, o se sitúa en ella si ya existe.
+
+    La crea el runner y no la skill por el mismo motivo por el que existe el sello: un
+    límite que depende de que el agente obedezca un markdown no es un límite.
+    `refs/heads/` en el `rev-parse` para no confundir la rama con un tag o un sha.
+    """
+    nombre = RAMA_FMT.format(ado_id=ado_id)
+    existe = subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{nombre}"],
+                            cwd=repo, capture_output=True).returncode == 0
+    cmd = ["git", "switch", "-q", nombre] if existe else ["git", "switch", "-q", "-c", nombre]
+    r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise HTTPException(409, f"No se pudo preparar la rama en {repo}: {r.stderr.strip()}")
+    return nombre
+
+
 def split_repos(repos: list) -> tuple:
     """Valida la lista tal como la manda la UI y la parte en (principal, resto)."""
     if not repos:
@@ -237,6 +257,9 @@ def init_db() -> None:
             # La reserva de un sello `parcial` (lo que sigue a ` · `), aparte de la
             # ruta: `artifact_path` tiene que seguir siendo una ruta limpia.
             "ALTER TABLE runs ADD COLUMN artifact_note TEXT",
+            # La rama que preparó el runner para una corrida de `implement`. Es el
+            # único dato que la corrida produce y no cabe en `tasks.md`.
+            "ALTER TABLE runs ADD COLUMN branch TEXT",
             # Existía desde el primer commit, se inicializaba a 'analyze' y nada la
             # escribió jamás: un sitio previsto para esto que solo confundía. El avance
             # se calcula de `runs`.
