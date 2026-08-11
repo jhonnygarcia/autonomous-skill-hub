@@ -20,6 +20,9 @@ DENEGADOS = [
     "git remote set-url origin https://ejemplo/x.git",
     "gh pr create --fill",
     "az repos pr create --source-branch x",
+    "if true; then git push; fi",      # palabra clave `then` tras el separador `;`
+    "for i in 1; do git push; done",   # palabra clave `do` tras el separador `;`
+    "`git push`",                      # el separador ahora incluye el backtick
 ]
 
 PERMITIDOS = [
@@ -33,6 +36,7 @@ PERMITIDOS = [
     "dotnet build ProvidenceTMS/PTMS.API/PTMS.API.csproj -c Debug",
     'git commit -m "fix: prevent accidental git push in CI"',   # "push" entrecomillado
     'echo "reminder: never git push to main" >> NOTES.md',      # ni siquiera es git
+    'git commit -m "then git push tomorrow"',  # canario: `then` no vale en cualquier sitio
 ]
 
 
@@ -78,6 +82,7 @@ def test_main_stdin_ilegible(monkeypatch):
     42,
     [1, 2, 3],
     {"tool_name": "Bash", "tool_input": None},
+    {"tool_name": "Bash", "tool_input": {"command": 123}},  # `command` no-cadena
 ])
 def test_main_formas_raras_fallan_abierto(monkeypatch, payload):
     assert _correr_main(monkeypatch, payload) == 0
