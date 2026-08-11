@@ -143,15 +143,15 @@ def sucio(repo: str) -> bool:
     propio agente. Exigir un árbol virgen haría la fase inlanzable siempre. Lo que
     importa es lo trackeado: eso sí es trabajo del usuario.
     """
-    try:
-        r = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
-                           capture_output=True, text=True)
-    except OSError:
-        # `cwd` ni siquiera existe en disco — distinto del caso "existe pero no es
-        # repo git" de abajo, pero el llamador quiere el mismo 409 limpio, no un 500.
-        # En POSIX esto llega como `FileNotFoundError`; en Windows, `NotADirectoryError`
-        # (`WinError 267`) — ambas son `OSError`, que es lo que se atrapa aquí.
+    # Se comprueba el directorio ANTES de invocar `git`, en vez de envolver la
+    # llamada en un `try/except OSError`: eso atrapaba también un `git` ausente del
+    # PATH (mismo `FileNotFoundError`/`NotADirectoryError` en Windows) y lo disfrazaba
+    # de "no es un repositorio git" — un 409 que miente sobre la causa. Un fallo real
+    # de invocación (git no instalado, etc.) tiene que propagar, no convertirse en 409.
+    if not Path(repo).is_dir():
         raise HTTPException(409, f"No es un repositorio git: {repo}")
+    r = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                       capture_output=True, text=True)
     if r.returncode != 0:
         raise HTTPException(409, f"No es un repositorio git: {repo}")
     return any(not ln.startswith("??") for ln in r.stdout.splitlines() if ln.strip())

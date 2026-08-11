@@ -971,11 +971,19 @@ def _git_init(path):
 
 def test_guarda_bloquea_un_trackeado_modificado(tmp_path, monkeypatch):
     """Sin esto, `git switch -c` arrastra tu trabajo sin commitear a la rama del
-    agente y el agente lo commitea como suyo."""
+    agente y el agente lo commitea como suyo.
+
+    El repo vive en un SUBdirectorio de `tmp_path`, nunca en `tmp_path` mismo: `_app`
+    apunta `ORCH_DB`/`ORCH_LOGS` a `tmp_path`, y si el repo fuera `tmp_path` esa BD
+    quedaría *dentro* del árbol bajo prueba — un `?? orch_test.db` parásito que
+    `git status --porcelain` vería siempre, sin importar la lógica que el test dice
+    ejercitar."""
     app = _app(monkeypatch, tmp_path)
-    _git_init(tmp_path)
-    (tmp_path / "seed.txt").write_text("v2\n", encoding="utf-8")
-    assert app.sucio(str(tmp_path)) is True
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "seed.txt").write_text("v2\n", encoding="utf-8")
+    assert app.sucio(str(repo)) is True
 
 
 def test_guarda_tolera_los_no_trackeados(tmp_path, monkeypatch):
@@ -983,18 +991,22 @@ def test_guarda_tolera_los_no_trackeados(tmp_path, monkeypatch):
     `openspec/` y `docs/tickets/` sin trackear, que son artefactos del agente.
     Si este test falla, la fase implement es inlanzable para siempre."""
     app = _app(monkeypatch, tmp_path)
-    _git_init(tmp_path)
-    (tmp_path / "openspec").mkdir()
-    (tmp_path / "openspec" / "changes.md").write_text("x", encoding="utf-8")
-    assert app.sucio(str(tmp_path)) is False
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "openspec").mkdir()
+    (repo / "openspec" / "changes.md").write_text("x", encoding="utf-8")
+    assert app.sucio(str(repo)) is False
 
 
 def test_guarda_ve_lo_que_esta_en_stage(tmp_path, monkeypatch):
     app = _app(monkeypatch, tmp_path)
-    _git_init(tmp_path)
-    (tmp_path / "nuevo.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "add", "nuevo.txt"], cwd=tmp_path, check=True)
-    assert app.sucio(str(tmp_path)) is True
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_init(repo)
+    (repo / "nuevo.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "nuevo.txt"], cwd=repo, check=True)
+    assert app.sucio(str(repo)) is True
 
 
 def test_check_limpios_nombra_los_repos_sucios(tmp_path, monkeypatch):
@@ -1021,11 +1033,29 @@ def test_un_directorio_que_no_es_git_da_409(tmp_path, monkeypatch):
 
 
 def test_un_directorio_que_no_existe_da_409(tmp_path, monkeypatch):
-    """No ya "no es un repo git": una ruta que ni siquiera está en disco. `cwd=repo`
-    en `subprocess.run` lanza `FileNotFoundError` sin capturar si no se atrapa —
-    eso sería un 500, no el 409 limpio que espera `check_limpios`."""
+    """No ya "no es un repo git": una ruta que ni siquiera está en disco. `sucio`
+    comprueba `Path.is_dir()` antes de invocar `git`, así que esto da el mismo 409
+    limpio sin necesidad de dejar que `subprocess.run` reviente con `cwd` inexistente."""
     app = _app(monkeypatch, tmp_path)
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as e:
         app.sucio(str(tmp_path / "no_existe"))
     assert e.value.status_code == 409
+
+
+def test_git_ausente_no_se_disfraza_de_409(tmp_path, monkeypatch):
+    """Un `git` ausente del PATH es un entorno mal configurado, no "no es un
+    repositorio git": tiene que propagar, no convertirse en un 409 que miente sobre
+    la causa. Se simula la ausencia parcheando `subprocess.run` (scoped por
+    `monkeypatch`, revertido solo al terminar el test) en vez de tocar el PATH real
+    de la sesión."""
+    app = _app(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _sin_git(*args, **kwargs):
+        raise FileNotFoundError("git no encontrado")
+
+    monkeypatch.setattr(app.subprocess, "run", _sin_git)
+    with pytest.raises(FileNotFoundError):
+        app.sucio(str(repo))
