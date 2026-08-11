@@ -1,5 +1,21 @@
 # Fase 2b — del plan al código — Plan de implementación
 
+> **Ejecutado el 2026-08-10**, más la oleada de arreglos de la revisión final. Dos
+> bloques de código que este documento muestra quedaron **desactualizados en ejecución**,
+> y en los dos casos **manda el código**, no este plan:
+>
+> - **El regex del hook** (Tarea 3, `hooks/deny_push.py`). Aquí aparece con `\bgit\b…`,
+>   que casa la subcadena en CUALQUIER posición: `git commit -m "... git push ..."` se
+>   denegaba por mencionar la frase dentro del mensaje. El código añade un ancla de
+>   inicio de comando (`_INICIO`: principio de cadena o tras `;`, `&`, `|`, salto de
+>   línea, `(` o backtick, con `then`/`do`/`else` opcional dentro del ancla) a cada
+>   alternativa.
+> - **El helper `_app()` de los tests** (Tarea 1). Aquí solo mete `BACKEND_DIR` en
+>   `sys.path`. Así, el primer import real de `app` dispara `init_db()` contra la **BD y
+>   los logs reales** del backend. El código fija `ORCH_DB`/`ORCH_LOGS` a `tmp_path` y
+>   saca `app` de `sys.modules` antes de importarlo, replicando el aislamiento del
+>   fixture `client`; por eso recibe `(monkeypatch, tmp_path)`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Que una corrida de la fase `implement` ejecute el plan de OpenSpec de un

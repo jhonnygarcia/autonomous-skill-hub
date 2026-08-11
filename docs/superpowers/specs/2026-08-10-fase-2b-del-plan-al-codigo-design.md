@@ -172,7 +172,9 @@ En `autonomy: supervised`, resumen en el chat de lo hecho y lo bloqueado.
    comprobación no corrió es una casilla mentirosa.
 4. **Una tarea que falla dos veces detiene el plan.** Lo bloqueado se declara bloqueado.
 5. **No se reintenta lo que el hook deniega.** Si la denegación aparece, se registra y
-   se sigue.
+   se sigue. Una denegación **no cuenta como fallo de la tarea**: no gasta ninguno de los
+   dos intentos de la regla 4 y la tarea sigue su curso. Confundir las dos cosas hace que
+   un `git push` denegado —el caso para el que existe el hook— aborte el plan entero.
 
 ## Manejo de errores
 
@@ -184,7 +186,7 @@ En `autonomy: supervised`, resumen en el chat de lo hecho y lo bloqueado.
 | Falta el plan | La skill para y sella `nada` |
 | Varios slugs para el mismo id | La skill para y pregunta |
 | Build en rojo | **No es error**: `parcial`, que es información |
-| Denegación del hook | Ni aborta ni se reintenta; se registra |
+| Denegación del hook | **No es un fallo de la tarea**: no consume el cupo de dos fallos, no se reintenta el comando denegado, se registra y la tarea continúa |
 | Corrida sin sello | Lo existente: `MOTIVO_SIN_HUELLA` |
 
 ## Pruebas
