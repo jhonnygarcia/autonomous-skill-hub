@@ -1194,3 +1194,51 @@ def test_sello_parcial_de_implement_conserva_la_reserva(client, monkeypatch, tmp
     assert run["artifact_state"] == "parcial"
     assert run["artifact_path"] == "openspec/changes/3320-x/tasks.md"
     assert run["artifact_note"] == "3/5 tareas, build en rojo"
+
+
+def test_implement_con_segundo_repo_sucio_no_deja_el_primero_en_otra_rama(
+    client, monkeypatch, tmp_path
+):
+    """El repo sucio es el SEGUNDO (`backend-repo`), con el principal limpio. Si la
+    guarda se entremezclara con la creación de rama repo a repo (comprobar y ramificar
+    uno, luego el siguiente), el principal ya habría pasado a `ticket-agent/<id>` antes
+    de que la comprobación del segundo repo fallara. `test_implement_con_repo_sucio_
+    da_409_y_no_encola` no distingue esto porque ensucia el repo principal — el primero
+    de la lista — así que una implementación entremezclada falla en la misma primera
+    iteración y ese test no la delata."""
+    _use_fake_claude(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    original = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=tmp_path / "repo",
+        capture_output=True, text=True,
+    ).stdout.strip()
+    (tmp_path / "backend-repo" / "seed.txt").write_text("v2\n", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert r.status_code == 409
+    assert client.get(f"/tickets/{tid}").json()["runs"] == []
+    actual = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=tmp_path / "repo",
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert actual == original
+
+
+def test_implement_con_un_solo_repo_prepara_la_rama(client, monkeypatch, tmp_path):
+    """El camino sin repos extra (`extra_dirs` vacío) no se ejercitaba nunca desde
+    el endpoint: todos los tests anteriores de `implement` usan el proyecto `Demo`,
+    que siempre trae un repo extra."""
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3320-x/tasks.md")
+    solo = tmp_path / "solo-repo"
+    solo.mkdir()
+    _git_init(solo)
+    client.post("/projects", json={
+        "name": "Solo", "org": "O", "project": "P",
+        "repos": [{"path": solo.as_posix(), "primary": True}],
+    })
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Solo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert r.status_code == 202
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["branch"] == "ticket-agent/3320"

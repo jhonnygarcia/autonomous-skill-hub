@@ -673,6 +673,13 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         for r in repos:
             # En todos, incluidos los que el plan acabe no tocando: el runner no
             # parsea el plan, y una rama sin commits es ruido que se borra solo.
+            # ponytail: si `preparar_rama` falla a mitad del bucle (guarda ya pasada,
+            # así que no es un repo sucio: p. ej. un `git switch` que revienta por otra
+            # razón), los repos anteriores quedan en `ticket-agent/<id>` sin que se
+            # llegue a insertar la corrida que la explique. No se deshace: revertir la
+            # rama de vuelta es más maquinaria de la que este caso raro merece, y la
+            # rama en sí no es destructiva (no toca el árbol de trabajo). Se acepta
+            # como inconsistencia menor, visible con `git branch` si hace falta.
             rama = preparar_rama(r, t["ado_id"])
     with db() as c:
         cur = c.execute(
