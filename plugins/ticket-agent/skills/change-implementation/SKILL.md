@@ -25,20 +25,30 @@ usuario para crearlo (plantilla en el README del plugin). Lee `autonomy`.
    `HUELLA: nada — falta el plan de <id>`.
 2. **Slug único.** Si hay **más de una coincidencia** (dos changes para el mismo id) →
    detente y pregunta al usuario cuál usar. No es hipotético: un mismo ticket ha
-   llegado a tener dos slugs el mismo día. No elijas por él.
+   llegado a tener dos slugs el mismo día. No elijas por él, y cierra con
+   `HUELLA: nada — varios changes para <id>, falta elegir cuál`.
 3. **La rama.** Comprueba que la rama actual del repo principal es
    `ticket-agent/<id>`. Si no lo es, el runner no la preparó — no es asunto de esta
-   skill arreglarlo: detente y repórtalo.
+   skill arreglarlo: detente, repórtalo y cierra con
+   `HUELLA: nada — el repo no está en ticket-agent/<id>`.
 
 ## 3. Lectura del plan
 
 Lee `tasks.md` entero — la checklist con destino, espejo y comprobación de cada
 tarea —, más `design.md` y `proposal.md` del mismo change. Las cabeceras del plan
-traen el mapa de repos afectados y avisos del tipo "sin `design.md` las tareas 1-4 no
-se entienden": ese mapa es el que vas a pasarle a cada subagente en el paso 4.
+también traen un mapa de repos afectados y avisos del tipo "sin `design.md` las
+tareas 1-4 no se entienden".
 
 No vuelvas a leer el análisis de la Fase 1 ni el work item: el plan es la interfaz
 entre planificar y ejecutar.
+
+**El mapa de repos real, sin embargo, sale del prompt, no del plan.** Si el prompt te
+nombra repos adicionales montados con su etiqueta (backend, app de auth…), esos son
+los que el proceso tiene montados de verdad con `--add-dir`, y son los que vas a
+pasarle a cada subagente en el paso 4. Úsalo junto con el mapa que traiga la cabecera
+del plan; si difieren, **manda el prompt**, porque describe lo que está montado en
+esta corrida — la cabecera del plan puede quedar desactualizada respecto a los repos
+que el proyecto tiene configurados hoy.
 
 ## 4. El bucle
 
@@ -72,6 +82,15 @@ usarla), no las adelantes ni las reordenes:
 4. Si algo falla (la comprobación no pasa, el diff no corresponde, el subagente no
    pudo escribir), regístralo y reintenta esa misma tarea una vez más, dándole al
    nuevo subagente el fallo anterior como contexto.
+
+   **Excepción: una denegación del hook no es un fallo de la tarea.** Se reconoce
+   porque el mensaje de denegación viene del propio hook y menciona que esta fase
+   para en rama sin tocar el remoto (`git push`, `git remote add`/`set-url`,
+   `gh pr create`, `az repos pr create`). Significa que el subagente intentó algo
+   fuera de alcance de esta fase, no que la implementación esté mal: regístralo en el
+   informe, **no reintentes el comando denegado** y **no cuentes esa denegación como
+   uno de los dos fallos** de la regla de oro 5 — la tarea sigue su curso normal (diff,
+   comprobación, commit) con el resto de lo que el subagente sí llegó a hacer.
 
 ## 5. Parada
 
