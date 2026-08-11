@@ -39,25 +39,25 @@
 Agregar al final de `tests/test_app.py`:
 
 ```python
-def test_ruta_existente_es_valida(client, tmp_path):
+def test_existing_path_is_valid(client, tmp_path):
     r = client.post("/rutas/validar", json={"ruta": (tmp_path / "repo").as_posix()})
     assert r.status_code == 200
     assert r.json() == {"existe": True}
 
 
-def test_ruta_inexistente_no_es_valida(client, tmp_path):
+def test_nonexistent_path_is_invalid(client, tmp_path):
     r = client.post("/rutas/validar", json={"ruta": (tmp_path / "no-existe").as_posix()})
     assert r.json() == {"existe": False}
 
 
-def test_un_archivo_no_es_un_repo(client, tmp_path):
+def test_a_file_is_not_a_repo(client, tmp_path):
     f = tmp_path / "archivo.txt"
     f.write_text("x", encoding="utf-8")
     r = client.post("/rutas/validar", json={"ruta": f.as_posix()})
     assert r.json() == {"existe": False}
 
 
-def test_ruta_absurda_no_revienta(client):
+def test_absurd_path_does_not_blow_up(client):
     """A null byte makes `Path.is_dir()` raise instead of returning False. The form
     sends whatever the user pasted, so this reaches the endpoint for real."""
     r = client.post("/rutas/validar", json={"ruta": "x\x00y"})
@@ -67,7 +67,7 @@ def test_ruta_absurda_no_revienta(client):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "ruta_" -v`
+Run: `.venv/Scripts/python -m pytest tests/test_app.py -k path -v`
 Expected: los cuatro FAIL con `404 != 200` (la ruta no existe todavía).
 
 - [ ] **Step 3: Write the implementation**
@@ -120,13 +120,13 @@ def validar_ruta(body: RutaIn):
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
-Expected: los 4 nuevos PASS y los 125 existentes siguen PASS (`check_dirs` cambió de cuerpo pero no de contrato).
+Expected: los 4 nuevos PASS y los existentes siguen PASS (`check_dirs` cambió de cuerpo pero no de contrato).
 
 - [ ] **Step 5: Verify the tests aren't placebos (mutation)**
 
 Cambiar temporalmente `is_repo_dir` a `return True`.
-Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "ruta_" -v`
-Expected: `test_ruta_inexistente_no_es_valida`, `test_un_archivo_no_es_un_repo` y `test_ruta_absurda_no_revienta` en **rojo**. Si alguno sigue verde, el test no prueba nada. Revertir la mutación.
+Run: `.venv/Scripts/python -m pytest tests/test_app.py -k path -v`
+Expected: `test_nonexistent_path_is_invalid`, `test_a_file_is_not_a_repo` y `test_absurd_path_does_not_blow_up` en **rojo**. Si alguno sigue verde, el test no prueba nada. Revertir la mutación.
 
 - [ ] **Step 6: Commit**
 
@@ -832,7 +832,7 @@ git commit -m "feat(ui): el formulario de proyecto vive en su propia vista"
 Agregar al final de `tests/test_app.py`:
 
 ```python
-def test_declared_file_or_none_rechaza_lo_mismo_que_el_endpoint(client, tmp_path, monkeypatch):
+def test_declared_file_or_none_rejects_what_the_endpoint_rejects(client, tmp_path, monkeypatch):
     """The internal consumers (`read_title`, `task_progress`) must not get a second,
     laxer door to disk. Same ticket, same declared path, same verdict — the only
     difference is `None` instead of a 400."""
@@ -919,13 +919,13 @@ def artifact(tid: int, ruta: str):
 - [ ] **Step 4: Run the FULL suite**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
-Expected: los 125 existentes PASS —**incluida toda la batería de path traversal, que sigue corriendo contra el endpoint**— más el nuevo. Un test de traversal que se volvió rojo significa que la extracción cambió el comportamiento: revertir y volver a mover, sin reformular.
+Expected: los existentes PASS —**incluida toda la batería de path traversal, que sigue corriendo contra el endpoint**— más el nuevo. Un test de traversal que se volvió rojo significa que la extracción cambió el comportamiento: revertir y volver a mover, sin reformular.
 
 - [ ] **Step 5: Verify it isn't a placebo (mutation)**
 
 Cambiar temporalmente el cuerpo de `declared_file` por `return (Path(t["repo_path"]) / ruta).resolve()`.
 Run: `.venv/Scripts/python -m pytest tests/ -v`
-Expected: **rojo** tanto en los tests de traversal del endpoint como en `test_declared_file_or_none_rechaza_lo_mismo_que_el_endpoint`. Si el endpoint se pone rojo pero el test nuevo no, el test nuevo no está ejerciendo la función. Revertir la mutación.
+Expected: **rojo** tanto en los tests de traversal del endpoint como en `test_declared_file_or_none_rejects_what_the_endpoint_rejects`. Si el endpoint se pone rojo pero el test nuevo no, el test nuevo no está ejerciendo la función. Revertir la mutación.
 
 - [ ] **Step 6: Commit**
 
@@ -969,14 +969,14 @@ def _fake_analyze(client, monkeypatch, tmp_path, contenido: str):
     return tid
 
 
-def test_el_titulo_sale_del_primer_encabezado(client, monkeypatch, tmp_path):
+def test_title_comes_from_the_first_heading(client, monkeypatch, tmp_path):
     tid = _fake_analyze(client, monkeypatch, tmp_path,
                         "por ticket-agent v0.7.1\n\n# Carrier API V2 Migration - Dayton\n\ntexto\n")
     t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
     assert t["title"] == "Carrier API V2 Migration - Dayton"
 
 
-def test_analisis_sin_encabezado_deja_el_titulo_vacio(client, monkeypatch, tmp_path):
+def test_analysis_without_heading_leaves_title_empty(client, monkeypatch, tmp_path):
     """Soft contract: the skill's template writes the `# `, but no plugin test protects
     it. Without a heading the list falls back to `#<ado_id>` — it must never blow up."""
     tid = _fake_analyze(client, monkeypatch, tmp_path, "sin encabezado ninguno\n")
@@ -984,7 +984,7 @@ def test_analisis_sin_encabezado_deja_el_titulo_vacio(client, monkeypatch, tmp_p
     assert t["title"] is None
 
 
-def test_el_titulo_no_es_una_segunda_puerta_al_disco(client, tmp_path):
+def test_title_is_not_a_second_door_to_disk(client, tmp_path):
     """A stamp declaring a traversal must not let `read_title` read outside the repo."""
     import app as app_module
 
@@ -999,7 +999,7 @@ def test_el_titulo_no_es_una_segunda_puerta_al_disco(client, tmp_path):
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "titulo" -v`
+Run: `.venv/Scripts/python -m pytest tests/test_app.py -k title -v`
 Expected: FAIL con `AttributeError: module 'app' has no attribute 'read_title'`.
 
 - [ ] **Step 3: Add the column, the reader, and the write in the runner**
@@ -1079,9 +1079,9 @@ Expected: los tres nuevos PASS y los anteriores siguen PASS.
 Dos mutaciones, una por riesgo:
 
 1. En `read_title`, cambiar `p = declared_file_or_none(t, rel)` por `p = Path(t["repo_path"]) / rel`.
-   Expected: `test_el_titulo_no_es_una_segunda_puerta_al_disco` en **rojo**.
+   Expected: `test_title_is_not_a_second_door_to_disk` en **rojo**.
 2. En `read_title`, cambiar `if line.startswith("# ")` por `if True`.
-   Expected: `test_analisis_sin_encabezado_deja_el_titulo_vacio` en **rojo**.
+   Expected: `test_analysis_without_heading_leaves_title_empty` en **rojo**.
 
 Si alguna de las dos deja todo verde, ese test no prueba nada. Revertir ambas.
 
@@ -1110,7 +1110,7 @@ git commit -m "feat(backend): el titulo del ticket sale del analisis, no de Azur
 - [ ] **Step 1: Write the failing test for `fases` in the list**
 
 ```python
-def test_la_lista_de_tickets_trae_las_fases(client):
+def test_the_ticket_list_carries_the_phases(client):
     """The three-dot stepper needs per-phase state, not just the folded status: `error`
     alone doesn't say which phase failed.
 
@@ -1120,8 +1120,8 @@ def test_la_lista_de_tickets_trae_las_fases(client):
     off, which is what made the list cheap in the first place."""
     tid = client.post("/tickets", json={"ado_id": 7, "project": "Demo"}).json()["id"]
     t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
-    esperadas = [f["fase"] for f in client.get(f"/tickets/{tid}").json()["fases"]]
-    assert [f["fase"] for f in t["fases"]] == esperadas
+    expected = [f["fase"] for f in client.get(f"/tickets/{tid}").json()["fases"]]
+    assert [f["fase"] for f in t["fases"]] == expected
     assert all("huella" not in f for f in t["fases"])
 ```
 
@@ -1399,7 +1399,7 @@ git commit -m "refactor: guards y pr salen del timeline hasta que existan"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-def _con_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
+def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
     """A ticket with a `design` run that declared a change directory, and an `implement`
     run in flight. Returns the ticket id."""
     import app as app_module
@@ -1423,23 +1423,23 @@ def _implement(client, tid):
                 if f["fase"] == "implement")
 
 
-def test_progreso_cuenta_las_casillas(client, tmp_path):
+def test_progress_counts_the_boxes(client, tmp_path):
     md = "## 1\n- [x] a\n- [x] b\n  - [x] c\n- [ ] d\n- [ ] e\n"
-    tid = _con_plan(client, tmp_path, md)
+    tid = _with_plan(client, tmp_path, md)
     assert _implement(client, tid)["progreso"] == {"hechas": 3, "total": 5}
 
 
-def test_sin_tasks_md_no_hay_barra(client, tmp_path):
-    tid = _con_plan(client, tmp_path, None, ado_id=31)
+def test_no_tasks_md_means_no_bar(client, tmp_path):
+    tid = _with_plan(client, tmp_path, None, ado_id=31)
     assert _implement(client, tid).get("progreso") is None
 
 
-def test_tasks_md_sin_casillas_no_hay_barra(client, tmp_path):
-    tid = _con_plan(client, tmp_path, "solo prosa, ninguna casilla\n", ado_id=32)
+def test_tasks_md_without_boxes_means_no_bar(client, tmp_path):
+    tid = _with_plan(client, tmp_path, "solo prosa, ninguna casilla\n", ado_id=32)
     assert _implement(client, tid).get("progreso") is None
 
 
-def test_sin_corrida_de_design_no_hay_barra(client):
+def test_no_design_run_means_no_bar(client):
     import app as app_module
     tid = client.post("/tickets", json={"ado_id": 33, "project": "Demo"}).json()["id"]
     with app_module.db() as c:
@@ -1448,7 +1448,7 @@ def test_sin_corrida_de_design_no_hay_barra(client):
     assert _implement(client, tid).get("progreso") is None
 
 
-def test_el_progreso_no_es_una_segunda_puerta_al_disco(client, tmp_path):
+def test_progress_is_not_a_second_door_to_disk(client, tmp_path):
     """A `design` stamp that declares a traversal must not let the counter read a
     `tasks.md` outside the ticket's repos."""
     import app as app_module
@@ -1467,8 +1467,8 @@ def test_el_progreso_no_es_una_segunda_puerta_al_disco(client, tmp_path):
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "progreso or barra" -v`
-Expected: `test_progreso_cuenta_las_casillas` FAIL con `KeyError: 'progreso'`; los otros pasan por accidente (el campo no existe, así que `.get()` da `None`). Eso está bien: son redes para la implementación, no la prueba de que falta.
+Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "progress or bar" -v`
+Expected: `test_progress_counts_the_boxes` FAIL con `KeyError: 'progreso'`; los otros pasan por accidente (el campo no existe, así que `.get()` da `None`). Eso está bien: son redes para la implementación, no la prueba de que falta.
 
 - [ ] **Step 3: Implement `task_progress` and hook it in**
 
@@ -1547,11 +1547,11 @@ Expected: los cinco nuevos PASS, los anteriores siguen PASS.
 Tres mutaciones:
 
 1. Cambiar `p = declared_file_or_none(...)` por `p = Path(t["repo_path"]) / design["artifact_path"] / "tasks.md"`.
-   Expected: `test_el_progreso_no_es_una_segunda_puerta_al_disco` en **rojo**.
+   Expected: `test_progress_is_not_a_second_door_to_disk` en **rojo**.
 2. Cambiar `return {...} if total else None` por `return {"hechas": hechas, "total": total}`.
-   Expected: `test_tasks_md_sin_casillas_no_hay_barra` en **rojo**.
+   Expected: `test_tasks_md_without_boxes_means_no_bar` en **rojo**.
 3. Cambiar `DONE_BOX` a `re.compile(r"^\s*- \[.\]", re.MULTILINE)`.
-   Expected: `test_progreso_cuenta_las_casillas` en **rojo** (contaría 5 hechas de 5).
+   Expected: `test_progress_counts_the_boxes` en **rojo** (contaría 5 hechas de 5).
 
 Revertir las tres.
 
