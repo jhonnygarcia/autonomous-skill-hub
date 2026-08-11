@@ -664,20 +664,28 @@ Prompt sugerido — abrir Claude Code en el hub
 
 > Lee docs/STATUS.md para situarte. **La Fase 2b está construida y validada** (plugin v0.6.1):
 > el agente escribe código y commitea en una rama. El 3332 se implementó entero —19/19 tareas,
-> 17 commits, 83 minutos— sin una sola fuga en los commits.
+> 17 commits, 83 minutos— sin una sola fuga en los commits. El roadmap se encogió: `test` dejó
+> de ser una fase porque las pruebas se escriben dentro de `implement`.
 >
-> El objetivo de esta sesión es **cerrar el único supuesto grande que quedó sin probar**: que el
-> agente pueda **escribir en un `extra_dir`** (decisión 4 del spec de la 2b). El 3332 era de un
-> solo repo, así que no lo ejercitó. El caso está listo y esperando: el **3320**, ya analizado y
-> planificado, tiene todo su código en `ProvidenceTMS`, que se monta como extra. Requiere que ese
-> repo esté libre de trabajo en curso — la última vez no lo estaba.
+> El objetivo de esta sesión es **leer lo que el agente escribió**. En la rama
+> `ticket-agent/3332` de `ProvidenceTMSTenant` hay **2658 líneas nuevas en 31 archivos** que
+> **nadie ha mirado**. La corrida salió `ok` porque el build está verde y las casillas marcadas
+> — pero eso mide que el mecanismo funcionó, no que el código sea bueno. Es exactamente la
+> misma trampa que un test que pasa por su montaje.
 >
-> 1. **Recrea el proyecto con los dos repos** y da de alta el 3320. Su análisis y su change ya
->    existen en el Tenant, así que se puede lanzar `implement` directamente.
-> 2. **Mira la guarda antes de nada**: si el frontend tiene cambios trackeados, la corrida
->    devolverá `409`, y eso es lo correcto, no un fallo.
-> 3. Si la escritura en el extra falla, **fallará a la primera y en la tarea 1**. El diseño lo
->    tiene anotado como supuesto pendiente en "Riesgos e incógnitas abiertas".
+> 1. **Revisa el diff completo** (`git diff Dev..ticket-agent/3332` desde
+>    `D:/Companies/ProvidenceSolutions/ProvidenceTMSTenant`) **contra el patrón que dice
+>    copiar**: los carriers ya escritos en `Carriers/Abf/` y `Carriers/Estes/`. La pregunta no
+>    es "¿compila?" sino "¿lo firmaría un humano del equipo?".
+> 2. Mira con lupa **los 12 archivos de test**: ¿prueban la lógica o pasan por el montaje? La
+>    técnica que ha destapado cuatro placebos en este proyecto es **mutar el código y ver si
+>    alguno se pone rojo**.
+> 3. **Mira también el plan que los generó** (`openspec/changes/3332-carrier-api-v2-migration-dayton/`).
+>    Si el código es flojo, la causa puede estar ahí y no en la fase 2b.
+>
+> **Ese veredicto decide lo que viene después.** Si el código es bueno, la última milla (push +
+> PR) se justifica sola. Si no lo es, automatizar la entrega sería empeorar el problema, y lo
+> que toca es arreglar las skills.
 >
 > Dos cosas menores siguen abiertas: el **hallazgo de AR** (el auto-marcado estampa autoría y
 > `BilledOn` al abrir la pantalla) necesita work item propio, y los **adjuntos embebidos en HTML**
