@@ -17,7 +17,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 |---|---|---|
 | 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables + **avance por fases, huellas y timeline implementados y validados con corrida real** (2026-08-10) |
+| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Tres fases lanzables**, avance por fases, huellas y timeline. Guarda de árbol limpio, rama bajo el lock y hook de contención (2026-08-11) |
 | 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Cerrada** (3323 y 3320, n=2) — plugin **v0.5.2**, con la regla del negativo verificada en re-corrida |
 | 2b — Del plan al código | Ejecutar el plan: escribir código y commitear en una rama | ✅ **Construida y validada** (3332) — plugin **v0.6.1**, n=1. Para en rama, sin push |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
@@ -615,11 +615,13 @@ estaba viva.
   solo el primer segmento (`docs`) y el visor pasa a servir **todo ese directorio**, sin
   fallar de forma visible. Por eso las dos skills lo dicen explícitamente; no hay guarda
   en el backend que lo detecte.
-- **Permisos del runner**: corre con `--permission-mode acceptEdits` más una lista
-  explícita de `--allowedTools` (sin ella el MCP se auto-deniega en headless), ahora
-  ramificada por fase (`PHASE_ALLOWED_TOOLS`; `analyze` va con la lista vacía).
-  **El especificador `Bash(...)` habilita la herramienta, no la acota al comando** —
-  verificado en corrida real. Al llegar la fase que escriba código hay que revisar qué
+- **Permisos del runner** (resuelto para `implement` en la 2b, decisión 17): lista de
+  `--allowedTools` ramificada por fase, `Bash` pelado en `implement` porque el especificador
+  no acota, y la contención por hook vía `--settings`. Lo que queda sin resolver es la fase
+  que **empuje al remoto**: ahí el pestillo actual no vale y hay que rehacer la sección de
+  contención del spec. Texto histórico: **el especificador `Bash(...)` habilita la herramienta,
+  no la acota al comando** — verificado en corrida real. Al llegar la fase que escriba código
+  hay que revisar qué
   modo, qué tools y qué guards corresponden, y recordar que los `extra_dirs` son de
   lectura, no sitios donde el agente deba escribir.
 - **`openspec init` deja más huella de la esperada** en el repo destino: además de
@@ -628,8 +630,14 @@ estaba viva.
   de decidir si se commitea o se revierte.
 - **La Fase 2 va por n=2** (3323 y 3320), las dos formas opuestas de ticket. Lo que falta medir
   no es otra forma más: es **si sus negativos son fiables**, que es lo que el 3320 destapó.
-- **El orquestador es v1 delgado**: sin SSE, sin corridas paralelas, columnas de
-  fases 2-4 deshabilitadas — crecen junto con las fases del agente.
+- **El orquestador es v1 delgado**: sin SSE, sin corridas paralelas, y las fases `test`,
+  `guards` y `pr` declaradas pero no lanzables — crecen junto con las fases del agente.
+- **Una corrida de `implement` es larga**: el 3332 tardó **83 minutos** con 19 tareas, y el
+  ritmo es irregular (de 2 a 9 minutos por tarea según su tamaño). Consume ventana de
+  suscripción a ese ritmo. Si se corta, `tasks.md` conserva el avance y relanzar retoma.
+- **La guarda de árbol limpio se evalúa dos veces** (en el POST, para el `409` inmediato, y
+  bajo el lock, que es la autoritativa). Dos tickets sobre el mismo repositorio físico se
+  encolan los dos: el segundo se entera al arrancar, con un error explicado, no al pulsar.
 - **Actualizar este documento** y los checkboxes de los planes al cerrar hitos.
 
 ## Cómo retomar en una sesión nueva
