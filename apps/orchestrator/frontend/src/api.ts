@@ -53,6 +53,13 @@ export const api = {
     }).then(r => json<Project>(r)),
   removeProject: (name: string) =>
     fetch(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }).then(r => json<void>(r)),
+  /** Does this path exist on disk? A courtesy for the form: saving validates again,
+   *  and that one is the authoritative check. */
+  validatePath: (ruta: string) =>
+    fetch("/api/rutas/validar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ruta }),
+    }).then(r => json<{ existe: boolean }>(r)).then(x => x.existe),
   models: () => fetch("/api/modelos").then(r => json<PhaseModels>(r)),
   saveModels: (m: PhaseModels) =>
     fetch("/api/modelos", {
