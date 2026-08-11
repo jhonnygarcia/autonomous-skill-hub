@@ -1145,3 +1145,52 @@ def test_git_ausente_no_se_disfraza_de_409(tmp_path, monkeypatch):
     monkeypatch.setattr(app.subprocess, "run", _sin_git)
     with pytest.raises(FileNotFoundError):
         app.sucio(str(repo))
+
+
+def test_implement_con_repo_sucio_da_409_y_no_encola(client, monkeypatch, tmp_path):
+    """El 409 llega ANTES de gastar un subproceso de 8 minutos."""
+    import app
+    _use_fake_claude(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    (tmp_path / "repo" / "seed.txt").write_text("v2\n", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert r.status_code == 409
+    assert client.get(f"/tickets/{tid}").json()["runs"] == []
+
+
+def test_implement_guarda_la_rama_en_la_corrida(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3320-x/tasks.md")
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["branch"] == "ticket-agent/3320"
+
+
+def test_analyze_no_exige_repo_limpio(client, monkeypatch):
+    """La guarda es de `implement`. Si se aplicara a todas, la Fase 1 dejaría de
+    poder correrse sobre un repo con trabajo a medias, que es lo normal."""
+    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3311-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={})
+    assert r.status_code == 202
+
+
+def test_sello_parcial_de_implement_conserva_la_reserva(client, monkeypatch, tmp_path):
+    """El contrato del sello ya existía, pero nadie lo había ejercitado con la fase
+    nueva ni con una reserva de esta forma. Falla si el parseo se ata a las rutas de
+    `docs/tickets/` o si la reserva se cuela dentro de `artifact_path`."""
+    _use_fake_claude(
+        monkeypatch,
+        huella="parcial — openspec/changes/3320-x/tasks.md · 3/5 tareas, build en rojo")
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["artifact_state"] == "parcial"
+    assert run["artifact_path"] == "openspec/changes/3320-x/tasks.md"
+    assert run["artifact_note"] == "3/5 tareas, build en rojo"

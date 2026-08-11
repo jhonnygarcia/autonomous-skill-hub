@@ -664,10 +664,21 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         ).fetchone()
     if active:
         raise HTTPException(409, "Este ticket ya tiene una corrida activa")
+    rama = None
+    if body.phase == "implement":
+        # Los tres pasos deterministas del diseño, antes de gastar un subproceso.
+        repos = [t["repo_path"]] + [e["path"] for e in
+                                    norm_dirs(json.loads(t["extra_dirs"] or "[]"))]
+        check_limpios(repos)
+        for r in repos:
+            # En todos, incluidos los que el plan acabe no tocando: el runner no
+            # parsea el plan, y una rama sin commits es ruido que se borra solo.
+            rama = preparar_rama(r, t["ado_id"])
     with db() as c:
         cur = c.execute(
-            "INSERT INTO runs(ticket_id, phase, instructions, status) VALUES(?,?,?,'queued')",
-            (tid, body.phase, body.instructions),
+            "INSERT INTO runs(ticket_id, phase, instructions, status, branch) "
+            "VALUES(?,?,?,'queued',?)",
+            (tid, body.phase, body.instructions, rama),
         )
         run_id = cur.lastrowid
     set_ticket(tid)
