@@ -155,6 +155,24 @@ export function Timeline({ fases, runs, activo, ticketId, onRun }: {
                 <p className="pb-2 text-xs text-amber-600 dark:text-amber-500">{f.motivo}</p>
               )}
 
+              {/* La rama que preparó `implement`, tratada igual que la ruta del artefacto
+                  (mismo mono, mismo tamaño): un dato técnico hermano, no un elemento
+                  nuevo. Va FUERA del bloque de la huella y no dentro: el runner ya cambió
+                  de rama todos los repos del ticket antes de lanzar al agente, así que una
+                  corrida que cierra con `nada` o que revienta deja los repos igual de
+                  movidos — y ahí es justo cuando hace falta saber dónde mirar. El diseño
+                  acepta dejarlos en la rama nueva porque "es visible y reversible";
+                  anidada bajo la huella solo era visible cuando no hacía falta.
+                  Sin hueco cuando no hay rama — es lo normal en el resto de fases. */}
+              {branch && (
+                <div className="flex flex-wrap items-center gap-x-2 pb-2 text-xs">
+                  <span className="text-muted-foreground">Rama</span>
+                  <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+                    {branch}
+                  </span>
+                </div>
+              )}
+
               {h && (
                 <div className="pb-2 text-xs">
                   {h.existe ? (
@@ -167,14 +185,6 @@ export function Timeline({ fases, runs, activo, ticketId, onRun }: {
                         <span className="text-muted-foreground">
                           {h.archivos === 1 ? tamaño(h.bytes) : `${h.archivos} archivos · ${tamaño(h.bytes)}`}
                         </span>
-                        {/* La rama que preparó `implement`, tratada igual que la ruta del
-                            artefacto (mismo mono, mismo tamaño): un dato técnico hermano,
-                            no un elemento nuevo. Sin hueco cuando no hay — es lo normal. */}
-                        {branch && (
-                          <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
-                            {branch}
-                          </span>
-                        )}
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {items.map(it => (

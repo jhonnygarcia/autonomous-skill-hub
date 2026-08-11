@@ -5,11 +5,12 @@ const COLOR: Record<string, string> = {
   corriendo: "border-blue-500/60 bg-blue-500/10 text-blue-700 dark:text-blue-500",
   analizado: "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-500",
   planificado: "border-violet-500/60 bg-violet-500/10 text-violet-700 dark:text-violet-500",
+  implementado: "border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-500",
   error: "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-500",
 }
 const LABEL: Record<string, string> = {
   queued: "registrado", running: "corriendo", analyzed: "analizado",
-  planned: "planificado", error: "error",
+  planned: "planificado", implemented: "implementado", error: "error",
 }
 
 /** `queued` significa dos cosas en el backend — recién añadido y a punto de correr.
