@@ -20,9 +20,21 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 | Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Tres fases lanzables**, avance por fases, huellas y timeline. Guarda de árbol limpio, rama bajo el lock y hook de contención (2026-08-11) |
 | 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Cerrada** (3323 y 3320, n=2) — plugin **v0.5.2**, con la regla del negativo verificada en re-corrida |
 | 2b — Del plan al código | Ejecutar el plan: escribir código y commitear en una rama | ✅ **Construida y validada** (3332) — plugin **v0.6.1**, n=1. Para en rama, sin push |
-| 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
-| 4 — Guards | Agents revisores read-only + hooks deterministas | 📋 Futura |
-| 5 — Aprendizaje por proyecto | Memoria local que alimenta las skills | 📋 Futura (OpenSpec también candidato aquí) |
+| ~~3 — Pruebas~~ | Unitarias ligadas a criterios de aceptación | ✅ **Absorbida por la 2b** (2026-08-11) — no era una fase, era un paso |
+| 4 — Guards | Agents revisores read-only + hooks deterministas | 🔄 **Empezada**: el hook de contención ya corre en `implement`. Falta el revisor |
+| 5 — Aprendizaje por proyecto | Memoria local que alimenta las skills | 🔄 **Encogida** (2026-08-08): el `CLAUDE.md` del repo destino ya lo hace |
+
+**El roadmap se encoge según se construye, y conviene no pelearse con eso.** Tres de las
+cuatro fases "futuras" resultaron no ser fases. La 5 se encogió al descubrir que el
+`CLAUDE.md` del proyecto anfitrión ya es la memoria. La 3 desapareció entera: el 3332
+escribió **12 archivos de test dentro de `implement`**, porque cada tarea del plan trae su
+*"Comprobación"* y la skill obliga a ejecutarla — pedir una fase aparte habría sido pedir
+los tests dos veces. Y la 4 ya está a medias sin haberla planificado: el hook que deniega
+el push nació como contención de la 2b.
+
+Consecuencia práctica, aplicada el 2026-08-11: **`test` se borró de `PHASES`**. Una fase
+declarada que nunca se va a lanzar no es documentación, es una promesa incumplida ocupando
+un sitio en el timeline. Quedan cinco: `analyze`, `design`, `implement`, `guards`, `pr`.
 
 ## Qué existe y dónde
 
@@ -386,6 +398,11 @@ inútil— y los 118 tests seguían verdes. La única contención del hito no la
 
 ## Pendientes inmediatos
 
+- [ ] **Leer las 2658 líneas que el 3332 dejó en la rama `ticket-agent/3332`.** Nadie las ha
+  mirado. La corrida salió `ok` porque el build está verde y las casillas marcadas, pero eso
+  mide que el mecanismo funcionó, **no que el código sea bueno** — es primo hermano de un test
+  placebo. Revisarlas contra el patrón de Estes y ABF es lo que dice si la 2b sirve para
+  trabajar o solo para demos, y condiciona si merece la pena construir la última milla.
 - [ ] **Recrear los tickets 3322 y 3323 en el orquestador.** Se perdieron con la BD (ver
   "El borrado"). Sus artefactos siguen en el repo destino; su historial de corridas no vuelve.
 - [ ] **Verificar la escritura en un `extra_dir`.** La decisión 4 del spec de la 2b sigue sin

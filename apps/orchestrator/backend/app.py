@@ -17,7 +17,11 @@ BASE = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("ORCH_DB", BASE / "orchestrator.db"))
 LOGS_DIR = Path(os.environ.get("ORCH_LOGS", BASE / "logs"))
 
-PHASES = ["analyze", "design", "implement", "test", "guards", "pr"]
+# `test` estuvo aquí y se borró el 2026-08-11: no es una fase, es parte de `implement`.
+# Cada tarea del plan trae su "Comprobación" y la skill obliga a ejecutarla, así que la
+# corrida del 3332 escribió 12 archivos de test dentro de la implementación. Una fase que
+# nunca se va a lanzar solo ocupa un sitio en el timeline y promete algo que no llega.
+PHASES = ["analyze", "design", "implement", "guards", "pr"]
 
 # Declarar una fase no es implementarla. Solo estas tres se pueden lanzar; el resto
 # están en PHASES para que la UI sepa que existen, y se rechazan con 400.

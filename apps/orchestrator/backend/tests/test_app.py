@@ -627,13 +627,14 @@ def test_run_conflict_when_active(client, monkeypatch):
 def test_fases_sin_corridas(client):
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     fases = client.get(f"/tickets/{tid}").json()["fases"]
-    assert [f["fase"] for f in fases] == ["analyze", "design", "implement", "test", "guards", "pr"]
+    # `test` no está: las pruebas se escriben dentro de `implement`, no en una fase aparte.
+    assert [f["fase"] for f in fases] == ["analyze", "design", "implement", "guards", "pr"]
     assert fases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
     assert fases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
     # una fase no ejecutable no informa estado: no hay nada que informar
-    assert fases[3] == {"fase": "test", "disponible": False}
+    assert fases[3] == {"fase": "guards", "disponible": False}
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 

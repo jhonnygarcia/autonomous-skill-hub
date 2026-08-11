@@ -54,10 +54,12 @@ export function duracion(desde: string | null, hasta: string | null): string {
   return duracionTexto(Math.round((Date.parse(hasta) - Date.parse(desde)) / 1000))
 }
 
-/** Las seis fases del pipeline, con el nombre que se le enseña al usuario. */
+/** Las cinco fases del pipeline, con el nombre que se le enseña al usuario.
+ *  `test` desapareció el 2026-08-11: las pruebas se escriben dentro de `implement`,
+ *  porque cada tarea del plan trae su comprobación. No era una fase, era un paso. */
 export const FASE_LABEL: Record<string, string> = {
   analyze: "Análisis", design: "Plan", implement: "Código",
-  test: "Pruebas", guards: "Revisión", pr: "PR",
+  guards: "Revisión", pr: "PR",
 }
 
 /** Tamaño legible de un artefacto: bytes, KB o MB. */
