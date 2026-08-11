@@ -44,7 +44,7 @@ export function TicketDetail({ detail, activo, projectName, onBack, onRun, onDel
       </div>
       {motivo && <p className="text-xs text-amber-700 dark:text-amber-500">{motivo}</p>}
 
-      <Timeline fases={detail.fases} activo={activo} ticketId={t.id}
+      <Timeline fases={detail.fases} runs={detail.runs} activo={activo} ticketId={t.id}
                 onRun={(fase, ins) => onRun(ins, fase)} />
 
       <div>

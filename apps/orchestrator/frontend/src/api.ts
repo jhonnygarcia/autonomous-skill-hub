@@ -6,6 +6,9 @@ export type Run = {
   id: number; phase: string; instructions: string | null
   status: string; started_at: string | null; finished_at: string | null
   artifact_state: string | null; artifact_path: string | null
+  // Solo la fase que prepara rama (`implement`) la deja; el resto de corridas
+  // llega en `null`, que es el caso normal, no una ausencia de dato.
+  branch: string | null
 }
 export type Huella = {
   ruta: string; existe: boolean; archivos: number; bytes: number; nombres: string[]

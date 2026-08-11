@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { api, type ActiveRun, type Artefacto, type Fase } from "@/api"
+import { api, type ActiveRun, type Artefacto, type Fase, type Run } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { colorFase, duracionTexto, FASE_LABEL, hora, iconoFase, puedeLanzar, tamaño } from "@/estado"
@@ -18,8 +18,9 @@ const CHIP =
  * va donde está la información, el mismo principio que movió los repos a la cabecera del
  * proyecto. Las fases que aún no existen salen apagadas: el camino pendiente es contexto.
  */
-export function Timeline({ fases, activo, ticketId, onRun }: {
+export function Timeline({ fases, runs, activo, ticketId, onRun }: {
   fases: Fase[]
+  runs: Run[]
   activo: ActiveRun | null
   ticketId: number
   onRun: (fase: string, instructions?: string) => void
@@ -50,6 +51,10 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
       {fases.map((f, i) => {
         const motivo = puedeLanzar(fases, i, activo, ticketId)
         const h = f.huella
+        // `runs` llega ordenado por id DESC, igual que en `fases_de` del backend: el
+        // primero que coincide con esta fase es su corrida más reciente, la misma que
+        // produjo `h`. Solo `implement` la deja — el resto llega en `null`.
+        const branch = runs.find(r => r.phase === f.fase)?.branch ?? null
         // Dos formas de artefacto: un directorio (ruta + "/" + cada nombre) o un archivo
         // suelto (la ruta ya es completa y coincide con su propio nombre). La decisión se
         // toma UNA vez, fuera del map — meterla dentro del map (como en la primera versión)
@@ -162,6 +167,14 @@ export function Timeline({ fases, activo, ticketId, onRun }: {
                         <span className="text-muted-foreground">
                           {h.archivos === 1 ? tamaño(h.bytes) : `${h.archivos} archivos · ${tamaño(h.bytes)}`}
                         </span>
+                        {/* La rama que preparó `implement`, tratada igual que la ruta del
+                            artefacto (mismo mono, mismo tamaño): un dato técnico hermano,
+                            no un elemento nuevo. Sin hueco cuando no hay — es lo normal. */}
+                        {branch && (
+                          <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+                            {branch}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {items.map(it => (
