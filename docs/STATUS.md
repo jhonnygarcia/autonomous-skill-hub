@@ -1,7 +1,7 @@
 # Estado del proyecto — Autonomous Skill Hub
 
 > Documento vivo. Actualízalo al cerrar cada hito o al tomar una decisión.
-> Última actualización: 2026-08-10 (Fase 2 **cerrada**: el fallo del negativo, arreglado y verificado)
+> Última actualización: 2026-08-11 (**Fase 2b construida y validada**: el agente escribe código)
 
 ## Propósito
 
@@ -19,7 +19,7 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
 | 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
 | Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ Ciclo completo con dos fases lanzables + **avance por fases, huellas y timeline implementados y validados con corrida real** (2026-08-10) |
 | 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Cerrada** (3323 y 3320, n=2) — plugin **v0.5.2**, con la regla del negativo verificada en re-corrida |
-| 2b — Del plan al código | Ejecutar el plan: escribir código, rama, PR | 📋 Futura — la Fase 2 se quedó deliberadamente en el documento |
+| 2b — Del plan al código | Ejecutar el plan: escribir código y commitear en una rama | ✅ **Construida y validada** (3332) — plugin **v0.6.1**, n=1. Para en rama, sin push |
 | 3 — Pruebas | Unitarias ligadas a criterios de aceptación + integración | 📋 Futura |
 | 4 — Guards | Agents revisores read-only + hooks deterministas | 📋 Futura |
 | 5 — Aprendizaje por proyecto | Memoria local que alimenta las skills | 📋 Futura (OpenSpec también candidato aquí) |
@@ -110,6 +110,13 @@ con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
     `.opencode/`— **no hay que versionarlo ni revertirlo**. Se están probando el plugin y
     el orquestador, no ese repo. Sí merece la pena **medir** la huella que dejan: eso es
     evidencia sobre la herramienta.
+17. **La Fase 2b para en rama con commits, sin push** (2026-08-11, spec
+    `2026-08-10-fase-2b-del-plan-al-codigo-design.md`, seis decisiones votadas allí). Las dos
+    que más gobiernan: se trabaja **en sitio con guarda de árbol limpio** —un worktree no
+    traería `node_modules` ni `obj/` y cada corrida pagaría un install antes de poder ejecutar
+    las comprobaciones del plan— y **la contención es un hook determinista**, no una
+    instrucción en la skill. El hook contiene **accidentes, no malicia**: es un pestillo, y si
+    algún día la fase corre desatendida hay que rehacerlo.
 16. **Un negativo lleva su fuente igual que una cifra** (2026-08-10, regla 5 de `change-planning`,
     plugin v0.5.2). Las reglas de oro disciplinaban lo que el agente **encuentra**; nada
     disciplinaba lo que declara **ausente**, y ahí falló el 3320. Ahora declarar "no existe" exige
@@ -322,8 +329,69 @@ quien **abrió la pantalla** y pone `BilledOn = today` si estaba vacío. Verific
 Abrir la pestaña falsea autoría y fecha de facturación — eso ya no es un checkbox que no
 persiste, y no está en el ticket.
 
+## Sexta jornada — 2026-08-11 (madrugada): la Fase 2b, y el agente escribe código
+
+**Construida entera con `subagent-driven-development`**: 8 tareas, 21 commits, backend de
+118 a **125 tests**. Spec en `2026-08-10-fase-2b-del-plan-al-codigo-design.md`, plan con sus
+casillas. Lo que hay ahora: fase `implement` en las cuatro tablas, guarda de árbol limpio,
+rama por ticket creada **bajo el lock**, un hook que deniega push y PR entregado con
+`--settings`, la skill `change-implementation`, y la rama visible en el timeline.
+
+**La prueba de fuego pasó, sobre el 3332** (*Carrier API V2 Migration - Dayton*, backend
+puro; el frontend quedó fuera a petición del usuario, que tenía trabajo en curso allí).
+Cadena completa en una noche: análisis `parcial` → plan `ok` con 19 tareas → **implementación
+`ok`, 19/19 tareas, 17 commits, 83 minutos**. El ticket se plegó a `implemented`.
+
+Lo verificado, uno a uno:
+
+- **La rama se preparó bajo el lock** y quedó en `runs.branch`: `ticket-agent/3332`. El repo
+  se situó en ella y no salió de la máquina: **cero denegaciones del hook**, porque el agente
+  nunca intentó pushear.
+- **Ni una fuga en 17 commits.** Cero archivos de `.claude/`, `.opencode/` o `docs/tickets/`.
+  De 31 archivos tocados, 29 son código y tests (8 ficheros de prueba nuevos o ampliados) y 2
+  son el ledger y una nota de hallazgos del propio change. La regla de commitear rutas
+  concretas —que solo la sostiene un markdown— **aguantó en el repo de un cliente**.
+- **Un commit por tarea**, con su número y su asunto: `3332 tarea 5.2: crear DaytonTenderCall
+  V2 y traducir los accesoriales…`. El `git log` es el registro, como se diseñó.
+- **El sello**: 8 coincidencias en un log de 3,72 MB, la buena a 225 caracteres del final.
+- **El visor** sirvió el `tasks.md` de 21,5 KB y siguió devolviendo 400 a la travesía.
+
+**Y la parte cara del diseño se ganó su precio en vivo.** En la tarea 5.2 el agente principal
+detectó que su subagente había tocado `CarrierCallBase.cs` —archivo compartido por **todos**
+los carriers— y, en vez de aceptar el diff, verificó que el cambio es equivalente para
+cualquier carrier que no sobrescriba `MapError` antes de commitear. Un radio de impacto que
+una tarea aislada no ve, atrapado por la revisión entre tareas.
+
+### Lo que costó no fue construirlo
+
+**Siete rondas de arreglo en ocho tareas, y cinco de los fallos eran del plan que escribí:**
+
+| Dónde | El fallo |
+|---|---|
+| Tarea 2 | El regex denegaba `git commit -m "… git push …"`: casaba la subcadena en cualquier posición |
+| Tarea 3 | El helper `_app()` no aislaba el import: `init_db()` escribía en la BD y los logs **reales** |
+| Tarea 6 | El invariante "validar todos antes de tocar ninguno" no lo protegía ningún test |
+| Tarea 8 | Era imposible tocando solo el archivo que el plan mandaba: `branch` viaja en `runs`, no en `fases` |
+| Revisión final | **El prompt del runner decía lo contrario que el diseño** |
+
+El último es el que justifica la revisión de la rama entera. El bloque de repos extra no se
+ramificaba por fase, así que en `implement` el agente leía que los repos montados son
+*legibles* y que el entregable va al principal —lo contrario de la decisión 4— y la skill,
+para desempatar, manda **hacer caso al prompt**. Ninguna revisión por tarea podía verlo: el
+prompt lo escribe una tarea y lo contradice otra.
+
+**Cuatro tests placebo**, los cuatro destapados mutando el código. El peor dejaba cambiar
+`PreToolUse` por `PostToolUse` —el hook correría **después** del push, con el `exit 2` ya
+inútil— y los 118 tests seguían verdes. La única contención del hito no la sujetaba nada.
+
 ## Pendientes inmediatos
 
+- [ ] **Recrear los tickets 3322 y 3323 en el orquestador.** Se perdieron con la BD (ver
+  "El borrado"). Sus artefactos siguen en el repo destino; su historial de corridas no vuelve.
+- [ ] **Verificar la escritura en un `extra_dir`.** La decisión 4 del spec de la 2b sigue sin
+  ejercitarse: el 3332 es de un solo repo. Hace falta un ticket cuyo código viva en un repo
+  montado —el **3320** lo es— y que el frontend esté libre. Es el único supuesto grande de la
+  fase que aún no se ha probado en vivo.
 - [ ] **Avisar del hallazgo de AR al equipo.** El auto-marcado de AR estampa autoría y
   `BilledOn` al abrir la pantalla (`UpdateArReadyToProcessCommand.cs:36-43`). Es un defecto de
   integridad de datos que **no está en ningún ticket** y que salió de planificar el 3320. Merece
@@ -360,6 +428,47 @@ persiste, y no está en el ticket.
 - `puedeLanzar` duplica los textos de bloqueo de `bloqueo()` en `estado.ts`.
 - Los planes de las jornadas anteriores tienen casillas sin marcar
   (`fase-0-1`: 15/20, `orchestrator`: 31/32, `fase-2`: 30/32) pese a estar cerradas.
+
+## El borrado de la BD del orquestador (2026-08-11)
+
+**Se perdieron la base de datos y todos los logs de corridas.** No fue un fallo del código:
+al revisar la Tarea 3 de la Fase 2b, la instrucción que se le dio al revisor decía
+literalmente *"borra `orchestrator.db` y el directorio `logs/`"* para comprobar que los tests
+ya no ensuciaban el disco real. Y esa era la BD de verdad — `DB_PATH` cuelga de `BASE`, que es
+la carpeta del propio `app.py`, así que no depende del directorio de trabajo. Está en
+`.gitignore`: no hay nada que recuperar de git.
+
+Lo perdido: el proyecto, los tickets 3322/3323/3320 y ~10 corridas con sus huellas y tiempos,
+más **todos los logs**. Lo que sobrevivió es lo que valía: los análisis y los changes están en
+el repo destino, y las mediciones están escritas aquí y en los mensajes de commit.
+
+**La lección no es "ten cuidado".** Es que una instrucción de verificación que manda **borrar**
+algo tiene que nombrar un directorio de usar y tirar, nunca una ruta de producción. El propio
+bug que se estaba verificando —tests que escriben en el disco real— demostraba que esa ruta
+estaba viva.
+
+## Lo aprendido (2026-08-11, madrugada)
+
+- **Mutar el código es la única forma fiable de saber si un test prueba algo.** Cuatro placebos
+  en un solo hito, y ninguno se veía leyendo: el del hook pasaba con `PostToolUse`, el de la
+  guarda pasaba con la comprobación entremezclada, el de la rama pasaba sin `refs/heads/`. La
+  pregunta *"¿qué tendría que romperse?"* es buena para escribir el test; **romperlo de verdad**
+  es lo que lo demuestra. Ahora hay una tabla de mutaciones en el informe de la oleada final.
+- **Arreglar un hallazgo abrió otro tres veces de tres.** El ancla del regex tapó los falsos
+  positivos y dejó escapar `then git push`; el aislamiento de los tests metió la BD dentro del
+  repo bajo prueba y creó un placebo nuevo. **Toda ronda de arreglo necesita su re-revisión**, y
+  la re-revisión tiene que buscar lo que el arreglo rompió, no solo si arregló.
+- **El prompt es parte del contrato, y nadie lo revisaba.** El diseño, la skill y el código
+  decían lo correcto; el texto que el runner inyecta decía lo contrario. Vivía en una tarea
+  distinta de la que definía la regla, así que ninguna revisión por tarea lo cruzaba. Los huecos
+  siguen viviendo en las costuras: es la segunda vez que este proyecto lo aprende.
+- **Un plan es una hipótesis, y esta vez se midió**: cinco de sus bloques resultaron
+  equivocados. La cabecera del plan ahora avisa de cuáles, con "manda el código". Un plan que
+  enseña código que sabemos incorrecto es una trampa para el siguiente que lo lea.
+- **La ceremonia cara se pagó sola.** Un subagente por tarea con revisión del diff parecía
+  exagerado para una fase sin estrenar. Atrapó un cambio en un archivo compartido por todos los
+  carriers en el repo de un cliente. Con el bucle lineal, ese diff se habría commiteado sin que
+  nadie lo mirase.
 
 ## Lo aprendido (2026-08-10, noche)
 
@@ -528,39 +637,43 @@ persiste, y no está en el ticket.
 Prompt sugerido — abrir Claude Code en el hub
 (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md para situarte. **La Fase 2 está cerrada** (n=2, plugin v0.5.2): el fallo del
-> negativo que destapó el 3320 está arreglado y verificado con una re-corrida de respuesta
-> conocida. Lo que queda ya no es la Fase 2.
+> Lee docs/STATUS.md para situarte. **La Fase 2b está construida y validada** (plugin v0.6.1):
+> el agente escribe código y commitea en una rama. El 3332 se implementó entero —19/19 tareas,
+> 17 commits, 83 minutos— sin una sola fuga en los commits.
 >
-> El objetivo de esta sesión es **desbloquear la Fase 2b (del plan al código)**, y lo que la
-> bloquea no es código sino una decisión aplazada tres sesiones: **qué hace el runner con `Bash` y
-> con los permisos de escritura**. Hoy `analyze` va con lista vacía y `design` con
-> `Bash(npx …)` — que habilita la herramienta entera, no la acota. Escribir código exige
-> `Edit`/`Write` en el repo de un cliente, rama, build y tests, y los `extra_dirs` están montados
-> como lectura pero nada impide escribir en ellos. Eso es un cambio de postura de riesgo, no una
-> bandera más: **merece spec propio en `docs/superpowers/specs/`** antes de tocar el runner.
+> El objetivo de esta sesión es **cerrar el único supuesto grande que quedó sin probar**: que el
+> agente pueda **escribir en un `extra_dir`** (decisión 4 del spec de la 2b). El 3332 era de un
+> solo repo, así que no lo ejercitó. El caso está listo y esperando: el **3320**, ya analizado y
+> planificado, tiene todo su código en `ProvidenceTMS`, que se monta como extra. Requiere que ese
+> repo esté libre de trabajo en curso — la última vez no lo estaba.
 >
-> Antes de empezar, dos cosas pequeñas que quedaron abiertas: el **hallazgo de AR** (el
-> auto-marcado estampa autoría y `BilledOn` al abrir la pantalla) necesita work item propio, y los
-> **adjuntos embebidos en HTML** siguen sin ejercitarse (el `.jpg` de #827 lleva su GUID en el
-> `src`, no en `relations`).
+> 1. **Recrea el proyecto con los dos repos** y da de alta el 3320. Su análisis y su change ya
+>    existen en el Tenant, así que se puede lanzar `implement` directamente.
+> 2. **Mira la guarda antes de nada**: si el frontend tiene cambios trackeados, la corrida
+>    devolverá `409`, y eso es lo correcto, no un fallo.
+> 3. Si la escritura en el extra falla, **fallará a la primera y en la tarea 1**. El diseño lo
+>    tiene anotado como supuesto pendiente en "Riesgos e incógnitas abiertas".
+>
+> Dos cosas menores siguen abiertas: el **hallazgo de AR** (el auto-marcado estampa autoría y
+> `BilledOn` al abrir la pantalla) necesita work item propio, y los **adjuntos embebidos en HTML**
+> siguen sin ejercitarse (el `.jpg` de #827 lleva su GUID en el `src`, no en `relations`).
 >
 > Para levantar el orquestador: backend en `apps/orchestrator/backend`
 > (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
 > `apps/orchestrator/frontend` (`npm run dev`). Comprueba que el proceso del 8000 arrancó
 > **después** de la última modificación de `app.py` — nos ha engañado cuatro veces ya.
 
-Contexto que ya no hace falta rehacer: el **3320 está dado de alta** en el orquestador
-(ticket interno `id=3`, proyecto "Providence (Back & Front)", primario `ProvidenceTMSTenant`)
-con sus dos fases corridas y verdes, y el Tenant ya tiene su `.claude/ticket-agent.json`.
-El TMS está configurado (`ADO_ORG` en `.claude/settings.json`), el proyecto dado de alta en la
-BD del orquestador y el plugin instalado a nivel de usuario en **v0.5.2**.
-El **3322 está analizado con el contrato nuevo**
-y su timeline se ve completo, con artefacto abrible. El **3323** está analizado y
-planificado, pero **sus corridas son anteriores al sello**, así que sale en rojo y sin
-artefacto: eso es correcto, no es un bug — el backfill leyó sus logs y no había sello que
-recuperar. `ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas dejen ahí
-no hay que versionarlo ni limpiarlo (decisión 15).
+**Cuidado con el estado de la BD del orquestador: está casi vacía.** Se borró (ver "El
+borrado"), y lo único que hay es el proyecto *"Providence (solo backend)"* —un solo repo, el
+Tenant— con el ticket **3332** y sus tres corridas. Los tickets 3322, 3323 y 3320 **no están
+dados de alta**, aunque sus análisis y changes siguen en el repo destino: recrearlos es dar de
+alta el ticket, no volver a correr las fases.
+
+Lo que sí está hecho y no hace falta rehacer: `ADO_ORG` en `.claude/settings.json` del TMS, el
+`.claude/ticket-agent.json` del Tenant, y el plugin instalado a nivel de usuario en **v0.6.1**.
+`ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas dejen ahí no hay que
+versionarlo ni limpiarlo (decisión 15) — y ahora incluye la rama **`ticket-agent/3332`** con
+17 commits de la implementación, que tampoco hay que mergear ni borrar salvo que estorbe.
 
 Cinco trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
 plugin instalado; **no usar `uvicorn --reload`**, que deja procesos huérfanos reteniendo
