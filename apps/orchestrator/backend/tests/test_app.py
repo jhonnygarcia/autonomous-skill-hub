@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_db_tables_created(client):
     import app
 
@@ -933,3 +936,78 @@ def test_artefacto_extra_dir_descendiente_del_principal_sigue_rechazando_comodin
         client.post(f"/tickets/{tid}/run", json={})
         assert client.get(f"/tickets/{tid}/artefacto",
                           params={"ruta": ".env"}).status_code == 400
+
+
+import subprocess
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _app():
+    """`app` se importa DENTRO de cada test porque conftest lo saca de `sys.modules`
+    para que relea `ORCH_DB`. Y el `sys.path` lo pone el fixture `client`, que estos
+    tests no usan: sin esta línea pasarían o fallarían según el orden de ejecución."""
+    sys.path.insert(0, str(BACKEND_DIR))
+    import app
+    return app
+
+
+def _git_init(path):
+    """Un repo con un commit: `git switch -c` necesita algo de donde colgar."""
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+    (path / "seed.txt").write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "seed.txt"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=path, check=True)
+
+
+def test_guarda_bloquea_un_trackeado_modificado(tmp_path):
+    """Sin esto, `git switch -c` arrastra tu trabajo sin commitear a la rama del
+    agente y el agente lo commitea como suyo."""
+    app = _app()
+    _git_init(tmp_path)
+    (tmp_path / "seed.txt").write_text("v2\n", encoding="utf-8")
+    assert app.sucio(str(tmp_path)) is True
+
+
+def test_guarda_tolera_los_no_trackeados(tmp_path):
+    """El caso que hace la fase lanzable: el repo principal SIEMPRE tiene
+    `openspec/` y `docs/tickets/` sin trackear, que son artefactos del agente.
+    Si este test falla, la fase implement es inlanzable para siempre."""
+    app = _app()
+    _git_init(tmp_path)
+    (tmp_path / "openspec").mkdir()
+    (tmp_path / "openspec" / "changes.md").write_text("x", encoding="utf-8")
+    assert app.sucio(str(tmp_path)) is False
+
+
+def test_guarda_ve_lo_que_esta_en_stage(tmp_path):
+    app = _app()
+    _git_init(tmp_path)
+    (tmp_path / "nuevo.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "nuevo.txt"], cwd=tmp_path, check=True)
+    assert app.sucio(str(tmp_path)) is True
+
+
+def test_check_limpios_nombra_los_repos_sucios(tmp_path):
+    app = _app()
+    from fastapi import HTTPException
+    limpio, sucio_ = tmp_path / "a", tmp_path / "b"
+    limpio.mkdir(); sucio_.mkdir()
+    _git_init(limpio); _git_init(sucio_)
+    (sucio_ / "seed.txt").write_text("v2\n", encoding="utf-8")
+    with pytest.raises(HTTPException) as e:
+        app.check_limpios([str(limpio), str(sucio_)])
+    assert e.value.status_code == 409
+    assert str(sucio_) in e.value.detail
+    assert str(limpio) not in e.value.detail
+
+
+def test_un_directorio_que_no_es_git_da_409(tmp_path):
+    app = _app()
+    from fastapi import HTTPException
+    (tmp_path / "pelado").mkdir()
+    with pytest.raises(HTTPException) as e:
+        app.check_limpios([str(tmp_path / "pelado")])
+    assert e.value.status_code == 409

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -132,6 +133,29 @@ def check_dirs(*paths: str) -> None:
     bad = [p for p in paths if not Path(p).is_dir()]
     if bad:
         raise HTTPException(400, "No existen o no son directorios: " + ", ".join(bad))
+
+
+def sucio(repo: str) -> bool:
+    """¿Hay trabajo sin commitear que un `git switch -c` se llevaría por delante?
+
+    Los `??` se ignoran **a propósito**: el repo principal siempre tiene `openspec/`,
+    `docs/tickets/` y lo que dejó `openspec init` sin trackear — son artefactos del
+    propio agente. Exigir un árbol virgen haría la fase inlanzable siempre. Lo que
+    importa es lo trackeado: eso sí es trabajo del usuario.
+    """
+    r = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise HTTPException(409, f"No es un repositorio git: {repo}")
+    return any(not ln.startswith("??") for ln in r.stdout.splitlines() if ln.strip())
+
+
+def check_limpios(repos: list[str]) -> None:
+    malos = [r for r in repos if sucio(r)]
+    if malos:
+        raise HTTPException(409, "Hay cambios sin commitear en: " + ", ".join(malos)
+                            + ". La fase implement commitea, y no debe llevarse por "
+                              "delante tu trabajo a medias.")
 
 
 def split_repos(repos: list) -> tuple:
