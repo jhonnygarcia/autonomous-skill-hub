@@ -23,6 +23,13 @@ function validate(f: Project): Record<string, string> {
   if (!f.org.trim()) e.org = "Falta la organización de Azure DevOps."
   if (!f.project.trim()) e.project = "Falta el proyecto de Azure DevOps."
   if (!f.repos.some(r => r.path.trim())) e.repos = "Necesitas al menos un repo con su ruta."
+  // Blank rows get dropped on save. If the one marked primary is among them, the payload
+  // arrives with no primary at all: the backend answers 400 (`split_repos`) with a banner
+  // that doesn't say which row to fix — a round trip to learn something the form already
+  // knows. Reachable by filling the second row and forgetting to move the radio.
+  else if (!f.repos.some(r => r.primary && r.path.trim())) {
+    e.repos = "El repo marcado como principal necesita su ruta."
+  }
   return e
 }
 
@@ -75,6 +82,9 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
     const e = validate(form)
     setErrors(e)
     if (Object.keys(e).length) {
+      // `campo-repos` sits on the PRIMARY row's path input, not on the wrapping <div>:
+      // both `repos` errors are about that row, and a <div> without tabindex silently
+      // refuses focus, which made this a no-op for the most reachable failure.
       document.getElementById(`campo-${Object.keys(e)[0]}`)?.focus()
       return
     }
@@ -142,7 +152,7 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
           que le dice cuándo mirar en cada uno.
         </p>
 
-        <div id="campo-repos" className="space-y-4">
+        <div className="space-y-4">
           {form.repos.map((r, i) => {
             const key = r.path.trim()
             // `undefined` = not visited yet. Absence is not a verdict.
@@ -171,6 +181,7 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
                 </div>
 
                 <Input className="mt-2 font-mono" placeholder="D:/ruta/al/repo" value={r.path}
+                       id={r.primary ? "campo-repos" : undefined}
                        aria-label="Ruta del repo"
                        onBlur={e => checkPath(e.target.value)}
                        onChange={e => patch(rs =>
