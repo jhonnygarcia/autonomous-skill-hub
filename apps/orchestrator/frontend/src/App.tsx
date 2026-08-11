@@ -1,18 +1,22 @@
 import { useEffect, useState } from "react"
 import { api, type ActiveRun, type Project, type Ticket, type TicketDetail as Detail } from "@/api"
 import { Models } from "@/Models"
+import { ProjectForm } from "@/ProjectForm"
 import { ProjectHeader } from "@/ProjectHeader"
 import { Projects } from "@/Projects"
 import { Sidebar } from "@/Sidebar"
 import { TicketDetail } from "@/TicketDetail"
 import { TicketList } from "@/TicketList"
 
-// Three views switched by hand. No router: it's a single-user local app and
+// Four views switched by hand. No router: it's a single-user local app and
 // `react-router` would be a dependency for nothing.
 type View =
   | { kind: "project" }
   | { kind: "ticket"; id: number }
-  | { kind: "settings"; isNew?: boolean }
+  | { kind: "settings" }
+  // `name: null` = creating. The form used to be a block expanded inside the settings
+  // card, which is why `+ Nuevo` had to jump to another view and open it via a prop.
+  | { kind: "projectForm"; name: string | null }
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -21,11 +25,13 @@ export default function App() {
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [view, setView] = useState<View>({ kind: "project" })
+  // User-initiated actions and the project load land here. What does NOT is the 3-second
+  // poll: it retries on its own, and a banner for a transient blip is noise that trains
+  // you to ignore the banner. Loading the projects is different — it runs on mount and
+  // after saving, and failing silently there leaves an empty app with no explanation.
   const [error, setError] = useState("")
 
-  const fail = (e: unknown) => setError(String(e))
-
-  // `select` is sent by Settings after saving, so a rename doesn't change the
+  // `select` is sent by the form after saving, so a rename doesn't change the
   // active project out from under it (the old name is no longer in the list).
   const refreshProjects = (select?: string) =>
     api.projects().then(ps => {
@@ -34,11 +40,11 @@ export default function App() {
         const wanted = select ?? c
         return ps.some(p => p.name === wanted) ? wanted : (ps[0]?.name ?? null)
       })
-    }).catch(fail)
+    }).catch(e => setError(String(e)))
 
   const refresh = () => {
-    api.tickets().then(setTickets).catch(fail)
-    api.activeRun().then(setActiveRun).catch(fail)
+    api.tickets().then(setTickets).catch(() => {})
+    api.activeRun().then(setActiveRun).catch(() => {})
     if (view.kind === "ticket") api.detail(view.id).then(setDetail).catch(() => setDetail(null))
   }
 
@@ -55,37 +61,56 @@ export default function App() {
   // ponytail: today they match; if they ever diverge, tickets need a `project_key`.
   const myTickets = project ? tickets.filter(t => t.project === project.project) : []
 
-  const act = (fn: () => Promise<unknown>) => { setError(""); return fn().then(refresh).catch(fail) }
+  const act = (fn: () => Promise<unknown>) => {
+    setError("")
+    return fn().then(refresh).catch(e => setError(String(e)))
+  }
 
   const addTicket = (adoId: number) =>
     project && act(() => api.create(adoId, project.name))
 
   const open = (id: number) => { setDetail(null); setView({ kind: "ticket", id }) }
   const back = () => { setDetail(null); setView({ kind: "project" }) }
+  const editing = view.kind === "projectForm" ? view.name : null
 
   return (
     <div className="mx-auto flex w-full max-w-[92rem] gap-6 p-6">
-      <Sidebar projects={projects} current={current} settings={view.kind === "settings"}
+      <Sidebar projects={projects} current={current}
+               settings={view.kind === "settings" || view.kind === "projectForm"}
                onSelect={n => { setCurrent(n); back() }}
-               onNew={() => setView({ kind: "settings", isNew: true })}
                onSettings={() => setView({ kind: "settings" })} />
 
       <main className="min-w-0 flex-1 space-y-4">
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40
+                          bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError("")} aria-label="Descartar el error"
+                    className="rounded px-1 focus-visible:outline-none focus-visible:ring-2
+                               focus-visible:ring-ring/50">✕</button>
+          </div>
+        )}
 
         {view.kind === "settings" && (
           <>
-            {/* the `key` forces a remount when "+ Nuevo" is pressed while already in Settings */}
-            <Projects key={view.isNew ? "new" : "list"} projects={projects}
-                      startNew={view.isNew} onChange={refreshProjects} />
+            <Projects projects={projects}
+                      onEdit={name => setView({ kind: "projectForm", name })}
+                      onNew={() => setView({ kind: "projectForm", name: null })}
+                      onChange={() => refreshProjects()} />
             <Models />
           </>
         )}
 
-        {view.kind !== "settings" && !project && (
+        {view.kind === "projectForm" && (
+          <ProjectForm initial={projects.find(p => p.name === editing) ?? null}
+                       onSaved={name => { refreshProjects(name); setView({ kind: "settings" }) }}
+                       onCancel={() => setView({ kind: "settings" })} />
+        )}
+
+        {(view.kind === "project" || view.kind === "ticket") && !project && (
           <p className="text-sm text-muted-foreground">
             Aún no hay proyectos.{" "}
-            <button className="underline" onClick={() => setView({ kind: "settings" })}>
+            <button className="underline" onClick={() => setView({ kind: "projectForm", name: null })}>
               Agrega uno
             </button>{" "}
             para poder encolar tickets.
