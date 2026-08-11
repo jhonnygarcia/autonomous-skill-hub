@@ -318,7 +318,7 @@ git commit -m "refactor(ui): la tabla de repos sale de ProjectHeader para poder 
 
 **Interfaces:**
 - Consumes: `api.saveProject`, `api.validatePath` (nuevo), `ConfirmDialog` (Task 2), `Button`, `Input`.
-- Produces: `<ProjectForm initial={Project | null} onSaved={(name: string) => void} onCancel={() => void} />`, más los helpers exportados `newProject(): Project` y `validate(f: Project): Record<string, string>`. La consume la Task 5 desde `App.tsx`.
+- Produces: `<ProjectForm initial={Project | null} onSaved={(name: string) => void} onCancel={() => void} />`. La consume la Task 5 desde `App.tsx`. Los helpers `newProject()` y `validate()` quedan **locales del módulo**: nadie fuera del archivo los usa, y exportarlos dispara `react/only-export-components` en oxlint, que sube la línea base de warnings sin comprar nada.
 
 - [ ] **Step 1: Add `validatePath` to the API client**
 
@@ -348,18 +348,27 @@ const EMPTY: Project = {
   repos: [{ path: "", label: "", primary: true }],
 }
 
-export const newProject = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
+// Module-local, both of them: nothing outside this file uses them, and exporting a
+// non-component alongside a component trips oxlint's `react/only-export-components`.
+const newProject = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
 
 /**
  * What's missing, per field. Replaces the four-condition `disabled` that named none of
  * them: the button stays alive and pressing it paints what's missing.
  */
-export function validate(f: Project): Record<string, string> {
+function validate(f: Project): Record<string, string> {
   const e: Record<string, string> = {}
   if (!f.name.trim()) e.name = "Ponle un nombre al proyecto."
   if (!f.org.trim()) e.org = "Falta la organización de Azure DevOps."
   if (!f.project.trim()) e.project = "Falta el proyecto de Azure DevOps."
   if (!f.repos.some(r => r.path.trim())) e.repos = "Necesitas al menos un repo con su ruta."
+  // Blank rows get dropped on save. If the one marked primary is among them, the payload
+  // arrives with no primary at all: the backend answers 400 (`split_repos`) with a banner
+  // that doesn't say which row to fix — a round trip to learn something the form already
+  // knows. Reachable by filling the second row and forgetting to move the radio.
+  else if (!f.repos.some(r => r.primary && r.path.trim())) {
+    e.repos = "El repo marcado como principal necesita su ruta."
+  }
   return e
 }
 
@@ -412,6 +421,9 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
     const e = validate(form)
     setErrors(e)
     if (Object.keys(e).length) {
+      // `campo-repos` sits on the PRIMARY row's path input, not on the wrapping <div>:
+      // both `repos` errors are about that row, and a <div> without tabindex silently
+      // refuses focus, which made this a no-op for the most reachable failure.
       document.getElementById(`campo-${Object.keys(e)[0]}`)?.focus()
       return
     }
@@ -479,7 +491,7 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
           que le dice cuándo mirar en cada uno.
         </p>
 
-        <div id="campo-repos" className="space-y-4">
+        <div className="space-y-4">
           {form.repos.map((r, i) => {
             const key = r.path.trim()
             // `undefined` = not visited yet. Absence is not a verdict.
@@ -508,6 +520,7 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
                 </div>
 
                 <Input className="mt-2 font-mono" placeholder="D:/ruta/al/repo" value={r.path}
+                       id={r.primary ? "campo-repos" : undefined}
                        aria-label="Ruta del repo"
                        onBlur={e => checkPath(e.target.value)}
                        onChange={e => patch(rs =>
@@ -565,7 +578,7 @@ git commit -m "feat(ui): el formulario de proyecto contesta al salir de cada cam
 - Modify: `apps/orchestrator/frontend/src/Sidebar.tsx:31`
 
 **Interfaces:**
-- Consumes: `ProjectForm`, `newProject` (Task 4), `ConfirmDialog` (Task 2), `RepoTable` (Task 3).
+- Consumes: `ProjectForm` (Task 4), `ConfirmDialog` (Task 2), `RepoTable` (Task 3).
 - Produces: la vista `{ kind: "projectForm"; name: string | null }` en el `View` union de `App.tsx`.
 
 - [ ] **Step 1: Rewrite `Projects.tsx` as a list only**
