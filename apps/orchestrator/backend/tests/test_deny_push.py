@@ -1,12 +1,14 @@
 """El hook contiene accidentes, no malicia. Los dos lados importan: denegar de menos
 deja escapar un push; denegar de más rompe corridas legítimas y se diagnostica fatal."""
+import io
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from hooks.deny_push import debe_denegar  # noqa: E402
+from hooks.deny_push import MOTIVO, debe_denegar, main  # noqa: E402
 
 DENEGADOS = [
     "git push",
@@ -29,6 +31,8 @@ PERMITIDOS = [
     "git remote show origin",
     "npm run build",
     "dotnet build ProvidenceTMS/PTMS.API/PTMS.API.csproj -c Debug",
+    'git commit -m "fix: prevent accidental git push in CI"',   # "push" entrecomillado
+    'echo "reminder: never git push to main" >> NOTES.md',      # ni siquiera es git
 ]
 
 
@@ -40,3 +44,47 @@ def test_deniega(cmd):
 @pytest.mark.parametrize("cmd", PERMITIDOS)
 def test_deja_pasar(cmd):
     assert debe_denegar(cmd) is False
+
+
+def _correr_main(monkeypatch, payload):
+    """Simula stdin con `payload` (JSON ya serializado si es str; si no, se serializa)
+    y corre `main()`, devolviendo su código de salida."""
+    entrada = payload if isinstance(payload, str) else json.dumps(payload)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(entrada))
+    return main()
+
+
+def test_main_evento_bash_prohibido(monkeypatch):
+    evento = {"tool_name": "Bash", "tool_input": {"command": "git push"}}
+    assert _correr_main(monkeypatch, evento) == 2
+
+
+def test_main_evento_bash_permitido(monkeypatch):
+    evento = {"tool_name": "Bash", "tool_input": {"command": "git status"}}
+    assert _correr_main(monkeypatch, evento) == 0
+
+
+def test_main_tool_name_distinto_de_bash(monkeypatch):
+    evento = {"tool_name": "Read", "tool_input": {"command": "git push"}}
+    assert _correr_main(monkeypatch, evento) == 0
+
+
+def test_main_stdin_ilegible(monkeypatch):
+    assert _correr_main(monkeypatch, "esto no es json") == 0
+
+
+@pytest.mark.parametrize("payload", [
+    None,
+    42,
+    [1, 2, 3],
+    {"tool_name": "Bash", "tool_input": None},
+])
+def test_main_formas_raras_fallan_abierto(monkeypatch, payload):
+    assert _correr_main(monkeypatch, payload) == 0
+
+
+def test_main_imprime_motivo_en_stderr_al_denegar(monkeypatch, capsys):
+    evento = {"tool_name": "Bash", "tool_input": {"command": "git push"}}
+    codigo = _correr_main(monkeypatch, evento)
+    assert codigo == 2
+    assert MOTIVO in capsys.readouterr().err

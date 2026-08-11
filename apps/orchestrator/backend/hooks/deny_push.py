@@ -15,11 +15,16 @@ import sys
 # `git push-notes` saldría denegado. Denegar de más rompe corridas legítimas.
 # El grupo de opciones cubre `git -C <ruta> push` y `git --git-dir=x push`.
 _OPCIONES = r"(?:\s+-{1,2}\S+(?:\s+\S+)?)*"
+# Cada alternativa exige que el verbo abra el comando: al principio de la cadena o
+# justo tras un separador de shell (`;`, `&`, `|`, salto de línea o `(`). Sin este
+# anclaje el regex casa la subcadena en cualquier punto, incluida dentro de texto
+# entrecomillado — `git commit -m "... git push ..."` no es un push, es un mensaje.
+_INICIO = r"(?:^|[;&|\n(])\s*"
 PROHIBIDO = re.compile(
-    rf"\bgit\b{_OPCIONES}\s+push(?![-\w])"
-    rf"|\bgit\b{_OPCIONES}\s+remote\s+(?:add|set-url)(?![-\w])"
-    r"|\bgh\s+pr\s+create(?![-\w])"
-    r"|\baz\s+repos\s+pr\s+create(?![-\w])"
+    rf"{_INICIO}git\b{_OPCIONES}\s+push(?![-\w])"
+    rf"|{_INICIO}git\b{_OPCIONES}\s+remote\s+(?:add|set-url)(?![-\w])"
+    rf"|{_INICIO}gh\s+pr\s+create(?![-\w])"
+    rf"|{_INICIO}az\s+repos\s+pr\s+create(?![-\w])"
 )
 
 MOTIVO = ("La Fase 2b para en rama con commits: nada de push ni de PR. "
@@ -35,9 +40,14 @@ def main() -> int:
         evento = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0  # sin evento legible no hay nada que denegar
-    if evento.get("tool_name") != "Bash":
+    # El hook falla abierto: una forma de evento que no reconocemos (no es un objeto,
+    # o `tool_input` no es un objeto) no es motivo para denegar ni para reventar.
+    if not isinstance(evento, dict) or evento.get("tool_name") != "Bash":
         return 0
-    if debe_denegar(evento.get("tool_input", {}).get("command", "")):
+    entrada = evento.get("tool_input")
+    if not isinstance(entrada, dict):
+        return 0
+    if debe_denegar(entrada.get("command", "")):
         print(MOTIVO, file=sys.stderr)
         return 2
     return 0
