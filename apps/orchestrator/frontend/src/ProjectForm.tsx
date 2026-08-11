@@ -9,13 +9,15 @@ const EMPTY: Project = {
   repos: [{ path: "", label: "", primary: true }],
 }
 
-export const newProject = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
+// Module-local, both of them: nothing outside this file uses them, and exporting a
+// non-component alongside a component trips oxlint's `react/only-export-components`.
+const newProject = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
 
 /**
  * What's missing, per field. Replaces the four-condition `disabled` that named none of
  * them: the button stays alive and pressing it paints what's missing.
  */
-export function validate(f: Project): Record<string, string> {
+function validate(f: Project): Record<string, string> {
   const e: Record<string, string> = {}
   if (!f.name.trim()) e.name = "Ponle un nombre al proyecto."
   if (!f.org.trim()) e.org = "Falta la organización de Azure DevOps."
