@@ -233,10 +233,22 @@ def get_project(name: str) -> sqlite3.Row | None:
         return c.execute("SELECT * FROM projects WHERE name=?", (name,)).fetchone()
 
 
+def is_repo_dir(path: str) -> bool:
+    """Whether a path from a form points at a real directory.
+
+    `is_dir()` raises instead of returning False on a null byte or an absurdly long
+    path, and this value comes straight from a text field the user pasted into.
+    """
+    try:
+        return Path(path).is_dir()
+    except (ValueError, OSError):
+        return False
+
+
 def check_dirs(*paths: str) -> None:
     """Paths arrive from a form and end up as cwd and --add-dir of a subprocess: a typo
     here blows up inside the CLI with an unreadable error."""
-    bad = [p for p in paths if not Path(p).is_dir()]
+    bad = [p for p in paths if not is_repo_dir(p)]
     if bad:
         raise HTTPException(400, "No existen o no son directorios: " + ", ".join(bad))
 
@@ -436,6 +448,10 @@ class ProjectIn(BaseModel):
     repos: list[Repo] = []
 
 
+class RutaIn(BaseModel):
+    ruta: str
+
+
 class TicketIn(BaseModel):
     ado_id: int
     project: str
@@ -527,6 +543,18 @@ def delete_project(name: str):
     with db() as c:
         if not c.execute("DELETE FROM projects WHERE name=?", (name,)).rowcount:
             raise HTTPException(404)
+
+
+@app.post("/rutas/validar")
+def validar_ruta(body: RutaIn):
+    """The same check `check_dirs` does, exposed on its own so the project form can
+    answer at blur time instead of at save time.
+
+    It does NOT replace `check_dirs`: saving keeps validating, and that one stays the
+    authoritative check. This endpoint is a courtesy, so a failure here never blocks a
+    save — see the frontend's `catch` in `ProjectForm`.
+    """
+    return {"existe": is_repo_dir(body.ruta)}
 
 
 @app.post("/tickets", status_code=201)

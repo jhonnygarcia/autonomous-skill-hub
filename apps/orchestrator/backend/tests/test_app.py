@@ -1509,3 +1509,29 @@ def test_the_run_branch_is_the_one_prepared_under_the_lock(
         current = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / d,
                                 capture_output=True, text=True).stdout.strip()
         assert current == "ticket-agent/3320"
+
+
+def test_ruta_existente_es_valida(client, tmp_path):
+    r = client.post("/rutas/validar", json={"ruta": (tmp_path / "repo").as_posix()})
+    assert r.status_code == 200
+    assert r.json() == {"existe": True}
+
+
+def test_ruta_inexistente_no_es_valida(client, tmp_path):
+    r = client.post("/rutas/validar", json={"ruta": (tmp_path / "no-existe").as_posix()})
+    assert r.json() == {"existe": False}
+
+
+def test_un_archivo_no_es_un_repo(client, tmp_path):
+    f = tmp_path / "archivo.txt"
+    f.write_text("x", encoding="utf-8")
+    r = client.post("/rutas/validar", json={"ruta": f.as_posix()})
+    assert r.json() == {"existe": False}
+
+
+def test_ruta_absurda_no_revienta(client):
+    """A null byte makes `Path.is_dir()` raise instead of returning False. The form
+    sends whatever the user pasted, so this reaches the endpoint for real."""
+    r = client.post("/rutas/validar", json={"ruta": "x\x00y"})
+    assert r.status_code == 200
+    assert r.json() == {"existe": False}
