@@ -1,11 +1,11 @@
 import type { Project } from "@/api"
 
 /**
- * Los repos que el agente va a montar tienen que estar a la vista JUSTO donde se
- * decide lanzar un ticket — no escondidos en el formulario donde se configuraron.
+ * The repos the agent will mount need to be in view RIGHT WHERE launching a
+ * ticket is decided — not hidden in the form where they were configured.
  */
 export function ProjectHeader({ project }: { project: Project }) {
-  // el principal primero, que es donde se escribe el análisis
+  // primary first, since that's where the analysis is written
   const repos = [...project.repos].sort((a, b) => Number(b.primary) - Number(a.primary))
   return (
     <div className="space-y-2">

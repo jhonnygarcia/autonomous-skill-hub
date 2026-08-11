@@ -1,716 +1,860 @@
-# Estado del proyecto — Autonomous Skill Hub
+# Project status — Autonomous Skill Hub
 
-> Documento vivo. Actualízalo al cerrar cada hito o al tomar una decisión.
-> Última actualización: 2026-08-11 (**Fase 2b construida y validada**: el agente escribe código)
+> Living document. Update it when closing each milestone or making a decision.
+> Last updated: 2026-08-11 (**Phase 2b built and validated**: the agent writes code)
 
-## Propósito
+## Purpose
 
-Hub personal de plugins de Claude Code que captura la experiencia de Jhonny como
-skills/agents/hooks reutilizables. Primer objetivo: un agente que lee un ticket de
-Azure DevOps, lo comprende a cabalidad (relaciones, adjuntos, wiki, reglas del
-proyecto), y por fases llegará a diseñar, implementar, probar y validar el código
-con guards — instalable en cualquier proyecto y capaz de aprender de cada uno.
+Personal hub of Claude Code plugins that captures Jhonny's experience as
+reusable skills/agents/hooks. First goal: an agent that reads an Azure DevOps
+ticket, understands it thoroughly (relations, attachments, wiki, project
+rules), and will progress through phases to design, implement, test and
+validate the code with guards — installable in any project and able to learn
+from each one.
 
-## Roadmap y estado
+## Roadmap and status
 
-| Fase | Qué entrega | Estado |
+| Phase | What it delivers | Status |
 |---|---|---|
-| 0 — Fundación del hub | Marketplace de plugins + esqueleto ticket-agent | ✅ Hecha |
-| 1 — Comprensión de tickets | Skill `ticket-comprehension` + `/ticket-agent:analyze` (solo lectura) | ✅ **Aceptada** (3311 y 3322) — skill **v0.3.0** |
-| Orquestador (transversal) | App local: cola SQLite + runner CLI headless + UI React | ✅ **Tres fases lanzables**, avance por fases, huellas y timeline. Guarda de árbol limpio, rama bajo el lock y hook de contención (2026-08-11) |
-| 2 — Del análisis al plan de cambios | Skill `change-planning` + `/ticket-agent:plan` → change de OpenSpec | ✅ **Cerrada** (3323 y 3320, n=2) — plugin **v0.5.2**, con la regla del negativo verificada en re-corrida |
-| 2b — Del plan al código | Ejecutar el plan: escribir código y commitear en una rama | ✅ **Construida y validada** (3332) — plugin **v0.6.1**, n=1. Para en rama, sin push |
-| ~~3 — Pruebas~~ | Unitarias ligadas a criterios de aceptación | ✅ **Absorbida por la 2b** (2026-08-11) — no era una fase, era un paso |
-| 4 — Guards | Agents revisores read-only + hooks deterministas | 🔄 **Empezada**: el hook de contención ya corre en `implement`. Falta el revisor |
-| 5 — Aprendizaje por proyecto | Memoria local que alimenta las skills | 🔄 **Encogida** (2026-08-08): el `CLAUDE.md` del repo destino ya lo hace |
+| 0 — Hub foundation | Plugin marketplace + ticket-agent skeleton | ✅ Done |
+| 1 — Ticket comprehension | `ticket-comprehension` skill + `/ticket-agent:analyze` (read-only) | ✅ **Accepted** (3311 and 3322) — skill **v0.3.0** |
+| Orchestrator (cross-cutting) | Local app: SQLite queue + headless CLI runner + React UI | ✅ **Three phases launchable**, per-phase progress, stamps and timeline. Clean-tree guard, branch under the lock, and containment hook (2026-08-11) |
+| 2 — From analysis to a change plan | `change-planning` skill + `/ticket-agent:plan` → OpenSpec change | ✅ **Closed** (3323 and 3320, n=2) — plugin **v0.5.2**, with the negative-claim rule verified on a re-run |
+| 2b — From plan to code | Execute the plan: write code and commit on a branch | ✅ **Built and validated** (3332) — plugin **v0.6.1**, n=1. Stops on a branch, no push |
+| ~~3 — Tests~~ | Unit tests tied to acceptance criteria | ✅ **Absorbed by 2b** (2026-08-11) — it wasn't a phase, it was a step |
+| 4 — Guards | Read-only reviewer agents + deterministic hooks | 🔄 **Started**: the containment hook already runs in `implement`. The reviewer is still missing |
+| 5 — Per-project learning | Local memory that feeds the skills | 🔄 **Shrunk** (2026-08-08): the target repo's `CLAUDE.md` already does this |
 
-**El roadmap se encoge según se construye, y conviene no pelearse con eso.** Tres de las
-cuatro fases "futuras" resultaron no ser fases. La 5 se encogió al descubrir que el
-`CLAUDE.md` del proyecto anfitrión ya es la memoria. La 3 desapareció entera: el 3332
-escribió **12 archivos de test dentro de `implement`**, porque cada tarea del plan trae su
-*"Comprobación"* y la skill obliga a ejecutarla — pedir una fase aparte habría sido pedir
-los tests dos veces. Y la 4 ya está a medias sin haberla planificado: el hook que deniega
-el push nació como contención de la 2b.
+**The roadmap shrinks as it gets built, and it's not worth fighting that.** Three of
+the four "future" phases turned out not to be phases at all. Phase 5 shrank once it
+became clear the host project's `CLAUDE.md` already is the memory. Phase 3 disappeared
+entirely: 3332 wrote **12 test files inside `implement`**, because every task in the
+plan carries its own *"Check"* and the skill requires running it — asking for a
+separate phase would have meant asking for the tests twice. And phase 4 is already
+half-done without having been planned: the hook that denies the push was born as
+containment for 2b.
 
-Consecuencia práctica, aplicada el 2026-08-11: **`test` se borró de `PHASES`**. Una fase
-declarada que nunca se va a lanzar no es documentación, es una promesa incumplida ocupando
-un sitio en el timeline. Quedan cinco: `analyze`, `design`, `implement`, `guards`, `pr`.
+Practical consequence, applied on 2026-08-11: **`test` was removed from `PHASES`**. A
+declared phase that will never be launched isn't documentation, it's a broken promise
+taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
+`guards`, `pr`.
 
-## Qué existe y dónde
+## What exists and where
 
-- **Marketplace**: `.claude-plugin/marketplace.json` — instalar con
-  `/plugin marketplace add <ruta-del-hub>` + `/plugin install ticket-agent@autonomous-skill-hub`.
-- **Plugin ticket-agent**: `plugins/ticket-agent/` — `.mcp.json` (MCP oficial de
-  Azure DevOps, org por env `ADO_ORG`, dominios filtrados, auth `az login`),
-  skill `ticket-comprehension`, comando `analyze`, README de instalación.
-- **Orquestador**: `apps/orchestrator/` — backend FastAPI+SQLite (`backend/app.py`,
-  **18 tests** pytest), README de arranque. No hay archivo de configuración: los
-  proyectos están en la BD y se editan desde la UI.
-  Frontend (Vite+React+Tailwind+shadcn), una vista por archivo:
-  `App.tsx` (conmutador de vistas y estado), `Sidebar`, `ProjectHeader`,
-  `TicketList`, `TicketDetail`, `Projects` (ajustes), `estado.ts` (etiquetas,
-  bloqueo por corrida activa, duraciones).
-- **Diseños**: `docs/superpowers/specs/` (hub+fase1, orquestador, navegación de la
-  UI). **Planes** con checkboxes: `docs/superpowers/plans/`.
-- Configuración por proyecto destino: `.claude/ticket-agent.json` (org, project,
-  `autonomy: supervised|autonomous`) + `ADO_ORG` en settings del proyecto.
+- **Marketplace**: `.claude-plugin/marketplace.json` — install with
+  `/plugin marketplace add <hub-path>` + `/plugin install ticket-agent@autonomous-skill-hub`.
+- **ticket-agent plugin**: `plugins/ticket-agent/` — `.mcp.json` (official
+  Azure DevOps MCP, org via the `ADO_ORG` env var, filtered domains, `az login`
+  auth), `ticket-comprehension` skill, `analyze` command, install README.
+- **Orchestrator**: `apps/orchestrator/` — FastAPI+SQLite backend (`backend/app.py`,
+  **18 pytest tests**), startup README. No config file: projects live in the
+  DB and are edited from the UI.
+  Frontend (Vite+React+Tailwind+shadcn), one view per file:
+  `App.tsx` (view switcher and state), `Sidebar`, `ProjectHeader`,
+  `TicketList`, `TicketDetail`, `Projects` (settings), `status.ts` (labels,
+  lock while a run is active, durations).
+- **Designs**: `docs/superpowers/specs/` (hub+phase1, orchestrator, UI
+  navigation). **Plans** with checkboxes: `docs/superpowers/plans/`.
+- Per-target-project configuration: `.claude/ticket-agent.json` (org, project,
+  `autonomy: supervised|autonomous`) + `ADO_ORG` in the project's settings.
 
-## Decisiones clave (y por qué)
+## Key decisions (and why)
 
-1. **Plugin delgado que reusa piezas públicas**: MCP oficial de Microsoft +
-   skills de superpowers; solo se crea lo que codifica experiencia propia.
-2. **Suscripción, jamás API key**: la ejecución programática usa el CLI headless
-   (`claude -p`) — el Agent SDK exige `ANTHROPIC_API_KEY`. El runner además
-   elimina `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` del entorno del subproceso
-   (test que lo garantiza).
-3. **SQLite sin ORM, un ticket a la vez** (lock global): cola local transitoria.
-4. **El estado del pipeline vive en el orquestador; el análisis vive en el repo
-   del proyecto** (`docs/tickets/<id>-analysis.md`) — una fuente de verdad por cosa.
-5. **OpenSpec: adoptado** (2026-08-10) como formato de salida de la Fase 2, con su
-   carpeta en el **repo destino**, no aquí. El paquete es `@fission-ai/openspec` — *no*
-   `openspec`, que es otro y no existe como ejecutable. Sigue siendo candidato para la
-   memoria viva de la Fase 5.
-6. **Un ticket abarca N repos, pero escribe en uno** (2026-08-08). El 3311 manda los
-   arreglos de backend a `ProvidenceTMSTenant`, repo hermano del primario. Un proyecto
-   declara un `repo_path` (cwd de la corrida, donde se escribe el análisis) y
-   `extra_dirs` que el runner monta con `--add-dir`. La decisión 4 no cambia.
-   **Corolario (2026-08-09): montar no basta.** Ver "Lo aprendido".
-7. **Los proyectos viven en la BD y se editan desde la UI** (2026-08-08), no en un
-   archivo. Con `extra_dirs` siendo una lista, el JSON a mano dejaba de tener gracia;
-   y un proyecto que no se puede dar de alta desde la UI es un agujero en el producto.
-   El ticket **copia** los datos del proyecto al crearse (como una línea de pedido
-   guarda el precio), así que no hay FK y borrar un proyecto no rompe el historial.
-8. **No construir descubrimiento de CLAUDE.md**: Claude Code ya los carga en cascada
-   desde `cwd` hacia arriba, cruzando el límite del repo. Comprobado en el 3311, que
-   absorbió tres niveles — incluido `D:/Companies/ProvidenceSolutions/CLAUDE.md`, que
-   está fuera del repo — sin que nadie se lo dijera.
-9. **Un proyecto tiene repos; el usuario marca cuál es el principal** (2026-08-09).
-   La API expone una lista plana `repos: [{path, label, primary}]`. Por dentro se
-   siguen guardando separados porque el runner los usa distinto, pero eso deja de
-   ser un concepto que el usuario tenga que entender. La `label` no es decorativa:
-   viaja al prompt. El nombre del proyecto es editable — renombrar es seguro porque
-   los tickets copian sus datos al crearse (decisión 7).
-10. **El proyecto es el contexto de la UI** (2026-08-09, spec
-    `2026-08-09-orchestrator-ui-navegacion-design.md`): barra lateral de proyectos,
-    cabecera que muestra qué repos verá el agente, y el panel derecho pasa a ser el
-    ticket al elegirlo. Tres vistas con `useState`, sin router.
-11. **La Fase 2 entrega un documento, no código** (2026-08-10, spec
-    `2026-08-09-fase-2-plan-de-cambios-design.md`). El plan se escribe **para el agente
-    que lo implemente**: destino, espejo con `archivo:línea`, y cómo se comprueba. Eso
-    deja la corrida en solo lectura + escribir markdown, así que no hay ramas ni
-    permisos de escritura que resolver todavía. Escribir el código es una fase aparte.
-12. **Dos skills encadenadas, no una con dos modos** (2026-08-10). `change-planning`
-    consume `docs/tickets/<id>-analysis.md` y **se detiene si no existe**. El análisis
-    es la interfaz: si sale mal, se ve en el archivo y se re-corre la Fase 1 sola.
-13. **El estado de una corrida no se deduce del código de salida** (2026-08-10).
-    `claude -p` sale con 0 aunque el agente se detenga sin hacer nada, así que `planned`
-    llegó a significar "el subproceso no petó". Ahora la skill cierra con un sello y el
-    runner decide por la **última** coincidencia en el log. Ver "Lo aprendido" para por
-    qué *última* y no *presente*. **Generalizado el 2026-08-10**: el sello es
-    `HUELLA: <ok|parcial|nada> — <ruta>`, lo cierran **las dos** skills, y rige toda
-    fase. `PLAN:` se conserva solo como alias legado para no romper logs viejos.
-14. **El avance vive en `runs`, no en una columna de estado** (2026-08-10, spec
-    `2026-08-10-avance-por-fases-y-timeline-design.md`, **implementado el 2026-08-10**).
-    El sello `PLAN:` se generaliza a `HUELLA: <ok|parcial|nada> — <ruta>` para toda fase,
-    `runs` gana la huella, `current_phase` se borra y `tickets.status` pasa a calcularse.
-    La UI del ticket se convierte en un recorrido de fases con la acción y el artefacto
-    de cada una, y el artefacto se lee dentro de la app. Revierte a propósito la decisión
-    de retirar el stepper: allí eran 6 fases apagadas en **cada fila de la lista**; aquí
-    salen una vez, en el detalle, donde el camino pendiente es contexto.
-15. **`ProvidenceTMSTenant` es el conejillo de indias** (2026-08-10). Lo que las corridas
-    dejen ahí —análisis, `openspec/`, lo que instale `openspec init` en `.claude/` y
-    `.opencode/`— **no hay que versionarlo ni revertirlo**. Se están probando el plugin y
-    el orquestador, no ese repo. Sí merece la pena **medir** la huella que dejan: eso es
-    evidencia sobre la herramienta.
-17. **La Fase 2b para en rama con commits, sin push** (2026-08-11, spec
-    `2026-08-10-fase-2b-del-plan-al-codigo-design.md`, seis decisiones votadas allí). Las dos
-    que más gobiernan: se trabaja **en sitio con guarda de árbol limpio** —un worktree no
-    traería `node_modules` ni `obj/` y cada corrida pagaría un install antes de poder ejecutar
-    las comprobaciones del plan— y **la contención es un hook determinista**, no una
-    instrucción en la skill. El hook contiene **accidentes, no malicia**: es un pestillo, y si
-    algún día la fase corre desatendida hay que rehacerlo.
-16. **Un negativo lleva su fuente igual que una cifra** (2026-08-10, regla 5 de `change-planning`,
-    plugin v0.5.2). Las reglas de oro disciplinaban lo que el agente **encuentra**; nada
-    disciplinaba lo que declara **ausente**, y ahí falló el 3320. Ahora declarar "no existe" exige
-    haber buscado **por forma de nombre** (`Glob`), no por símbolos, y **nombrar esa búsqueda en la
-    tarea**. Generalizable a las fases que vengan: toda afirmación negativa del agente es
-    verificable o no vale.
+1. **A thin plugin that reuses public pieces**: Microsoft's official MCP +
+   superpowers skills; only what encodes our own experience gets built.
+2. **Subscription, never an API key**: programmatic execution uses the
+   headless CLI (`claude -p`) — the Agent SDK requires `ANTHROPIC_API_KEY`. On
+   top of that, the runner removes `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
+   from the subprocess environment (a test guarantees this).
+3. **SQLite without an ORM, one ticket at a time** (global lock): a transient
+   local queue.
+4. **The pipeline's state lives in the orchestrator; the analysis lives in the
+   project's repo** (`docs/tickets/<id>-analysis.md`) — one source of truth
+   per thing.
+5. **OpenSpec: adopted** (2026-08-10) as Phase 2's output format, with its
+   folder in the **target repo**, not here. The package is
+   `@fission-ai/openspec` — *not* `openspec`, which is a different thing and
+   doesn't exist as an executable. Still a candidate for Phase 5's live
+   memory.
+6. **A ticket can span N repos, but writes to one** (2026-08-08). 3311 sends
+   backend fixes to `ProvidenceTMSTenant`, a sibling repo of the primary one.
+   A project declares a `repo_path` (the run's cwd, where the analysis is
+   written) and `extra_dirs`, which the runner mounts with `--add-dir`.
+   Decision 4 doesn't change. **Corollary (2026-08-09): mounting isn't
+   enough.** See "Lessons learned".
+7. **Projects live in the DB and are edited from the UI** (2026-08-08), not in
+   a file. With `extra_dirs` being a list, hand-editing JSON stopped making
+   sense; and a project that can't be registered from the UI is a hole in the
+   product. The ticket **copies** the project's data when created (like a
+   line item on an order preserves the price), so there's no FK and deleting
+   a project doesn't break history.
+8. **Don't build `CLAUDE.md` discovery**: Claude Code already loads them in a
+   cascade from `cwd` upward, crossing the repo boundary. Verified in 3311,
+   which picked up three levels — including
+   `D:/Companies/ProvidenceSolutions/CLAUDE.md`, which is outside the repo —
+   without anyone telling it to.
+9. **A project has repos; the user marks which one is primary** (2026-08-09).
+   The API exposes a flat list `repos: [{path, label, primary}]`. Internally
+   they're still stored separately because the runner uses them differently,
+   but that stops being a concept the user has to understand. The `label`
+   isn't decorative: it travels into the prompt. The project's name is
+   editable — renaming is safe because tickets copy its data when created
+   (decision 7).
+10. **The project is the UI's context** (2026-08-09, spec
+    `2026-08-09-orchestrator-ui-navegacion-design.md`): a sidebar of projects,
+    a header showing which repos the agent will see, and the right-hand panel
+    becomes the ticket once one is selected. Three views with `useState`, no
+    router.
+11. **Phase 2 delivers a document, not code** (2026-08-10, spec
+    `2026-08-09-fase-2-plan-de-cambios-design.md`). The plan is written **for
+    the agent that will implement it**: destination, mirror with
+    `file:line`, and how it's checked. That keeps the run read-only + writing
+    markdown, so there are no branches or write permissions to sort out yet.
+    Writing the code is a separate phase.
+12. **Two chained skills, not one with two modes** (2026-08-10).
+    `change-planning` consumes `docs/tickets/<id>-analysis.md` and **stops if
+    it doesn't exist**. The analysis is the interface: if it comes out wrong,
+    it shows in the file and Phase 1 gets re-run on its own.
+13. **A run's status isn't inferred from the exit code** (2026-08-10).
+    `claude -p` exits with 0 even if the agent stops without doing anything,
+    so `planned` came to mean "the subprocess didn't crash." Now the skill
+    closes with a stamp and the runner decides based on the **last** match in
+    the log. See "Lessons learned" for why *last* and not *present*.
+    **Generalized on 2026-08-10**: the stamp is
+    `HUELLA: <ok|parcial|nada> — <ruta>`, both skills close with it, and it
+    governs every phase. `PLAN:` is kept only as a legacy alias so old logs
+    don't break.
+14. **Progress lives in `runs`, not in a status column** (2026-08-10, spec
+    `2026-08-10-avance-por-fases-y-timeline-design.md`, **implemented on
+    2026-08-10**). The `PLAN:` stamp is generalized to
+    `HUELLA: <ok|parcial|nada> — <ruta>` for every phase, `runs` gains the
+    stamp, `current_phase` is dropped and `tickets.status` becomes computed.
+    The ticket UI becomes a phase journey with the action and the artifact
+    for each one, and the artifact is read inside the app. This deliberately
+    reverts the earlier decision to remove the stepper: there it was 6 dimmed
+    phases on **every row of the list**; here they appear once, in the detail
+    view, where the remaining path is context.
+15. **`ProvidenceTMSTenant` is the guinea pig** (2026-08-10). Whatever runs
+    leave there —analysis, `openspec/`, whatever `openspec init` installs
+    under `.claude/` and `.opencode/`— **doesn't need to be versioned or
+    reverted**. What's being tested is the plugin and the orchestrator, not
+    that repo. It is worth **measuring** the footprint they leave, though:
+    that's evidence about the tool.
+17. **Phase 2b stops on a branch with commits, no push** (2026-08-11, spec
+    `2026-08-10-fase-2b-del-plan-al-codigo-design.md`, six decisions voted
+    there). The two that matter most: work happens **in place with a
+    clean-tree guard** —a worktree wouldn't bring along `node_modules` or
+    `obj/`, and every run would pay for an install before it could run the
+    plan's checks— and **containment is a deterministic hook**, not an
+    instruction in the skill. The hook contains **accidents, not malice**:
+    it's a latch, and if this phase ever runs unattended it needs to be
+    redone.
+16. **A negative claim carries its source just like a figure does**
+    (2026-08-10, rule 5 of `change-planning`, plugin v0.5.2). The golden
+    rules disciplined what the agent **finds**; nothing disciplined what it
+    declares **absent**, and that's where 3320 failed. Now declaring
+    "doesn't exist" requires having searched **by name pattern** (`Glob`),
+    not by symbols, and **naming that search in the task**. Generalizable to
+    future phases: every negative claim the agent makes is either verifiable
+    or invalid.
 
-## Aceptación de la Fase 1 — cerrada el 2026-08-08
+## Phase 1 acceptance — closed on 2026-08-08
 
-Corrida sobre el ticket **3311** en el repo TMS, dos veces: con la skill v0.1.0 y,
-tras corregirla, con la v0.2.0. El archivo `docs/tickets/3311-analysis.md` se
-escribió en ambas.
+Run on ticket **3311** in the TMS repo, twice: with skill v0.1.0 and, after
+fixing it, with v0.2.0. The file `docs/tickets/3311-analysis.md` was written
+both times.
 
-**La incidencia del archivo que no aparecía queda explicada, y no era la skill.**
-En modo headless, `--permission-mode acceptEdits` **no** auto-aprueba las tools del
-MCP: se deniegan solas y el agente se queda sin poder leer el work item. El runner
-del orquestador no pasaba `--allowedTools`. Ya lo pasa, con test que lo fija.
+**The issue of the missing file is now explained, and it wasn't the skill.**
+In headless mode, `--permission-mode acceptEdits` does **not** auto-approve
+MCP tools: they get denied on their own and the agent is left unable to read
+the work item. The orchestrator's runner wasn't passing `--allowedTools`. It
+now does, with a test that pins it.
 
-**Qué salió bien en v0.1.0** (verificado contra el work item real): los 15 criterios
-de aceptación completos y en orden; "Qué pide" fiel sin interpretar de más; las
-deducciones todas etiquetadas `DEDUCIDO`; el padre #285 resumido con honestidad
-("no tiene descripción" ≠ "no pude leerlo"); los 2 comentarios con sus cifras
-exactas; e "Información faltante" autodelatándose.
+**What went well in v0.1.0** (verified against the real work item): all 15
+acceptance criteria complete and in order; "What it asks for" faithful without
+over-interpreting; deductions all tagged `DEDUCIDO`; parent #285 summarized
+honestly ("has no description" ≠ "I couldn't read it"); the 2 comments with
+their exact figures; and "Missing information" flagging itself honestly.
 
-**Qué falló, y qué se cambió en la skill (v0.2.0):**
+**What failed, and what was changed in the skill (v0.2.0):**
 
-| Fallo | Arreglo |
+| Failure | Fix |
 |---|---|
-| `docs/quote-visibility-rules.md` y el Bug #3271 listados **sin leerlos**, excusados con el límite de "1 nivel" — que solo aplica a `relations`, no a lo que el ticket cita en su texto | Paso propio y obligatorio (2.6) + sección *Referencias citadas* en la plantilla |
-| Dos cifras del repo **sin fuente y equivocadas**: "5 commits" (eran 12) y el 27 % de la línea base A.6 atribuido al guion completo | Segunda regla de oro: toda cifra ajena al work item cita `archivo:línea`, commit o comando. Y sección propia *Estado del trabajo en el repo*, separada de lo que dice el ticket |
-| La plantilla no tenía dónde poner los comentarios pese a que 2.2 obliga a leerlos | Sección *Comentarios* de primer nivel; ante contradicción gana el comentario más reciente |
+| `docs/quote-visibility-rules.md` and Bug #3271 listed **without reading them**, excused by the "1 level" limit — which only applies to `relations`, not to what the ticket cites in its text | Its own mandatory step (2.6) + a *Cited references* section in the template |
+| Two figures from the repo **with no source and wrong**: "5 commits" (it was 12) and the 27% of baseline A.6 attributed to the full script | Second golden rule: every figure not from the work item cites `file:line`, a commit, or a command. Plus its own *State of the work in the repo* section, separate from what the ticket says |
+| The template had nowhere to put comments even though step 2.2 requires reading them | A first-level *Comments* section; on contradiction, the most recent comment wins |
 
-**Verificación de la v0.2.0**: leyó el #3271 (sacó el modelo de cascada y el punto
-de control `QuoteVisibilityService.IsPricingOwnerMember`) y las 121 líneas de
-`quote-visibility-rules.md` (6 reglas de display que condicionan la v2 y que la
-v0.1.0 no tenía). Todas las cifras citan fuente; el 27 % ya se atribuye a A.6.
-De propina detectó una incoherencia interna de `ESTADO.md` (declara 179/179 en un
-sitio y 144/144 en otro).
+**v0.2.0 verification**: it read #3271 (pulled the cascade model and the
+`QuoteVisibilityService.IsPricingOwnerMember` checkpoint) and the 121 lines of
+`quote-visibility-rules.md` (6 display rules that condition v2, which v0.1.0
+didn't have). All figures cite a source; the 27% is now attributed to A.6. As
+a bonus it caught an internal inconsistency in `ESTADO.md` (states 179/179 in
+one place and 144/144 in another).
 
-## Segunda jornada — 2026-08-09
+## Second session — 2026-08-09
 
-**El orquestador completó el ciclo real.** Alta de proyecto por API con validación
-de rutas (`400`/`409` correctos), encolado, corrida del **3322 en 5m33s** con
-estado `analyzed`, y log en vivo. Se verificó el argv del subproceso:
+**The orchestrator completed the real cycle.** Project registration via API
+with path validation (correct `400`/`409`), queueing, a run of **3322 in
+5m33s** ending `analyzed`, and a live log. The subprocess argv was verified:
 `--allowedTools mcp__azure-devops … --add-dir …Tenant --add-dir …TMS.wiki`.
 
-**Fase 1 con n=2, y la predicción falló.** Se temía que la skill se rompiera con un
-Bug —el contenido vive en `Microsoft.VSTS.TCM.ReproSteps`, no en `System.Description`,
-y la forma es Repro/Expected/Actual—. Lo manejó sin problema: sacó **5 criterios
-explícitos** de un ticket cuya línea `AC:` es una sola frase, y discriminó bien que
-el load **16791** citado en el texto es un dato de producción, no un work item que
-haya que abrir. Además **contradijo la hipótesis del ticket con evidencia**: los
-iconos de excepción no están gateados por rol (`load-icon-exception.component.ts:21`
-solo cubre HotLoad), así que la causa raíz está en el backend.
+**Phase 1 at n=2, and the prediction failed.** The worry was that the skill
+would break on a Bug —its content lives in
+`Microsoft.VSTS.TCM.ReproSteps`, not `System.Description`, and the format is
+Repro/Expected/Actual—. It handled it fine: it pulled **5 explicit criteria**
+out of a ticket whose `AC:` line is a single sentence, and correctly told
+apart that load **16791**, cited in the text, is production data, not a work
+item that needs opening. It also **contradicted the ticket's hypothesis with
+evidence**: exception icons aren't gated by role
+(`load-icon-exception.component.ts:21` only covers HotLoad), so the root
+cause is in the backend.
 
-**Rediseño de la UI del orquestador** (spec propio, ver decisión 10), en respuesta a
-que "todo estaba en una misma pantalla y no era intuitivo". Además: repos como lista
-plana con principal marcado por el usuario, nombre de proyecto editable, un único
-botón de alta y ancho completo.
+**Redesign of the orchestrator's UI** (its own spec, see decision 10), in
+response to "everything was on one screen and it wasn't intuitive." Also:
+repos as a flat list with the primary marked by the user, editable project
+name, a single registration button, and full width.
 
-## Tercera jornada — 2026-08-10
+## Third session — 2026-08-10
 
-**La v0.3.0 pasó su prueba de fuego.** Re-corrido el 3322 con la instrucción de ajuste:
-**26 invocaciones con ruta dentro de `ProvidenceTMSTenant`** (antes 0), cero apariciones
-de "no inspeccionado", 24 archivos `.cs` citados frente a 5. Y respondió la pregunta: el
-recorte está en `BaseProviderGroupService.cs:1559-1575`, donde a un rol cliente que no es
-*pricing owner* se le borran las excepciones de categoría `Audit` — y Rate Change (311)
-es Audit. Montar un repo no basta; **nombrárselo en el prompt con su etiqueta, sí**.
+**v0.3.0 passed its trial by fire.** Re-ran 3322 with the adjustment
+instruction: **26 invocations with a path inside `ProvidenceTMSTenant`**
+(previously 0), zero occurrences of "not inspected," 24 `.cs` files cited
+versus 5. And it answered the question: the cutoff is at
+`BaseProviderGroupService.cs:1559-1575`, where a client role that isn't
+*pricing owner* has its `Audit`-category exceptions erased — and Rate Change
+(311) is Audit. Mounting a repo isn't enough; **naming it in the prompt with
+its label is.**
 
-**Fase 2 construida y validada sobre el 3323** (*Carrier API V2 Migration - XPO*), en
-cuatro tareas con revisión por subagente entre cada una. Los tres criterios de aceptación
-en verde en la segunda corrida: `openspec validate --changes` pasa, 10 de 15 espejos
-citan `archivo:línea`, y **GetDocs aparece bajo `## Bloqueado` con cero tareas asociadas**.
+**Phase 2 built and validated on 3323** (*Carrier API V2 Migration - XPO*),
+in four tasks with subagent review between each one. All three acceptance
+criteria green on the second run: `openspec validate --changes` passes, 10 of
+15 mirrors cite `file:line`, and **GetDocs appears under `## Blocked` with
+zero associated tasks**.
 
-El plan que produjo tiene 21 tareas y 5 bloqueos, y **encontró dos huecos del gateway que
-no estaban en el análisis**, comparando código: `ApiRateService.V2.cs:103-108` fuerza
-`AuthType.Basic` con `TokenUri: null`, así que el Rate de XPO viajaría sin bearer; y el
-adaptador V2 de Track anula el `AuditTrackingResponse` que el legacy de XPO **sí** genera,
-documentado como *"Gap B: verified equal"* porque se evaluó contra ABF, que no lo genera.
+The plan it produced has 21 tasks and 5 blockers, and **found two gateway
+gaps that weren't in the analysis**, by comparing code:
+`ApiRateService.V2.cs:103-108` forces `AuthType.Basic` with
+`TokenUri: null`, so XPO's Rate would travel without a bearer token; and the
+V2 Track adapter drops the `AuditTrackingResponse` that XPO's legacy code
+**does** generate, documented as *"Gap B: verified equal"* because it was
+evaluated against ABF, which doesn't generate it.
 
-**El 3323 resultó mejor candidato que el 3320.** Su Feature padre **#3319** trae un
-inventario verificado con la *Definition of Done* por carrier, y el patrón a replicar ya
-está escrito dos veces en el repo (`Carriers/Abf/`, `Carriers/Estes/`). El agente eligió
-Estes como espejo en vez de ABF —y tenía razón: XPO es REST + OAuth como Estes, mientras
-ABF no tiene token— y **leyó los 9 archivos que cita**, así que los números de línea no
-están inventados.
+**3323 turned out to be a better candidate than 3320.** Its parent Feature
+**#3319** carries a verified inventory with a *Definition of Done* per
+carrier, and the pattern to replicate is already written twice in the repo
+(`Carriers/Abf/`, `Carriers/Estes/`). The agent chose Estes as the mirror
+instead of ABF —and it was right to: XPO is REST + OAuth like Estes, while
+ABF has no token— and **read the 9 files it cites**, so the line numbers
+aren't made up.
 
-## Cuarta jornada — 2026-08-10 (tarde): avance por fases, huellas y timeline
+## Fourth session — 2026-08-10 (afternoon): per-phase progress, stamps and timeline
 
-**Implementado el spec entero**, con `subagent-driven-development`: 8 tareas, 21 commits
-(`4044a91..76f6f5d`) contando la oleada de la revisión final y el arreglo del repaso
-visual. Plan en `docs/superpowers/plans/2026-08-10-avance-por-fases-y-timeline.md`, con
-las 53 casillas marcadas. Backend: **66 tests** (antes 18). Frontend: build y lint verdes.
+**The whole spec implemented**, with `subagent-driven-development`: 8 tasks,
+21 commits (`4044a91..76f6f5d`) counting the final review wave and the visual
+touch-up fix. Plan at
+`docs/superpowers/plans/2026-08-10-avance-por-fases-y-timeline.md`, with all
+53 checkboxes checked. Backend: **66 tests** (up from 18). Frontend: build and
+lint green.
 
-Lo que hay ahora que antes no había: las dos skills cierran con `HUELLA:`; `runs` guarda
-`artifact_state` y `artifact_path`; `current_phase` desapareció y `tickets.status` se
-**calcula** de las corridas; `GET /tickets/{id}` devuelve `fases`; hay un visor de
-artefactos (`GET /tickets/{tid}/artefacto`) y un `Timeline.tsx` que pinta el recorrido con
-el artefacto legible dentro de la app.
+What exists now that didn't before: both skills close with `HUELLA:`; `runs`
+stores `artifact_state` and `artifact_path`; `current_phase` is gone and
+`tickets.status` is **computed** from the runs; `GET /tickets/{id}` returns
+`fases`; there's an artifact viewer (`GET /tickets/{tid}/artefacto`) and a
+`Timeline.tsx` that paints the journey with the artifact readable inside the
+app.
 
-**Lo que más costó no fue construirlo, fue que la revisión lo tumbara tres veces.** El
-visor de artefactos necesitó **tres rondas** de arreglo, cada una cerrando un agujero que
-la anterior había abierto: (1) `..` sin normalizar dejaba leer `.env` y `.git/config` del
-repo del cliente y de los repos hermanos; (2) al resolver las rutas para cerrar eso, una
-declarada que resuelve a la raíz se volvió comodín (`HUELLA: ok — ..` es alcanzable); (3)
-el predicado que arreglaba eso fundía dos preguntas en un `any` y volvía a fallar con
-raíces anidadas (un `extra_dir` que contiene al `repo_path`). Cerrado y verificado con
-**638 vectores** contra el endpoint real —seis configuraciones de raíces, junctions NTFS,
-ADS, nombres 8.3, UNC y comodines de toda grafía—: cero fugas, y los 30 casos legítimos
-siguen sirviendo.
+**What cost the most wasn't building it, it was review knocking it down three
+times.** The artifact viewer needed **three rounds** of fixing, each closing a
+hole the previous one had opened: (1) an un-normalized `..` allowed reading
+`.env` and `.git/config` from the client's repo and from sibling repos; (2)
+while resolving paths to close that, a declared path that resolves to the
+root became a wildcard (`HUELLA: ok — ..` is reachable); (3) the predicate
+that fixed that merged two questions into one `any` and failed again with
+nested roots (an `extra_dir` that contains the `repo_path`). Closed and
+verified with **638 vectors** against the real endpoint —six root
+configurations, NTFS junctions, ADS, 8.3 names, UNC paths and wildcards of
+every spelling—: zero leaks, and the 30 legitimate cases keep working.
 
-**La prueba de fuego pasó.** Re-corrida la Fase 1 sobre el **3322** con el plugin v0.5.1,
-**8m14s**, y el recorrido entero se cerró fuera del laboratorio por primera vez:
+**The trial by fire passed.** Phase 1 was re-run on **3322** with plugin
+v0.5.1, **8m14s**, and the whole journey closed outside the lab for the first
+time:
 
-- El agente estampó `HUELLA: ok — docs/tickets/3322-analysis.md`, con `/` y como última
-  línea. El log trae **6 coincidencias del sello**: 4 son el cuerpo de la skill filtrado
-  (incluido el ejemplo `parcial` que menciona el 3323), y la buena está a **190 caracteres
-  del final**. *Anclar en la última coincidencia no era una precaución teórica: sin ella
-  esta corrida habría leído un ejemplo de la documentación como si fuera su resultado.*
-- El runner guardó `artifact_state='ok'` y una ruta limpia; la fase salió `ok`, el ticket
-  se plegó a `analizado` y **`Plan` se desbloqueó solo**.
-- El visor sirvió el documento de 28,6 KB dentro de la app (200), y siguió devolviendo
-  400 a la travesía. El análisis estampa `ticket-agent v0.5.1`, así que el archivo prueba
-  qué versión lo produjo.
+- The agent stamped `HUELLA: ok — docs/tickets/3322-analysis.md`, with `/`
+  and as the last line. The log has **6 matches of the stamp**: 4 are the
+  skill's body filtered in (including the `parcial` example that mentions
+  3323), and the real one is **190 characters** from the end. *Anchoring on
+  the last match wasn't a theoretical precaution: without it, this run would
+  have read a documentation example as if it were its own result.*
+- The runner stored `artifact_state='ok'` and a clean path; the phase came
+  out `ok`, the ticket folded to `analizado`, and **`Plan` unlocked on its
+  own.**
+- The viewer served the 28.6 KB document inside the app (200), and kept
+  returning 400 to traversal attempts. The analysis stamps `ticket-agent
+  v0.5.1`, so the file proves which version produced it.
 
-**Repaso visual hecho** (el que se arrastraba desde el rediseño del 2026-08-09). Un solo
-defecto real: el riel del timeline estaba acotado a su fila con `bottom-0` y en las fases
-apagadas medía 4px, así que el recorrido se veía como círculos sueltos justo en el tramo
-pendiente. Arreglado en `8f3e6a2`. Consola limpia, sin desbordamiento horizontal, y el
-modo oscuro legible — aunque **la app no tiene interruptor de tema**, así que los `dark:`
-son inversión a futuro.
+**Visual pass done** (something that had been dragging since the 2026-08-09
+redesign). One real defect: the timeline's rail was scoped to its row with
+`bottom-0` and, on dimmed phases, was only 4px tall, so the journey looked
+like loose circles right along the pending stretch. Fixed in `8f3e6a2`.
+Console clean, no horizontal overflow, and dark mode legible — although
+**the app has no theme switch**, so the `dark:` classes are an investment for
+the future.
 
-## Quinta jornada — 2026-08-10 (noche): el 3320 y el fallo del negativo
+## Fifth session — 2026-08-10 (night): 3320 and the negative-claim failure
 
-**Fase 2 llega a n=2.** El 3320 (*Bug, "Ready To Pay" no persiste*, padre #827 sin
-descripción, **cero comentarios propios**) corrió entero por el orquestador reusando el
-proyecto existente: Fase 1 en **4m11s** (`HUELLA: parcial`) y Fase 2 en **7m59s**
-(`HUELLA: ok`). Change: `openspec/changes/3320-ap-ready-to-pay-persistence`, 14 tareas en
-7 grupos y 3 bloqueos. `openspec validate --strict` **re-corrido a mano**: exit 0.
+**Phase 2 reaches n=2.** 3320 (a *Bug*, "Ready To Pay" doesn't persist, parent
+#827 with no description, **zero of its own comments**) ran end to end
+through the orchestrator, reusing the existing project: Phase 1 in **4m11s**
+(`HUELLA: parcial`) and Phase 2 in **7m59s** (`HUELLA: ok`). Change:
+`openspec/changes/3320-ap-ready-to-pay-persistence`, 14 tasks in 7 groups and
+3 blockers. `openspec validate --strict` **re-run by hand**: exit 0.
 
-**La pregunta de la jornada tenía dos respuestas previstas y ganó una tercera.** No inventó
-espejos: los 9 `archivo:línea` que verifiqué caen **exactos** sobre lo que dicen citar, en
-los dos repos. Y encontró el espejo bueno donde nadie lo había apuntado — `ArApReceivableInvoice.cs:13-15`,
-el par `ReadyToProcessARBy`/`Date` de AR, con la observación de que AR lo tiene `Guid` **no
-nulo** y la desviación justificada en `design.md`. Tampoco se limitó a la forma: la tarea 4.2
-es "verifica y **no cambies**", y el `## Bloqueado` hereda la reserva de la Fase 1.
+**The day's question had two expected answers, and a third one won.** It
+didn't invent mirrors: the 9 `file:line` citations I verified land **exactly**
+on what they claim to cite, in both repos. And it found the right mirror
+where nobody had pointed it out — `ArApReceivableInvoice.cs:13-15`, AR's
+`ReadyToProcessARBy`/`Date` pair, noting that AR's `Guid` is **not** nullable
+and justifying the deviation in `design.md`. It also didn't stop at form: task
+4.2 is "verify and **don't change**," and `## Blocked` inherits Phase 1's
+reservation.
 
-**Pero el negativo salió falso.** La tarea 6.3 declara *"Sin espejo directo: no hay hoy ningún
-test de comando para AR/AP en el repo"* y avisa al implementador de que elija fixture. Existe
-`PTMS.Mediator.Tests/Load/Command/UpdateArReadyToProcessCommandTest.cs` — el gemelo AR literal
-del comando a testear, en la carpeta exacta, y **ya mockea `ISecurityService.GetUserIdentity()`**,
-que es justo lo que la tarea 3.1 necesita para sellar `ReadyToProcessAPBy`. El mejor espejo del
-plan, descartado.
+**But the negative claim turned out false.** Task 6.3 states *"No direct
+mirror: there is currently no command test for AR/AP in the repo"* and warns
+the implementer to pick a fixture. There is one:
+`PTMS.Mediator.Tests/Load/Command/UpdateArReadyToProcessCommandTest.cs` — the
+literal AR twin of the command to test, in the exact folder, and it **already
+mocks `ISecurityService.GetUserIdentity()`**, exactly what task 3.1 needs to
+stamp `ReadyToProcessAPBy`. The plan's best mirror, discarded.
 
-El log dice por qué: **13 lecturas, ninguna sobre un `*Test*.cs`**, y una sola búsqueda —
-`Grep "ForceReadyToPay|UpdateApReadyToProcessCommand"`. El gemelo AR no contiene ninguno de los
-dos símbolos, así que **el patrón no podía encontrarlo**. La cita `ApGetListQueryTest.cs:297` sí
-es correcta porque salió de ese mismo grep con `-n`: citar de un grep es una fuente legítima;
-**concluir una ausencia de un grep, no**.
+The log explains why: **13 reads, none on a `*Test*.cs`**, and a single
+search — `Grep "ForceReadyToPay|UpdateApReadyToProcessCommand"`. The AR twin
+contains neither symbol, so **the pattern couldn't find it.** The
+`ApGetListQueryTest.cs:297` citation is correct because it came from that same
+grep with `-n`: citing from a grep is a legitimate source; **concluding an
+absence from a grep is not.**
 
-**La rama de adjuntos sigue sin ejercitarse, y ya se sabe por qué.** El padre #827 lleva
-`AR AP V20241023 with notes.jpg`, pero **inline en el HTML de `System.Description`**
-(`<img src=".../_apis/wit/attachments/<guid>?fileName=...">`), no como adjunto en `relations`.
-El agente cargó el esquema de `wit_work_item_attachment` por `ToolSearch` y **nunca lo invocó**:
-no tenía id que pasarle. Lo declaró sin leer en la reserva en vez de inventarse el contenido.
+**The attachments branch is still unexercised, and now we know why.** Parent
+#827 carries `AR AP V20241023 with notes.jpg`, but **inline in the HTML of
+`System.Description`**
+(`<img src=".../_apis/wit/attachments/<guid>?fileName=...">`), not as an
+attachment under `relations`. The agent loaded `wit_work_item_attachment`'s
+schema via `ToolSearch` and **never called it**: it had no id to pass. It
+declared it unread in the reservation instead of making up the content.
 
-**El contrato del sello aguantó otra vez, y por poco.** El log de la Fase 2 trae **11**
-coincidencias de `HUELLA:` y la buena está a **211 caracteres del final**; el de la Fase 1, 6 y a
-304. Diez señuelos en una sola corrida. El visor sirvió `tasks.md` **bajo el directorio
-declarado** (200), rechazó el directorio en sí (400, no es archivo regular) y siguió rechazando
-la travesía a `.env` (400).
+**The stamp contract held again, barely.** Phase 2's log has **11** matches of
+`HUELLA:` and the real one is **211 characters** from the end; Phase 1's, 6
+and 304. Ten decoys in a single run. The viewer served `tasks.md` **under the
+declared directory** (200), rejected the directory itself (400, not a regular
+file), and kept rejecting traversal to `.env` (400).
 
-**Primer `parcial` real en producción.** La Fase 1 cerró con reserva —falta
-`.claude/ticket-agent.json` en el Tenant (asumió `project: ProvidenceTMS`), y el comentario y la
-imagen de #827 sin leer— y la reserva viajó hasta el `## Bloqueado` de la Fase 2. La cadena
-completa funcionó sin tocarla.
+**First real `parcial` in production.** Phase 1 closed with a reservation —
+missing `.claude/ticket-agent.json` in the Tenant (it assumed
+`project: ProvidenceTMS`), and #827's comment and image left unread— and the
+reservation carried through to Phase 2's `## Blocked`. The full chain worked
+without touching it.
 
-### El arreglo, y la re-corrida con respuesta conocida
+### The fix, and the re-run with a known answer
 
-**Regla 5 en `change-planning`** (plugin **v0.5.2**): *decir "no existe" es una afirmación y
-necesita su fuente igual que una cifra*. Va en tres sitios — la regla de oro, un paso en §4 que
-manda **buscar por parentesco** (si tocas AP busca AR, si tocas un comando busca el test del
-comando hermano) y el caso límite, que ahora exige **nombrar la búsqueda en la propia tarea**.
-El ejemplo dentro de la skill es el fallo real: `Grep UpdateApReadyToProcess` no puede encontrar
+**Rule 5 in `change-planning`** (plugin **v0.5.2**): *saying "doesn't exist"
+is a claim, and it needs a source just like a figure does*. It's stated in
+three places — the golden rule, a step in §4 that requires **searching by
+relation** (if you touch AP, search AR; if you touch a command, search the
+sibling command's test) and the edge case, which now requires **naming the
+search in the task itself**. The example inside the skill is the real
+failure: `Grep UpdateApReadyToProcess` can't find
 `UpdateArReadyToProcessCommandTest.cs`.
 
-Preparación para que la prueba fuera limpia: el change v1 se apartó del repo (queda como
-evidencia fuera de `openspec/changes/`) y se creó el `.claude/ticket-agent.json` que faltaba en
-el Tenant. `claude plugin update` aplicó la 0.5.2 sin TTY — el cache va por carpeta de versión.
+Prep so the trial would be clean: the v1 change was moved out of the repo (it
+remains as evidence outside `openspec/changes/`) and the
+`.claude/ticket-agent.json` that was missing in the Tenant was created.
+`claude plugin update` applied 0.5.2 without a TTY — the cache is keyed by
+version folder.
 
-**Re-corrida (5m41s, `HUELLA: ok`, validate `--strict` exit 0): la regla funcionó.** Donde la v1
-declaraba "no hay ningún test de comando AR/AP", la v2 cita
-`UpdateArReadyToProcessCommandTest.cs:1-94` y respalda el negativo con
-`Glob **/*ReadyToProcess*` → 3 archivos. Verificado: el archivo tiene **94 líneas exactas** y el
-glob da **exactamente 3**. No es cumplimiento de boquilla — la tarea del spec de Angular cita
-**tres** búsquedas para sostener a la vez un positivo y un negativo, y sus tres conteos (1 spec
-bajo `pages/loads`, 0 bajo `load-ar-ap`, 0 bajo `*ar-ap*`) son exactos. El log lo confirma:
-**7 invocaciones de `Glob` frente a 0 en la v1**.
+**Re-run (5m41s, `HUELLA: ok`, `validate --strict` exit 0): the rule worked.**
+Where v1 declared "there is no AR/AP command test," v2 cites
+`UpdateArReadyToProcessCommandTest.cs:1-94` and backs the negative claim with
+`Glob **/*ReadyToProcess*` → 3 files. Verified: the file has exactly **94
+lines** and the glob returns **exactly 3**. This isn't box-checking — the
+Angular spec's task cites **three** searches to support a positive and a
+negative claim at once, and its three counts (1 spec under `pages/loads`, 0
+under `load-ar-ap`, 0 under `*ar-ap*`) are exact. The log confirms it:
+**7 `Glob` invocations versus 0 in v1.**
 
-**Lo que el arreglo no explica.** La v2 cambió de estrategia entera —5 tareas en vez de 14, solo
-frontend, y la columna nueva + migración al `## Bloqueado` por necesitar decisión de negocio y no
-caber en las 2 h de `Custom.EstimatedBugHrs`—. Eso es **varianza entre corridas, no efecto de la
-regla**, que solo tocaba el negativo. Conviene anotarlo así para no atribuirse mejoras que no se
-diseñaron.
+**What the fix doesn't explain.** v2 switched to an entirely different
+strategy —5 tasks instead of 14, frontend only, and the new column +
+migration moved to `## Blocked` for needing a business decision and not
+fitting `Custom.EstimatedBugHrs`'s 2-hour budget—. That's **variance between
+runs, not an effect of the rule**, which only touched the negative-claim
+piece. Worth noting so as not to credit the fix with improvements it wasn't
+designed to make.
 
-**Y por el camino, el hallazgo de la jornada.** La v2 metió en alcance el auto-marcado de **AR**,
-que la v1 había declarado explícitamente fuera: dispara
-`UpdateArReadyToProcessCommand.cs:36-43`, que estampa `ReadyToProcessARBy` con la identidad de
-quien **abrió la pantalla** y pone `BilledOn = today` si estaba vacío. Verificado en el código.
-Abrir la pestaña falsea autoría y fecha de facturación — eso ya no es un checkbox que no
-persiste, y no está en el ticket.
+**And along the way, the day's finding.** v2 brought **AR** auto-marking into
+scope, which v1 had explicitly declared out of scope: it triggers
+`UpdateArReadyToProcessCommand.cs:36-43`, which stamps `ReadyToProcessARBy`
+with the identity of whoever **opened the screen** and sets `BilledOn = today`
+if it was empty. Verified in the code. Opening the tab misattributes
+authorship and billing date — that's no longer just a checkbox that doesn't
+persist, and it's not in the ticket.
 
-## Sexta jornada — 2026-08-11 (madrugada): la Fase 2b, y el agente escribe código
+## Sixth session — 2026-08-11 (early morning): Phase 2b, and the agent writes code
 
-**Construida entera con `subagent-driven-development`**: 8 tareas, 21 commits, backend de
-118 a **125 tests**. Spec en `2026-08-10-fase-2b-del-plan-al-codigo-design.md`, plan con sus
-casillas. Lo que hay ahora: fase `implement` en las cuatro tablas, guarda de árbol limpio,
-rama por ticket creada **bajo el lock**, un hook que deniega push y PR entregado con
-`--settings`, la skill `change-implementation`, y la rama visible en el timeline.
+**Built entirely with `subagent-driven-development`**: 8 tasks, 21 commits,
+backend from 118 to **125 tests**. Spec at
+`2026-08-10-fase-2b-del-plan-al-codigo-design.md`, plan with its checkboxes.
+What exists now: the `implement` phase across the four tables, the
+clean-tree guard, a per-ticket branch created **under the lock**, a hook that
+denies push and PR delivered via `--settings`, the `change-implementation`
+skill, and the branch visible in the timeline.
 
-**La prueba de fuego pasó, sobre el 3332** (*Carrier API V2 Migration - Dayton*, backend
-puro; el frontend quedó fuera a petición del usuario, que tenía trabajo en curso allí).
-Cadena completa en una noche: análisis `parcial` → plan `ok` con 19 tareas → **implementación
-`ok`, 19/19 tareas, 17 commits, 83 minutos**. El ticket se plegó a `implemented`.
+**The trial by fire passed, on 3332** (*Carrier API V2 Migration - Dayton*,
+backend-only; the frontend was left out at the user's request, since they had
+work in progress there). Full chain in one night: analysis `parcial` → plan
+`ok` with 19 tasks → **implementation `ok`, 19/19 tasks, 17 commits, 83
+minutes**. The ticket folded to `implemented`.
 
-Lo verificado, uno a uno:
+Verified, one by one:
 
-- **La rama se preparó bajo el lock** y quedó en `runs.branch`: `ticket-agent/3332`. El repo
-  se situó en ella y no salió de la máquina: **cero denegaciones del hook**, porque el agente
-  nunca intentó pushear.
-- **Ni una fuga en 17 commits.** Cero archivos de `.claude/`, `.opencode/` o `docs/tickets/`.
-  De 31 archivos tocados, 29 son código y tests (8 ficheros de prueba nuevos o ampliados) y 2
-  son el ledger y una nota de hallazgos del propio change. La regla de commitear rutas
-  concretas —que solo la sostiene un markdown— **aguantó en el repo de un cliente**.
-- **Un commit por tarea**, con su número y su asunto: `3332 tarea 5.2: crear DaytonTenderCall
-  V2 y traducir los accesoriales…`. El `git log` es el registro, como se diseñó.
-- **El sello**: 8 coincidencias en un log de 3,72 MB, la buena a 225 caracteres del final.
-- **El visor** sirvió el `tasks.md` de 21,5 KB y siguió devolviendo 400 a la travesía.
+- **The branch was prepared under the lock** and landed in `runs.branch`:
+  `ticket-agent/3332`. The repo stayed on it and never left the machine:
+  **zero hook denials**, because the agent never tried to push.
+- **Not a single leak across 17 commits.** Zero files from `.claude/`,
+  `.opencode/`, or `docs/tickets/`. Of 31 files touched, 29 are code and
+  tests (8 new or extended test files) and 2 are the change's own ledger and
+  a findings note. The rule of committing specific paths —something only a
+  markdown file enforces— **held up in a client's repo.**
+- **One commit per task**, with its number and subject: `3332 tarea 5.2: crear
+  DaytonTenderCall V2 y traducir los accesoriales…`. The `git log` is the
+  record, as designed.
+- **The stamp**: 8 matches in a 3.72 MB log, the real one 225 characters from
+  the end.
+- **The viewer** served the 21.5 KB `tasks.md` and kept returning 400 to
+  traversal.
 
-**Y la parte cara del diseño se ganó su precio en vivo.** En la tarea 5.2 el agente principal
-detectó que su subagente había tocado `CarrierCallBase.cs` —archivo compartido por **todos**
-los carriers— y, en vez de aceptar el diff, verificó que el cambio es equivalente para
-cualquier carrier que no sobrescriba `MapError` antes de commitear. Un radio de impacto que
-una tarea aislada no ve, atrapado por la revisión entre tareas.
+**And the design's expensive part earned its price live.** In task 5.2 the
+main agent detected that its subagent had touched `CarrierCallBase.cs` — a
+file shared by **every** carrier — and, instead of accepting the diff,
+verified that the change is equivalent for any carrier that doesn't override
+`MapError`, before committing. A blast radius that an isolated task can't
+see, caught by the review between tasks.
 
-### Lo que costó no fue construirlo
+### What cost the most wasn't building it
 
-**Siete rondas de arreglo en ocho tareas, y cinco de los fallos eran del plan que escribí:**
+**Seven rounds of fixes across eight tasks, and five of the failures were in
+the plan I wrote:**
 
-| Dónde | El fallo |
+| Where | The failure |
 |---|---|
-| Tarea 2 | El regex denegaba `git commit -m "… git push …"`: casaba la subcadena en cualquier posición |
-| Tarea 3 | El helper `_app()` no aislaba el import: `init_db()` escribía en la BD y los logs **reales** |
-| Tarea 6 | El invariante "validar todos antes de tocar ninguno" no lo protegía ningún test |
-| Tarea 8 | Era imposible tocando solo el archivo que el plan mandaba: `branch` viaja en `runs`, no en `fases` |
-| Revisión final | **El prompt del runner decía lo contrario que el diseño** |
+| Task 2 | The regex denied `git commit -m "… git push …"`: it matched the substring anywhere |
+| Task 3 | The `_app()` helper didn't isolate the import: `init_db()` wrote to the **real** DB and logs |
+| Task 6 | The "validate all before touching any" invariant wasn't protected by any test |
+| Task 8 | It was impossible while touching only the file the plan specified: `branch` travels in `runs`, not in `fases` |
+| Final review | **The runner's prompt said the opposite of the design** |
 
-El último es el que justifica la revisión de la rama entera. El bloque de repos extra no se
-ramificaba por fase, así que en `implement` el agente leía que los repos montados son
-*legibles* y que el entregable va al principal —lo contrario de la decisión 4— y la skill,
-para desempatar, manda **hacer caso al prompt**. Ninguna revisión por tarea podía verlo: el
-prompt lo escribe una tarea y lo contradice otra.
+The last one is what justifies reviewing the whole branch. The extra-repos
+block wasn't branched by phase, so in `implement` the agent read that mounted
+repos are *readable* and that the deliverable goes to the primary one —the
+opposite of decision 4— and the skill, to break the tie, says **follow the
+prompt**. No per-task review could have caught it: one task writes the
+prompt and another contradicts it.
 
-**Cuatro tests placebo**, los cuatro destapados mutando el código. El peor dejaba cambiar
-`PreToolUse` por `PostToolUse` —el hook correría **después** del push, con el `exit 2` ya
-inútil— y los 118 tests seguían verdes. La única contención del hito no la sujetaba nada.
+**Four placebo tests**, all four exposed by mutating the code. The worst one
+let `PreToolUse` be swapped for `PostToolUse` —the hook would run **after**
+the push, with `exit 2` already useless— and the 118 tests stayed green. The
+milestone's only containment mechanism wasn't held in place by anything.
 
-## Pendientes inmediatos
+## Immediate pending items
 
-- [ ] **Leer las 2658 líneas que el 3332 dejó en la rama `ticket-agent/3332`.** Nadie las ha
-  mirado. La corrida salió `ok` porque el build está verde y las casillas marcadas, pero eso
-  mide que el mecanismo funcionó, **no que el código sea bueno** — es primo hermano de un test
-  placebo. Revisarlas contra el patrón de Estes y ABF es lo que dice si la 2b sirve para
-  trabajar o solo para demos, y condiciona si merece la pena construir la última milla.
-- [ ] **Recrear los tickets 3322 y 3323 en el orquestador.** Se perdieron con la BD (ver
-  "El borrado"). Sus artefactos siguen en el repo destino; su historial de corridas no vuelve.
-- [ ] **Verificar la escritura en un `extra_dir`.** La decisión 4 del spec de la 2b sigue sin
-  ejercitarse: el 3332 es de un solo repo. Hace falta un ticket cuyo código viva en un repo
-  montado —el **3320** lo es— y que el frontend esté libre. Es el único supuesto grande de la
-  fase que aún no se ha probado en vivo.
-- [ ] **Avisar del hallazgo de AR al equipo.** El auto-marcado de AR estampa autoría y
-  `BilledOn` al abrir la pantalla (`UpdateArReadyToProcessCommand.cs:36-43`). Es un defecto de
-  integridad de datos que **no está en ningún ticket** y que salió de planificar el 3320. Merece
-  work item propio; decidir quién lo abre.
-- [x] ~~**Regla del negativo en `change-planning`**~~ — hecha el 2026-08-10, plugin v0.5.2, y
-  **verificada en re-corrida**: la tarea que antes negaba el espejo ahora lo cita con su `Glob`.
-- [ ] **Adjuntos embebidos en el HTML.** La skill manda descargar lo que cuelga de `relations`;
-  las imágenes pegadas en la descripción llevan su GUID en el `src` y hoy nadie lo mina. Es la
-  razón concreta de que la rama de adjuntos siga sin ejercitarse (#827 es el caso de prueba).
-- [x] ~~**Segundo ticket para la Fase 2, y que sea el 3320**~~ — hecho el 2026-08-10.
-  Resultado en "Quinta jornada": no inventa espejos, pero declara ausencias sin buscarlas bien.
-- [x] ~~**Repaso visual de la UI**~~ — hecho el 2026-08-10 con el MCP de chrome-devtools,
-  al liberarse el navegador. Un defecto real (el riel del timeline), arreglado.
-- [ ] **Decidir qué se hace con `Bash` en el runner.** Ver "Lo aprendido": el
-  especificador no acota. Hoy `analyze` va con la lista vacía, pero la Fase 2 tiene Bash
-  disponible de facto para más que `npx`.
-- [ ] **Quitar `organization` de `.claude/ticket-agent.json`** — duplica `ADO_ORG`,
-  que no se puede eliminar porque el MCP la necesita como env var al arrancar.
-- [ ] **Añadir un interruptor de tema a la UI.** La paleta oscura está completa y con el
-  contraste verificado (ratio WCAG AA contra `#0a0a0a`), pero hoy solo se alcanza forzando
-  la clase `.dark` a mano: no hay forma de llegar a ella desde la app.
+- [ ] **Read the 2658 lines that 3332 left on branch `ticket-agent/3332`.**
+  Nobody has looked at them. The run came out `ok` because the build is
+  green and the boxes are checked, but that measures that the mechanism
+  worked, **not that the code is good** — it's a close cousin of a placebo
+  test. Reviewing it against the Estes and ABF pattern is what tells us
+  whether 2b is usable for real work or only for demos, and it determines
+  whether the last mile is worth building.
+- [ ] **Recreate tickets 3322 and 3323 in the orchestrator.** They were lost
+  with the DB (see "The DB wipe"). Their artifacts still live in the target
+  repo; their run history doesn't come back.
+- [ ] **Verify writing to an `extra_dir`.** Decision 4 of the 2b spec still
+  hasn't been exercised: 3332 is single-repo. A ticket whose code lives in a
+  mounted repo is needed —**3320** is one— with the frontend free. It's the
+  one big assumption of the phase still unproven live.
+- [ ] **Report the AR finding to the team.** AR auto-marking stamps
+  authorship and `BilledOn` on opening the screen
+  (`UpdateArReadyToProcessCommand.cs:36-43`). It's a data-integrity defect
+  that **isn't in any ticket** and came out of planning 3320. Deserves its
+  own work item; decide who opens it.
+- [x] ~~**Negative-claim rule in `change-planning`**~~ — done 2026-08-10,
+  plugin v0.5.2, and **verified on re-run**: the task that used to deny the
+  mirror now cites it with its `Glob`.
+- [ ] **Attachments embedded in HTML.** The skill mandates downloading what
+  hangs off `relations`; images pasted into the description carry their GUID
+  in the `src` and today nobody mines that. It's the concrete reason the
+  attachments branch is still unexercised (#827 is the test case).
+- [x] ~~**Second ticket for Phase 2, and make it 3320**~~ — done
+  2026-08-10. Result in "Fifth session": doesn't invent mirrors, but declares
+  absences without searching for them properly.
+- [x] ~~**Visual pass on the UI**~~ — done 2026-08-10 with the
+  chrome-devtools MCP, once the browser freed up. One real defect (the
+  timeline rail), fixed.
+- [ ] **Decide what to do about `Bash` in the runner.** See "Lessons
+  learned": the specifier doesn't scope it. Today `analyze` runs with an
+  empty list, but Phase 2 effectively has Bash available for more than
+  `npx`.
+- [ ] **Remove `organization` from `.claude/ticket-agent.json`** — it
+  duplicates `ADO_ORG`, which can't be removed because the MCP needs it as an
+  env var at startup.
+- [ ] **Add a theme switch to the UI.** The dark palette is complete and its
+  contrast verified (WCAG AA ratio against `#0a0a0a`), but today it can only
+  be reached by forcing the `.dark` class by hand: there's no way to get
+  there from the app.
 
-**Deuda menor anotada** (ninguna bloqueante):
+- [x] ~~**Model and effort per phase**~~ — done 2026-08-11. `phase_config`
+  table + Settings → "Model per phase" in the UI; the runner adds
+  `--model`/`--effort` when launching, read on every run so it doesn't
+  depend on restarting the backend. Empty = whatever the target repo's CLI
+  resolves to, which is how everything ran until today. In the plugin
+  **there is no equivalent knob**: skill and command frontmatter has no
+  model field, only subagents do — hence `subagent_model` in
+  `.claude/ticket-agent.json` (plugin v0.7.0), which applies to 2b's
+  per-task subagents and nothing else.
 
-- El log se lee entero para quedarse con los últimos 4 KB (`leer_huella`) y con 8 KB
-  (`log_tail`). Hoy pesan cientos de KB; con logs de MB tocaría un `seek` desde el final.
-- El `assert` que cuadra las claves de las cuatro tablas de fase desaparece con `python -O`.
-- Toda corrida `success` se pinta del color de "analizado" en el historial, aunque su fase
-  esté en rojo por no haber declarado huella. Confunde con los datos pre-contrato.
-- `leer_huella` no des-escapa comillas JSON dentro de una ruta; una reserva vacía
-  (`ruta · `) deja la ruta con el punto medio pegado. Ambos cosméticos, sin consecuencia.
-- TOCTOU teórico en el visor entre `is_file()` y `open()`. Un solo usuario local y el único
-  escritor es el propio agente; el peor caso es un 500.
-- `puedeLanzar` duplica los textos de bloqueo de `bloqueo()` en `estado.ts`.
-- Los planes de las jornadas anteriores tienen casillas sin marcar
-  (`fase-0-1`: 15/20, `orchestrator`: 31/32, `fase-2`: 30/32) pese a estar cerradas.
+**Minor debt noted** (none blocking):
 
-## El borrado de la BD del orquestador (2026-08-11)
+- The log is read in full just to keep the last 4 KB (`read_stamp`) and the
+  last 8 KB (`log_tail`). Today they weigh hundreds of KB; with MB-sized logs
+  this will need a `seek` from the end.
+- The `assert` that matches up the keys of the four phase tables disappears
+  under `python -O`.
+- Every `success` run is painted with the "analyzed" color in history, even
+  when its phase is red for not having declared a stamp. Confuses with
+  pre-contract data.
+- `read_stamp` doesn't unescape JSON quotes inside a path; an empty
+  reservation (`ruta · `) leaves the path with the middle dot stuck to it.
+  Both cosmetic, no consequences.
+- Theoretical TOCTOU in the viewer between `is_file()` and `open()`. A single
+  local user and the only writer is the agent itself; worst case is a 500.
+- `canRunPhase` duplicates the block-reason text from `blockReason()` in
+  `status.ts`.
+- Plans from earlier sessions have unchecked boxes (`fase-0-1`: 15/20,
+  `orchestrator`: 31/32, `fase-2`: 30/32) despite being closed.
 
-**Se perdieron la base de datos y todos los logs de corridas.** No fue un fallo del código:
-al revisar la Tarea 3 de la Fase 2b, la instrucción que se le dio al revisor decía
-literalmente *"borra `orchestrator.db` y el directorio `logs/`"* para comprobar que los tests
-ya no ensuciaban el disco real. Y esa era la BD de verdad — `DB_PATH` cuelga de `BASE`, que es
-la carpeta del propio `app.py`, así que no depende del directorio de trabajo. Está en
-`.gitignore`: no hay nada que recuperar de git.
+## The orchestrator DB wipe (2026-08-11)
 
-Lo perdido: el proyecto, los tickets 3322/3323/3320 y ~10 corridas con sus huellas y tiempos,
-más **todos los logs**. Lo que sobrevivió es lo que valía: los análisis y los changes están en
-el repo destino, y las mediciones están escritas aquí y en los mensajes de commit.
+**The database and all run logs were lost.** It wasn't a code bug: while
+reviewing Phase 2b's Task 3, the instruction given to the reviewer literally
+said *"delete `orchestrator.db` and the `logs/` directory"* to confirm the
+tests no longer polluted the real disk. And that was the real DB — `DB_PATH`
+hangs off `BASE`, which is `app.py`'s own folder, so it doesn't depend on the
+working directory. It's in `.gitignore`: there's nothing to recover from git.
 
-**La lección no es "ten cuidado".** Es que una instrucción de verificación que manda **borrar**
-algo tiene que nombrar un directorio de usar y tirar, nunca una ruta de producción. El propio
-bug que se estaba verificando —tests que escriben en el disco real— demostraba que esa ruta
-estaba viva.
+What was lost: the project, tickets 3322/3323/3320 and ~10 runs with their
+stamps and timings, plus **all the logs**. What survived is what mattered:
+the analyses and changes are in the target repo, and the measurements are
+written here and in the commit messages.
 
-## Lo aprendido (2026-08-11, madrugada)
+**The lesson isn't "be careful."** It's that a verification instruction that
+says to **delete** something has to name a disposable directory, never a
+production path. The very bug being verified —tests writing to the real
+disk— proved that path was live.
 
-- **Mutar el código es la única forma fiable de saber si un test prueba algo.** Cuatro placebos
-  en un solo hito, y ninguno se veía leyendo: el del hook pasaba con `PostToolUse`, el de la
-  guarda pasaba con la comprobación entremezclada, el de la rama pasaba sin `refs/heads/`. La
-  pregunta *"¿qué tendría que romperse?"* es buena para escribir el test; **romperlo de verdad**
-  es lo que lo demuestra. Ahora hay una tabla de mutaciones en el informe de la oleada final.
-- **Arreglar un hallazgo abrió otro tres veces de tres.** El ancla del regex tapó los falsos
-  positivos y dejó escapar `then git push`; el aislamiento de los tests metió la BD dentro del
-  repo bajo prueba y creó un placebo nuevo. **Toda ronda de arreglo necesita su re-revisión**, y
-  la re-revisión tiene que buscar lo que el arreglo rompió, no solo si arregló.
-- **El prompt es parte del contrato, y nadie lo revisaba.** El diseño, la skill y el código
-  decían lo correcto; el texto que el runner inyecta decía lo contrario. Vivía en una tarea
-  distinta de la que definía la regla, así que ninguna revisión por tarea lo cruzaba. Los huecos
-  siguen viviendo en las costuras: es la segunda vez que este proyecto lo aprende.
-- **Un plan es una hipótesis, y esta vez se midió**: cinco de sus bloques resultaron
-  equivocados. La cabecera del plan ahora avisa de cuáles, con "manda el código". Un plan que
-  enseña código que sabemos incorrecto es una trampa para el siguiente que lo lea.
-- **La ceremonia cara se pagó sola.** Un subagente por tarea con revisión del diff parecía
-  exagerado para una fase sin estrenar. Atrapó un cambio en un archivo compartido por todos los
-  carriers en el repo de un cliente. Con el bucle lineal, ese diff se habría commiteado sin que
-  nadie lo mirase.
+## Lessons learned (2026-08-11, early morning)
 
-## Lo aprendido (2026-08-10, noche)
+- **Mutating the code is the only reliable way to know if a test tests
+  anything.** Four placebos in a single milestone, and none of them showed up
+  from reading: the hook's test passed with `PostToolUse`, the guard's test
+  passed with the check mixed in, the branch's test passed without
+  `refs/heads/`. The question *"what would have to break?"* is good for
+  writing the test; **actually breaking it** is what proves it. There's now
+  a mutation table in the final wave's report.
+- **Fixing one finding opened another, three times out of three.** Anchoring
+  the regex closed the false positives and let `then git push` slip through;
+  isolating the tests put the DB inside the repo under test and created a
+  new placebo. **Every round of fixing needs its own re-review**, and the
+  re-review has to look for what the fix broke, not just whether it fixed
+  something.
+- **The prompt is part of the contract, and nobody was reviewing it.** The
+  design, the skill, and the code said the right thing; the text the runner
+  injects said the opposite. It lived in a different task from the one that
+  defined the rule, so no per-task review ever crossed it. The gaps keep
+  living in the seams: this is the second time this project has learned
+  that.
+- **A plan is a hypothesis, and this time it was measured**: five of its
+  blocks turned out wrong. The plan's header now flags which ones, with
+  "the code wins." A plan that teaches code known to be wrong is a trap for
+  whoever reads it next.
+- **The expensive ceremony paid for itself.** One subagent per task with diff
+  review seemed like overkill for an untested phase. It caught a change to a
+  file shared by every carrier in a client's repo. With a linear loop, that
+  diff would have been committed without anyone looking at it.
 
-- **Un negativo es una afirmación, y necesita su fuente igual que una cifra.** La regla de oro
-  "toda cita lleva `archivo:línea`" disciplina lo que el agente **sí** encuentra; nada disciplina
-  lo que declara **ausente**. El 3320 citó nueve espejos exactos y falló el único que no citó:
-  dijo "no existe test de comando AR/AP" tras un `Grep` de dos símbolos que el archivo buscado no
-  contiene. **Una ausencia vale lo que valga la búsqueda que la respalda**, y la skill no pide
-  esa búsqueda ni obliga a nombrarla.
-- **El fallo salió por el lado seguro, y por eso pasa desapercibido.** Inventar un espejo produce
-  un `archivo:línea` falso que cualquier verificación tumba. Declarar "sin espejo" produce un
-  aviso prudente que **nadie va a verificar** — se lee como honestidad. El coste no es un error
-  visible sino trabajo duplicado por el implementador.
-- **La salida honesta funcionó; lo que falló fue la premisa.** Las dos hipótesis eran "inventa
-  espejos" o "declara investigación pendiente". Ganó la segunda **con el dato equivocado**, que
-  no estaba en la quiniela. Vale la pena anotar la forma: un mecanismo puede dispararse
-  correctamente sobre una entrada falsa, y el sello no lo nota porque el sello mide entregable,
-  no verdad.
-- **Un ticket pobre no da un plan pobre.** El 3320 no tiene padre rico, ni *Definition of Done*,
-  ni patrón que copiar — y el plan salió con más espejos verificados que el 3323. El material se
-  lo fabricó él, cruzando AP contra AR: la simetría del propio repo hizo de padre.
-- **Arreglar la regla arregló la regla, y nada más — y hay que decirlo.** La re-corrida salió
-  mejor en varios ejes (alcance más ajustado, un defecto nuevo encontrado), pero la edición solo
-  tocaba el negativo. Atribuir esas mejoras al arreglo sería exactamente el error que el proyecto
-  lleva cinco sesiones cazando: **un resultado bueno no valida el cambio que lo precede**. Lo que
-  el arreglo demuestra es lo que se midió — el negativo, con respuesta conocida de antemano.
-- **La prueba con respuesta conocida vale más que la corrida número tres.** Antes de re-correr ya
-  sabíamos qué archivo tenía que aparecer. Eso convierte una corrida de 6 minutos en un veredicto
-  en vez de en otro relato que interpretar. Cuando se pueda montar así, se monta así.
+## Lessons learned (2026-08-10, night)
 
-## Lo aprendido (2026-08-10, tarde)
+- **A negative claim is a statement, and it needs its source just like a
+  figure does.** The golden rule "every citation carries `file:line`"
+  disciplines what the agent **does** find; nothing disciplines what it
+  declares **absent**. 3320 cited nine exact mirrors and failed on the one it
+  didn't cite: it said "no AR/AP command test exists" after a two-symbol
+  `Grep` that the file being searched for doesn't contain. **An absence is
+  only as good as the search that backs it**, and the skill didn't require
+  that search or require it be named.
+- **The failure came from the safe side, which is why it goes unnoticed.**
+  Inventing a mirror produces a fake `file:line` that any check knocks down.
+  Declaring "no mirror" produces a cautious-sounding warning that **nobody
+  is going to verify** — it reads as honesty. The cost isn't a visible error
+  but duplicated work for the implementer.
+- **The honest output worked; what failed was the premise.** The two
+  hypotheses were "invents mirrors" or "declares pending research." The
+  second won **on wrong data**, which wasn't in the pool of expected
+  outcomes. Worth noting the shape of it: a mechanism can fire correctly on
+  a false input, and the stamp doesn't notice because the stamp measures
+  deliverable, not truth.
+- **A poor ticket doesn't produce a poor plan.** 3320 has no rich parent, no
+  *Definition of Done*, no pattern to copy — and the plan came out with more
+  verified mirrors than 3323's. It manufactured its own material, cross
+  referencing AP against AR: the repo's own symmetry stood in for a parent.
+- **Fixing the rule fixed the rule, and nothing more — and it's worth saying
+  so.** The re-run came out better on several axes (tighter scope, a new
+  defect found), but the edit only touched the negative-claim piece.
+  Crediting those improvements to the fix would be exactly the mistake this
+  project has been hunting for five sessions: **a good result doesn't
+  validate the change that preceded it.** What the fix demonstrates is what
+  was measured — the negative claim, with a known answer in advance.
+- **A test with a known answer beats run number three.** Before re-running we
+  already knew which file had to show up. That turns a 6-minute run into a
+  verdict instead of another story to interpret. Whenever it can be set up
+  that way, set it up that way.
 
-- **Un test verde no es una prueba; a veces es una coartada.** Salieron **cinco** tests
-  placebo, todos con la misma forma: el montaje no puede producir el fallo que el test
-  dice prevenir. El de anclaje del sello pasaba igual con `hits[0]` porque
-  `json.dumps` escapaba el guion largo a `—` y los sellos señuelo nunca casaban. La
-  batería de travesía de rutas montaba un **archivo** declarado, contra el que la travesía
-  era imposible por construcción — el caso peligroso (directorio declarado) no lo tocaba
-  ninguno de los 8 tests, y por eso 50 tests pasaron en verde con un agujero que dejaba
-  leer `.env`. `test_current_phase_ya_no_existe` corría sobre una BD recién creada, cuyo
-  `CREATE TABLE` nunca tuvo esa columna, así que jamás ejecutaba el `DROP COLUMN` que
-  decía proteger. **La pregunta que los destapa: ¿qué tendría que romperse para que este
-  test fallara?** Si no hay respuesta concreta, el test no prueba nada.
-- **Arreglar un agujero abre el siguiente si arreglas la grafía y no la propiedad.** El
-  visor necesitó tres rondas. La segunda cerró `''` filtrando esa cadena en el SQL y
-  **amplió** el comodín a `'.'`, `'..'` y `'x/..'`. La que funcionó no filtra grafías:
-  exige que la ruta declarada, ya resuelta, quede **estrictamente dentro** de una raíz.
-  Filtrar cadenas es jugar al gato y al ratón; afirmar una propiedad se acaba.
-- **La revisión adversarial encuentra lo que la revisión amable no.** Los tres agujeros
-  del visor salieron de pedirle al revisor que *atacara* el endpoint con vectores
-  concretos, no que lo leyera. El que solo leyó el código dio Spec ✅.
-- **Los huecos viven en las costuras, y ninguna revisión por tarea los ve.** La Tarea 1
-  escribió en las skills "explica la reserva en el resumen, **no** en la línea del sello";
-  las Tareas 3 y 6 necesitaban esa reserva para mostrarla, como pedía el diseño. Cada
-  tarea era correcta por separado. Solo la revisión de la rama entera lo vio.
-- **El plan es una hipótesis, no una verdad.** Dos bloques de código que escribí en el
-  plan estaban mal y los tests del propio plan los habrían tapado: un `.strip("\n")` que
-  trata su argumento como conjunto de caracteres, y una expresión que producía la ruta de
-  un directorio cuando la huella tenía un solo archivo dentro. Un implementador que copia
-  el plan al pie de la letra hereda sus bugs.
+## Lessons learned (2026-08-10, afternoon)
 
-## Lo aprendido (2026-08-10, mañana)
+- **A green test isn't proof; sometimes it's an alibi.** **Five** placebo
+  tests came out, all with the same shape: the setup can't produce the
+  failure the test claims to prevent. The stamp-anchoring test passed just
+  the same with `hits[0]` because `json.dumps` escaped the em dash to `—`
+  and the decoy stamps never matched. The path-traversal battery mounted a
+  declared **file**, against which traversal is impossible by construction
+  — the dangerous case (a declared directory) wasn't touched by any of the 8
+  tests, which is why 50 tests passed green with a hole that let `.env` be
+  read. `test_current_phase_ya_no_existe` ran against a freshly created DB,
+  whose `CREATE TABLE` never had that column, so it never exercised the
+  `DROP COLUMN` it claimed to protect. **The question that exposes them:
+  what would have to break for this test to fail?** If there's no concrete
+  answer, the test proves nothing.
+- **Fixing one hole opens the next if you fix the spelling and not the
+  property.** The viewer needed three rounds. The second one closed `''` by
+  filtering that string in the SQL and **widened** the wildcard to `'.'`,
+  `'..'`, and `'x/..'`. The one that worked doesn't filter spellings: it
+  requires that the declared, already-resolved path lands **strictly
+  inside** a root. Filtering strings is playing cat and mouse; asserting a
+  property ends it.
+- **Adversarial review finds what friendly review doesn't.** All three holes
+  in the viewer came from asking the reviewer to *attack* the endpoint with
+  concrete vectors, not to read it. The one that only read the code gave it
+  a Spec ✅.
+- **The gaps live in the seams, and no per-task review sees them.** Task 1
+  wrote into the skills "explain the reservation in the summary, **not** in
+  the stamp line"; Tasks 3 and 6 needed that reservation to display it, as
+  the design required. Each task was correct on its own. Only reviewing the
+  whole branch caught it.
+- **The plan is a hypothesis, not a truth.** Two code blocks I wrote in the
+  plan were wrong, and the plan's own tests would have covered for them: a
+  `.strip("\n")` that treats its argument as a character set, and an
+  expression that produced a directory's path when the stamp had a single
+  file inside it. An implementer who copies the plan verbatim inherits its
+  bugs.
 
-- **Una comprobación puede encontrarse a sí misma.** El runner decidía si hubo plan
-  buscando el sello `PLAN: validado` en los últimos 4 KB del log. Pero el cuerpo de la
-  skill viaja en el log y contiene los tres sellos literalmente — el último `PLAN:
-  validado` está a 393 caracteres del final de `SKILL.md`. En una corrida que aborta
-  pronto, la ventana se tragaba la §7 de la propia skill y la corrida se daba por buena:
-  el bug que el mecanismo venía a matar, reconstruido por dentro. **Anclar en la última
-  coincidencia, no en la presencia.** Lo encontró la revisión final, no los tests.
-- **`--allowedTools` con un especificador no acota: habilita.** Poner
-  `Bash(npx openspec:*)` no restringió Bash a ese comando — dejó correr `ls`, `find` y
-  `git remote -v` en el repo del cliente, y a la vez **bloqueó** la invocación correcta
-  del CLI por no empezar con esa cadena literal. Lo peor de las dos cosas. Y como la
-  lista se construía sin mirar la fase, la Fase 1 —declarada solo lectura— pasó a
-  ejecutar shell sin que nadie lo decidiera. Hoy hay una tabla `PHASE_ALLOWED_TOOLS` y
-  `analyze` lleva la lista vacía.
-- **El código de salida de `claude -p` no dice nada.** Sale con 0 aunque el agente se
-  haya detenido sin hacer nada. Cualquier estado que se derive de él es una mentira
-  esperando a ocurrir: `planned` llegó a significar "el subproceso no petó".
-- **El nombre del paquete no se adivina.** `npx openspec` no existe; es
-  `@fission-ai/openspec`. Costó una corrida entera de 8 minutos descubrirlo.
-- **El agente fue más honesto que mi regla.** La skill le mandaba detenerse si el CLI
-  fallaba. No se detuvo: escribió el plan igual y abrió su resumen con *"Falta la
-  validación: npx está bloqueado por permisos"*, con sección propia y el diagnóstico de
-  la causa. Tirar un plan de 21 tareas por no poder validarlo habría sido peor. La regla
-  se quedó; lo que se añadió fue el sello, para que el **estado** no pueda mentir aunque
-  el agente decida seguir.
-- **Un espejo citado sin abrir es un número inventado.** Por eso se cuentan las lecturas
-  en el log, no solo las citas en el documento: el 3323 citó 9 archivos de Estes y los
-  leyó los 9.
+## Lessons learned (2026-08-10, morning)
 
-## Lo aprendido (2026-08-09)
+- **A check can find itself.** The runner decided whether there was a plan by
+  searching for the stamp `PLAN: validado` in the log's last 4 KB. But the
+  skill's body travels in the log and contains all three stamps literally —
+  the last `PLAN: validado` sits 393 characters from the end of `SKILL.md`.
+  In a run that aborts early, the window swallowed the skill's own §7 and
+  the run passed as good: the very bug the mechanism was meant to catch,
+  rebuilt from the inside. **Anchor on the last match, not on presence.**
+  The final review caught it, not the tests.
+- **A specifier on `--allowedTools` doesn't scope it: it enables it.**
+  Setting `Bash(npx openspec:*)` didn't restrict Bash to that command — it
+  let `ls`, `find`, and `git remote -v` run in the client's repo, while at
+  the same time **blocking** the correct CLI invocation for not starting
+  with that literal string. The worst of both worlds. And since the list was
+  built without looking at the phase, Phase 1 —declared read-only— ended up
+  able to run shell commands without anyone deciding that. There's now a
+  `PHASE_ALLOWED_TOOLS` table, and `analyze` carries an empty list.
+- **`claude -p`'s exit code says nothing.** It exits with 0 even if the agent
+  stopped without doing anything. Any status derived from it is a lie
+  waiting to happen: `planned` came to mean "the subprocess didn't crash."
+- **The package name can't be guessed.** `npx openspec` doesn't exist; it's
+  `@fission-ai/openspec`. It cost a full 8-minute run to find out.
+- **The agent was more honest than my rule.** The skill told it to stop if
+  the CLI failed. It didn't stop: it wrote the plan anyway and opened its
+  summary with *"Validation is missing: npx is blocked by permissions,"*
+  with its own section and root-cause diagnosis. Throwing away a 21-task
+  plan for not being able to validate it would have been worse. The rule
+  stayed; what got added was the stamp, so the **status** can't lie even if
+  the agent decides to keep going.
+- **A mirror cited without being opened is a made-up number.** That's why
+  reads are counted in the log, not just citations in the document: 3323
+  cited 9 Estes files and read all 9.
 
-- **`--add-dir` da acceso, no atención.** Montar un repo no hace que el agente lo
-  mire: en la corrida del 3322 tenía `ProvidenceTMSTenant` disponible, lo nombró 15
-  veces y registró 0 lecturas dentro. Hay que **nombrárselos en el prompt y decirle
-  de qué va cada uno** — de ahí que la etiqueta del repo sea funcional y no adorno.
-  El runner lo inyecta; `SKILL.md` 2.8 (v0.3.0) dice que esos repos entran en el
-  alcance de "Código afectado" en vez de declararse fuera.
-- **`uvicorn --reload` deja procesos huérfanos en Windows.** Tres veces seguidas el
-  backend siguió sirviendo código anterior y una prueba dio un resultado falso. El
-  puerto 8000 quedaba retenido por un hijo del recargador. **Arrancar sin `--reload`
-  y reiniciar a mano**; ante un comportamiento raro, sospechar del proceso antes que
-  del código.
-- **Aceptar con n=1 es aceptar poco.** El 3311 es una épica escrita por el propio
-  Jhonny, con criterios numerados: el ticket soñado. La prueba de verdad es el
-  ticket de dos frases. Salió bien, pero eso solo se supo al correr el segundo.
-- **Un `<select>` no dice qué arrastra.** El origen del rediseño de la UI: el usuario
-  elegía proyecto sin ver qué repos montaría el agente. La información tiene que
-  estar donde se toma la decisión, no donde se configuró la semana pasada.
+## Lessons learned (2026-08-09)
 
-## Lo aprendido en la aceptación (2026-08-08)
+- **`--add-dir` gives access, not attention.** Mounting a repo doesn't make
+  the agent look at it: in the 3322 run, `ProvidenceTMSTenant` was
+  available, got named 15 times, and logged 0 reads inside it. It has to be
+  **named in the prompt with what it's for** — hence the repo's label being
+  functional, not decorative. The runner injects it; `SKILL.md` 2.8 (v0.3.0)
+  says those repos fall under the scope of "Affected code" instead of being
+  declared out of scope.
+- **`uvicorn --reload` leaves orphaned processes on Windows.** Three times in
+  a row the backend kept serving old code and a test gave a false result.
+  Port 8000 stayed held by a child of the reloader. **Start without
+  `--reload` and restart by hand**; when behavior looks off, suspect the
+  process before the code.
+- **Accepting at n=1 is accepting little.** 3311 is an epic written by Jhonny
+  himself, with numbered criteria: the dream ticket. The real test is the
+  two-sentence ticket. It went well, but that was only known once the second
+  one ran.
+- **A `<select>` doesn't say what it drags along.** The origin of the UI
+  redesign: the user picked a project without seeing which repos the agent
+  would mount. The information has to be where the decision gets made, not
+  where it was configured last week.
 
-- **La versión del plugin es la clave de cache.** Editar y committear una skill en el
-  hub no llega al plugin instalado: `claude plugin update` no trae nada si `version`
-  en `plugin.json` no sube. Tocar una skill obliga a subir versión. La plantilla del
-  análisis estampa la versión, así que el archivo generado prueba cuál corrió.
-- **La Fase 5 se encoge.** La "memoria por proyecto" que iba a construirse ya existe:
-  es el `CLAUDE.md` + `.claude/rules/` del proyecto destino. El 3311 absorbió reglas
-  de Angular 21, el gate financiero, el flujo de git y el "developer mode" sin una
-  línea de código nuestra. A la Fase 5 solo le queda lo que el agente **aprende
-  corriendo** (que faltan las cuentas de B2, qué ordenaba un timeout de 850 ms) — un
-  archivo que el agente escribe en el repo destino, no un subsistema.
-- **`organization` en `.claude/ticket-agent.json` es redundante** con `ADO_ORG`, y el
-  README pedía que "coincidan": dos fuentes para un valor. Pendiente de quitar
-  (`ADO_ORG` no se puede eliminar, el MCP la necesita como env var al arrancar).
-- **El repo destino se mueve mientras se analiza.** Entre las dos corridas la rama
-  `jhonny/quote-v2` pasó de 12 a 19 commits. Por eso las cifras del análisis deben
-  citar el comando o el `archivo:línea` que las produjo: sin eso no hay forma de
-  distinguir un dato viejo de uno inventado.
+## Lessons learned in acceptance (2026-08-08)
 
-## Puntos a considerar / riesgos
+- **The plugin version is the cache key.** Editing and committing a skill in
+  the hub doesn't reach the installed plugin: `claude plugin update` fetches
+  nothing if `version` in `plugin.json` doesn't change. Touching a skill
+  requires bumping the version. The analysis template stamps the version, so
+  the generated file proves which one ran.
+- **Phase 5 shrinks.** The "per-project memory" that was going to be built
+  already exists: it's the target project's `CLAUDE.md` + `.claude/rules/`.
+  3311 absorbed Angular 21 rules, the financial gate, the git flow, and
+  "developer mode" without a single line of our own code. All that's left
+  for Phase 5 is what the agent **learns while running** (that B2's accounts
+  are missing, that an 850ms timeout mattered) — a file the agent writes in
+  the target repo, not a subsystem.
+- **`organization` in `.claude/ticket-agent.json` is redundant** with
+  `ADO_ORG`, and the README asked for them to "match": two sources for one
+  value. Pending removal (`ADO_ORG` can't be removed, the MCP needs it as an
+  env var at startup).
+- **The target repo moves while it's being analyzed.** Between the two runs,
+  branch `jhonny/quote-v2` went from 12 to 19 commits. That's why figures in
+  the analysis must cite the command or `file:line` that produced them:
+  without that there's no way to tell an old figure from a made-up one.
 
-- **Límites de la suscripción**: las corridas del orquestador consumen la ventana
-  del plan igual que el uso interactivo; análisis largos pueden toparla.
-- **Adjuntos e imágenes**: la rama sigue sin ejercitarse, pero ya no por falta de caso. El
-  padre #827 del 3320 trae un `.jpg` **embebido en el HTML de la descripción**, no colgado de
-  `relations`, y el agente no tiene de dónde sacar el id. Ver "Pendientes inmediatos".
-- **El stepper de fases se retiró de la UI** al rediseñarla: mostraba 6 fases con 5
-  apagadas en cada fila. Vuelve cuando las fases 2-4 existan de verdad.
-- **El contrato del sello depende de que el agente obedezca un markdown.** Funcionó en el
-  3322 con n=1. Pero si algún día declara la ruta con barras invertidas, la regex captura
-  solo el primer segmento (`docs`) y el visor pasa a servir **todo ese directorio**, sin
-  fallar de forma visible. Por eso las dos skills lo dicen explícitamente; no hay guarda
-  en el backend que lo detecte.
-- **Permisos del runner** (resuelto para `implement` en la 2b, decisión 17): lista de
-  `--allowedTools` ramificada por fase, `Bash` pelado en `implement` porque el especificador
-  no acota, y la contención por hook vía `--settings`. Lo que queda sin resolver es la fase
-  que **empuje al remoto**: ahí el pestillo actual no vale y hay que rehacer la sección de
-  contención del spec. Texto histórico: **el especificador `Bash(...)` habilita la herramienta,
-  no la acota al comando** — verificado en corrida real. Al llegar la fase que escriba código
-  hay que revisar qué
-  modo, qué tools y qué guards corresponden, y recordar que los `extra_dirs` son de
-  lectura, no sitios donde el agente deba escribir.
-- **`openspec init` deja más huella de la esperada** en el repo destino: además de
-  `openspec/`, instala 6 skills en `.claude/skills/openspec-*`, `.claude/commands/opsx/`
-  y comandos en `.opencode/`. En `ProvidenceTMSTenant` está todo sin trackear, pendiente
-  de decidir si se commitea o se revierte.
-- **La Fase 2 va por n=2** (3323 y 3320), las dos formas opuestas de ticket. Lo que falta medir
-  no es otra forma más: es **si sus negativos son fiables**, que es lo que el 3320 destapó.
-- **El orquestador es v1 delgado**: sin SSE, sin corridas paralelas, y las fases `test`,
-  `guards` y `pr` declaradas pero no lanzables — crecen junto con las fases del agente.
-- **Una corrida de `implement` es larga**: el 3332 tardó **83 minutos** con 19 tareas, y el
-  ritmo es irregular (de 2 a 9 minutos por tarea según su tamaño). Consume ventana de
-  suscripción a ese ritmo. Si se corta, `tasks.md` conserva el avance y relanzar retoma.
-- **La guarda de árbol limpio se evalúa dos veces** (en el POST, para el `409` inmediato, y
-  bajo el lock, que es la autoritativa). Dos tickets sobre el mismo repositorio físico se
-  encolan los dos: el segundo se entera al arrancar, con un error explicado, no al pulsar.
-- **Actualizar este documento** y los checkboxes de los planes al cerrar hitos.
+## Points to consider / risks
 
-## Cómo retomar en una sesión nueva
+- **Subscription limits**: orchestrator runs consume the plan's window just
+  like interactive use does; long analyses may hit the cap.
+- **Attachments and images**: the branch is still unexercised, but no longer
+  for lack of a case. 3320's parent #827 carries a `.jpg` **embedded in the
+  description's HTML**, not hanging off `relations`, and the agent has no id
+  to work from. See "Immediate pending items."
+- **The phase stepper was removed from the UI** during the redesign: it
+  showed 6 phases with 5 dimmed on every row. It comes back once phases 2-4
+  really exist.
+- **The stamp contract depends on the agent obeying a markdown file.** It
+  worked on 3322 at n=1. But if it ever declares a path with backslashes,
+  the regex only captures the first segment (`docs`) and the viewer ends up
+  serving **that entire directory**, without failing visibly. That's why
+  both skills say so explicitly; there's no backend guard that detects it.
+- **Runner permissions** (resolved for `implement` in 2b, decision 17):
+  `--allowedTools` branched by phase, bare `Bash` in `implement` because the
+  specifier doesn't scope it, and containment via hook through `--settings`.
+  What's still unresolved is the phase that **pushes to remote**: the
+  current latch doesn't hold there, and the containment section of the spec
+  will need to be redone. Historical note: **the `Bash(...)` specifier
+  enables the tool, it doesn't scope it to the command** — verified in a
+  real run. When the code-writing phase arrives, revisit which mode, which
+  tools, and which guards apply, and remember that `extra_dirs` are for
+  reading, not places the agent should write to.
+- **`openspec init` leaves more of a footprint than expected** in the target
+  repo: besides `openspec/`, it installs 6 skills under
+  `.claude/skills/openspec-*`, `.claude/commands/opsx/`, and commands under
+  `.opencode/`. In `ProvidenceTMSTenant` all of it is untracked, pending a
+  decision on whether to commit or revert it.
+- **Phase 2 is at n=2** (3323 and 3320), the two opposite shapes of ticket.
+  What's left to measure isn't yet another shape: it's **whether its
+  negative claims are reliable**, which is what 3320 exposed.
+- **The orchestrator is a thin v1**: no SSE, no parallel runs, and the
+  `test`, `guards`, and `pr` phases are declared but not launchable — they
+  grow alongside the agent's phases.
+- **An `implement` run is long**: 3332 took **83 minutes** with 19 tasks, and
+  the pace is uneven (2 to 9 minutes per task depending on size). It burns
+  subscription window at that rate. If interrupted, `tasks.md` keeps the
+  progress and relaunching resumes it.
+- **The clean-tree guard is evaluated twice** (on the POST, for the
+  immediate `409`, and under the lock, which is the authoritative check).
+  Two tickets on the same physical repo both get queued: the second finds
+  out at launch time, with an explained error, not at click time.
+- **Keep this document updated**, along with the plan checkboxes, when
+  closing milestones.
 
-Prompt sugerido — abrir Claude Code en el hub
+## How to resume in a new session
+
+Suggested prompt — open Claude Code in the hub
 (`D:/Companies/Jorge.Gutierrez/autonomous-skill-hub`):
 
-> Lee docs/STATUS.md para situarte. **La Fase 2b está construida y validada** (plugin v0.6.1):
-> el agente escribe código y commitea en una rama. El 3332 se implementó entero —19/19 tareas,
-> 17 commits, 83 minutos— sin una sola fuga en los commits. El roadmap se encogió: `test` dejó
-> de ser una fase porque las pruebas se escriben dentro de `implement`.
+> Read docs/STATUS.md to get oriented. **Phase 2b is built and validated**
+> (plugin v0.6.1): the agent writes code and commits on a branch. 3332 was
+> fully implemented —19/19 tasks, 17 commits, 83 minutes— with not a single
+> leak in the commits. The roadmap shrank: `test` stopped being a phase
+> because the tests get written inside `implement`.
 >
-> El objetivo de esta sesión es **leer lo que el agente escribió**. En la rama
-> `ticket-agent/3332` de `ProvidenceTMSTenant` hay **2658 líneas nuevas en 31 archivos** que
-> **nadie ha mirado**. La corrida salió `ok` porque el build está verde y las casillas marcadas
-> — pero eso mide que el mecanismo funcionó, no que el código sea bueno. Es exactamente la
-> misma trampa que un test que pasa por su montaje.
+> This session's goal is to **read what the agent wrote**. On branch
+> `ticket-agent/3332` of `ProvidenceTMSTenant` there are **2658 new lines
+> across 31 files** that **nobody has looked at**. The run came out `ok`
+> because the build is green and the boxes are checked — but that measures
+> that the mechanism worked, not that the code is good. It's exactly the
+> same trap as a test that passes because of its setup.
 >
-> 1. **Revisa el diff completo** (`git diff Dev..ticket-agent/3332` desde
->    `D:/Companies/ProvidenceSolutions/ProvidenceTMSTenant`) **contra el patrón que dice
->    copiar**: los carriers ya escritos en `Carriers/Abf/` y `Carriers/Estes/`. La pregunta no
->    es "¿compila?" sino "¿lo firmaría un humano del equipo?".
-> 2. Mira con lupa **los 12 archivos de test**: ¿prueban la lógica o pasan por el montaje? La
->    técnica que ha destapado cuatro placebos en este proyecto es **mutar el código y ver si
->    alguno se pone rojo**.
-> 3. **Mira también el plan que los generó** (`openspec/changes/3332-carrier-api-v2-migration-dayton/`).
->    Si el código es flojo, la causa puede estar ahí y no en la fase 2b.
+> 1. **Review the full diff** (`git diff Dev..ticket-agent/3332` from
+>    `D:/Companies/ProvidenceSolutions/ProvidenceTMSTenant`) **against the
+>    pattern it claims to copy**: the carriers already written in
+>    `Carriers/Abf/` and `Carriers/Estes/`. The question isn't "does it
+>    compile?" but "would a human on the team sign off on it?"
+> 2. Scrutinize **the 12 test files**: do they test the logic or just pass
+>    because of their setup? The technique that has exposed four placebos in
+>    this project is **mutating the code and seeing if any turn red**.
+> 3. **Also look at the plan that generated them**
+>    (`openspec/changes/3332-carrier-api-v2-migration-dayton/`). If the code
+>    is weak, the cause might be there and not in phase 2b.
 >
-> **Ese veredicto decide lo que viene después.** Si el código es bueno, la última milla (push +
-> PR) se justifica sola. Si no lo es, automatizar la entrega sería empeorar el problema, y lo
-> que toca es arreglar las skills.
+> **That verdict decides what comes next.** If the code is good, the last
+> mile (push + PR) justifies itself. If it isn't, automating delivery would
+> make the problem worse, and what's needed is fixing the skills.
 >
-> Dos cosas menores siguen abiertas: el **hallazgo de AR** (el auto-marcado estampa autoría y
-> `BilledOn` al abrir la pantalla) necesita work item propio, y los **adjuntos embebidos en HTML**
-> siguen sin ejercitarse (el `.jpg` de #827 lleva su GUID en el `src`, no en `relations`).
+> Two minor things remain open: the **AR finding** (auto-marking stamps
+> authorship and `BilledOn` on opening the screen) needs its own work item,
+> and **attachments embedded in HTML** are still unexercised (#827's `.jpg`
+> carries its GUID in the `src`, not in `relations`).
 >
-> Para levantar el orquestador: backend en `apps/orchestrator/backend`
-> (`.venv/Scripts/uvicorn app:app --port 8000`, **sin `--reload`**) y frontend en
-> `apps/orchestrator/frontend` (`npm run dev`). Comprueba que el proceso del 8000 arrancó
-> **después** de la última modificación de `app.py` — nos ha engañado cuatro veces ya.
+> To start the orchestrator: backend at `apps/orchestrator/backend`
+> (`.venv/Scripts/uvicorn app:app --port 8000`, **no `--reload`**) and
+> frontend at `apps/orchestrator/frontend` (`npm run dev`). Confirm the
+> process on port 8000 started **after** `app.py`'s last change — it's
+> fooled us four times already.
 
-**Cuidado con el estado de la BD del orquestador: está casi vacía.** Se borró (ver "El
-borrado"), y lo único que hay es el proyecto *"Providence (solo backend)"* —un solo repo, el
-Tenant— con el ticket **3332** y sus tres corridas. Los tickets 3322, 3323 y 3320 **no están
-dados de alta**, aunque sus análisis y changes siguen en el repo destino: recrearlos es dar de
-alta el ticket, no volver a correr las fases.
+**Careful with the orchestrator DB's state: it's nearly empty.** It was wiped
+(see "The DB wipe"), and all that's left is the *"Providence (backend
+only)"* project —a single repo, the Tenant— with ticket **3332** and its
+three runs. Tickets 3322, 3323, and 3320 **aren't registered**, though their
+analyses and changes still live in the target repo: recreating them means
+registering the ticket, not re-running the phases.
 
-Lo que sí está hecho y no hace falta rehacer: `ADO_ORG` en `.claude/settings.json` del TMS, el
-`.claude/ticket-agent.json` del Tenant, y el plugin instalado a nivel de usuario en **v0.6.1**.
-`ProvidenceTMSTenant` es el conejillo de indias: lo que las corridas dejen ahí no hay que
-versionarlo ni limpiarlo (decisión 15) — y ahora incluye la rama **`ticket-agent/3332`** con
-17 commits de la implementación, que tampoco hay que mergear ni borrar salvo que estorbe.
+What's already done and doesn't need redoing: `ADO_ORG` in the TMS's
+`.claude/settings.json`, the Tenant's `.claude/ticket-agent.json`, and the
+plugin installed at the user level at **v0.6.1**. `ProvidenceTMSTenant` is
+the guinea pig: whatever runs leave there doesn't need versioning or cleanup
+(decision 15) — and now that includes branch **`ticket-agent/3332`** with 17
+implementation commits, which also doesn't need merging or deleting unless
+it gets in the way.
 
-Cinco trampas conocidas: **subir `version`** al tocar una skill o el cambio no llega al
-plugin instalado; **no usar `uvicorn --reload`**, que deja procesos huérfanos reteniendo
-el 8000 y sirve código viejo sin avisar; el paquete de OpenSpec es **`@fission-ai/openspec`**,
-no `openspec`; **el código de salida de `claude -p` no dice si el agente hizo algo** —
-para eso está el sello `HUELLA:`; y **un test verde puede ser una coartada**: antes de
-fiarte de uno, pregúntale qué tendría que romperse para que fallara.
+Five known traps: **bump the `version`** when touching a skill, or the
+change won't reach the installed plugin; **don't use `uvicorn --reload`**,
+which leaves orphaned processes holding port 8000 and serves old code
+without warning; the OpenSpec package is **`@fission-ai/openspec`**, not
+`openspec`; **`claude -p`'s exit code doesn't say whether the agent did
+anything** — that's what the `HUELLA:` stamp is for; and **a green test can
+be an alibi**: before trusting one, ask what would have to break for it to
+fail.

@@ -1,114 +1,116 @@
 import { useRef, useState } from "react"
-import { api, type ActiveRun, type Artefacto, type Fase, type Run } from "@/api"
+import { api, type ActiveRun, type Artifact, type Phase, type Run } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { colorFase, duracionTexto, FASE_LABEL, hora, iconoFase, puedeLanzar, tamaño } from "@/estado"
+import { canRunPhase, durationText, formatSize, formatTime, PHASE_LABEL, phaseColor, phaseIcon } from "@/status"
 
-// Estilo compartido de foco/hover para los <button> nativos del visor: los botones de
-// shadcn ya traen su propio anillo, pero estos son planos (chips de archivo, cerrar,
-// ajuste) y sin esto quedarían mudos al navegar con teclado.
+// Shared focus/hover style for the viewer's native <button>s: shadcn buttons already
+// have their own ring, but these are plain (file chips, close, adjust) and without
+// this they'd be silent when navigating by keyboard.
 const CHIP =
   "rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors " +
   "hover:bg-accent hover:text-accent-foreground " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
 /**
- * El recorrido de fases del ticket: una fila por fase de PHASES, con su acción y el
- * artefacto que declaró haber dejado. Reemplaza a los botones de la cabecera — la acción
- * va donde está la información, el mismo principio que movió los repos a la cabecera del
- * proyecto. Las fases que aún no existen salen apagadas: el camino pendiente es contexto.
+ * The ticket's phase timeline: one row per phase in PHASES, with its action and the
+ * artifact it declared having left. Replaces the header buttons — the action goes
+ * where the information is, the same principle that moved the repos into the project
+ * header. Phases that don't exist yet show dimmed: the pending path is context.
  */
-export function Timeline({ fases, runs, activo, ticketId, onRun }: {
-  fases: Fase[]
+export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
+  phases: Phase[]
   runs: Run[]
-  activo: ActiveRun | null
+  activeRun: ActiveRun | null
   ticketId: number
-  onRun: (fase: string, instructions?: string) => void
+  onRun: (phase: string, instructions?: string) => void
 }) {
-  const [abierta, setAbierta] = useState<string | null>(null)   // caja de instrucciones
-  const [instrucciones, setInstrucciones] = useState("")
-  const [visor, setVisor] = useState<Artefacto | null>(null)
-  const [cargando, setCargando] = useState<string | null>(null)
+  const [openPhase, setOpenPhase] = useState<string | null>(null)   // instructions box
+  const [instructions, setInstructions] = useState("")
+  const [viewer, setViewer] = useState<Artifact | null>(null)
+  const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<{ ruta: string; msg: string } | null>(null)
-  // Cada click a un chip incrementa la secuencia; una respuesta que llega cuando ya no es
-  // la última pedida se descarta entera (ni pisa el visor, ni borra el `cargando` del
-  // clic que sí sigue en vuelo). Sin esto, un clic lento en A seguido de uno rápido en B
-  // deja a B mostrado y luego lo sobreescribe A al resolver tarde.
-  const peticion = useRef(0)
+  // Each click on a chip bumps the sequence; a response that lands when it's no longer
+  // the last one requested is discarded entirely (it neither overwrites the viewer nor
+  // clears the `loading` of the click still in flight). Without this, a slow click on A
+  // followed by a fast one on B leaves B shown and then A overwrites it once it resolves late.
+  const requestId = useRef(0)
 
-  const ver = (ruta: string) => {
-    if (visor?.ruta === ruta) return setVisor(null)     // segundo clic: cerrar
-    const id = ++peticion.current
-    setCargando(ruta); setError(null)
-    api.artefacto(ticketId, ruta)
-      .then(a => { if (id === peticion.current) setVisor(a) })
-      .catch(e => { if (id === peticion.current) { setVisor(null); setError({ ruta, msg: String(e) }) } })
-      .finally(() => { if (id === peticion.current) setCargando(null) })
+  const viewArtifact = (ruta: string) => {
+    if (viewer?.ruta === ruta) return setViewer(null)     // second click: close
+    const id = ++requestId.current
+    setLoading(ruta); setError(null)
+    api.artifact(ticketId, ruta)
+      .then(a => { if (id === requestId.current) setViewer(a) })
+      .catch(e => { if (id === requestId.current) { setViewer(null); setError({ ruta, msg: String(e) }) } })
+      .finally(() => { if (id === requestId.current) setLoading(null) })
   }
 
   return (
     <ol className="space-y-0">
-      {fases.map((f, i) => {
-        const motivo = puedeLanzar(fases, i, activo, ticketId)
+      {phases.map((f, i) => {
+        const reason = canRunPhase(phases, i, activeRun, ticketId)
         const h = f.huella
-        // `runs` llega ordenado por id DESC, igual que en `fases_de` del backend: el
-        // primero que coincide con esta fase es su corrida más reciente, la misma que
-        // produjo `h`. Solo `implement` la deja — el resto llega en `null`.
+        // `runs` arrives sorted by id DESC, same as `phases_for` in the backend: the
+        // first one matching this phase is its most recent run, the same one that
+        // produced `h`. Only `implement` sets it — the rest arrive as `null`.
         const branch = runs.find(r => r.phase === f.fase)?.branch ?? null
-        // Dos formas de artefacto: un directorio (ruta + "/" + cada nombre) o un archivo
-        // suelto (la ruta ya es completa y coincide con su propio nombre). La decisión se
-        // toma UNA vez, fuera del map — meterla dentro del map (como en la primera versión)
-        // hacía que la rama "no coincide" recalculara `archivos === 1` y llegara a la misma
-        // conclusión que la rama "sí coincide", así que un plan `parcial` que se detiene con
-        // un solo archivo en el directorio (p.ej. solo `proposal.md`) pintaba un chip
-        // rotulado con el nombre del DIRECTORIO, que al pulsarlo daba 400.
-        const esArchivo = h?.existe ? h.archivos === 1 && h.nombres[0] === h.ruta.split("/").pop() : false
-        // ponytail: un directorio "X/" que por casualidad contuviera un único archivo
-        // también llamado "X" produce el mismo payload {ruta:"X", nombres:["X"]} que un
-        // archivo suelto "X" — ambigüedad real, irresoluble desde el frontend sin que el
-        // backend marque `es_dir`. No se da en la práctica hoy (analyze siempre es archivo
-        // suelto; design siempre trae 2+), así que se deja anotada y no se resuelve aquí.
+        // Two shapes of artifact: a directory (path + "/" + each name) or a lone
+        // file (the path is already complete and matches its own name). The
+        // decision is made ONCE, outside the map — doing it inside the map (as in
+        // the first version) made the "doesn't match" branch recompute
+        // `archivos === 1` and reach the same conclusion as the "matches" branch,
+        // so a `parcial` plan that stops with a single file in the directory
+        // (e.g. only `proposal.md`) rendered a chip labeled with the DIRECTORY
+        // name, which 400'd on click.
+        const isFile = h?.existe ? h.archivos === 1 && h.nombres[0] === h.ruta.split("/").pop() : false
+        // ponytail: a directory "X/" that happens to contain a single file also
+        // named "X" produces the same payload {ruta:"X", nombres:["X"]} as a lone
+        // file "X" — a real ambiguity, unresolvable from the frontend unless the
+        // backend marks `es_dir`. Doesn't happen in practice today (analyze is
+        // always a lone file; design always brings 2+), so it's left noted and
+        // not resolved here.
         const items: { ruta: string; etiqueta: string }[] = !h?.existe ? []
-          : esArchivo ? [{ ruta: h.ruta, etiqueta: h.nombres[0] }]
-          // La etiqueta es el nombre RELATIVO que mandó el backend (`specs/pagos/spec.md`),
-          // no su basename: con dos capacidades, dos `spec.md` serían indistinguibles.
+          : isFile ? [{ ruta: h.ruta, etiqueta: h.nombres[0] }]
+          // The label is the RELATIVE name the backend sent (`specs/pagos/spec.md`),
+          // not its basename: with two capabilities, two `spec.md` would be indistinguishable.
           : h.nombres.map(n => ({ ruta: `${h.ruta}/${n}`, etiqueta: n }))
-        const rutas = items.map(it => it.ruta)
-        const ultima = i === fases.length - 1
-        const corriendo = f.estado === "corriendo"
+        const paths = items.map(it => it.ruta)
+        const isLast = i === phases.length - 1
+        const isRunning = f.estado === "corriendo"
 
-        // Metadatos neutros en una sola línea — hora, duración, nº de corridas — en vez de
-        // una fila de chips sueltos: así el nombre de la fase queda como el único elemento
-        // con peso visual y el resto se lee como un dato, no como otra etiqueta.
+        // Neutral metadata on a single line — time, duration, run count — instead
+        // of a row of loose chips: this way the phase name stays the only element
+        // with visual weight and the rest reads as data, not another label.
         const metaParts: string[] = []
         if (!f.disponible) metaParts.push("no disponible aún")
         else if (f.estado === "pendiente") metaParts.push("sin corridas")
-        if (f.en) metaParts.push(hora(f.en))
-        if (f.duracion_s != null) metaParts.push(duracionTexto(f.duracion_s))
+        if (f.en) metaParts.push(formatTime(f.en))
+        if (f.duracion_s != null) metaParts.push(durationText(f.duracion_s))
         if (f.corridas) metaParts.push(`${f.corridas} ${f.corridas === 1 ? "corrida" : "corridas"}`)
 
         return (
           <li key={f.fase} className={`relative pl-9 ${f.disponible ? "" : "opacity-60"}`}>
-            {/* La línea que une las fases; no se dibuja bajo la última. Arranca detrás
-                del nodo (`top-7`, que el nodo tapa al pintarse después) y **sobresale
-                6px por debajo de la fila** hasta donde empieza el nodo siguiente
-                (`top-1.5` = 6px). Con `bottom-0` se quedaba dentro de su propia fila:
-                en las fases apagadas, que miden 36px, medía 4px y el recorrido se veía
-                como círculos sueltos justo donde el camino pendiente es todo el mensaje. */}
-            {!ultima && <span aria-hidden className="absolute left-[11px] top-7 -bottom-1.5 w-px bg-border" />}
+            {/* The line connecting phases; not drawn under the last one. Starts behind
+                the node (`top-7`, which the node covers once painted after it) and
+                **sticks out 6px below the row** to where the next node starts
+                (`top-1.5` = 6px). With `bottom-0` it stayed inside its own row: on
+                dimmed phases, which measure 36px, it measured 4px and the path looked
+                like loose circles right where the pending path is the whole message. */}
+            {!isLast && <span aria-hidden className="absolute left-[11px] top-7 -bottom-1.5 w-px bg-border" />}
             <span
               className={`absolute left-0 top-1.5 flex h-6 w-6 items-center justify-center
                           rounded-full border text-[11px] font-semibold shadow-sm transition-colors
-                          ${colorFase(f.estado)}
-                          ${corriendo ? "animate-pulse ring-2 ring-blue-500/30 ring-offset-2 ring-offset-background" : ""}`}
+                          ${phaseColor(f.estado)}
+                          ${isRunning ? "animate-pulse ring-2 ring-blue-500/30 ring-offset-2 ring-offset-background" : ""}`}
             >
-              {iconoFase(f.estado)}
+              {phaseIcon(f.estado)}
             </span>
 
-            <div className={`-mx-2 rounded-lg px-2 transition-colors ${corriendo ? "bg-blue-500/5" : ""}`}>
+            <div className={`-mx-2 rounded-lg px-2 transition-colors ${isRunning ? "bg-blue-500/5" : ""}`}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
                 <span className={`text-sm font-semibold tracking-tight ${f.disponible ? "text-foreground" : "text-muted-foreground"}`}>
-                  {FASE_LABEL[f.fase] ?? f.fase}
+                  {PHASE_LABEL[f.fase] ?? f.fase}
                 </span>
                 {metaParts.length > 0 && (
                   <span className="text-xs text-muted-foreground">{metaParts.join(" · ")}</span>
@@ -122,17 +124,17 @@ export function Timeline({ fases, runs, activo, ticketId, onRun }: {
                 {f.disponible && (
                   <div className="ml-auto flex gap-1">
                     <Button size="sm" variant={f.estado === "pendiente" ? "default" : "outline"}
-                            disabled={!!motivo} title={motivo || undefined}
+                            disabled={!!reason} title={reason || undefined}
                             onClick={() => onRun(f.fase)}>
                       {f.corridas ? "Re-correr" : "Correr"}
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={!!motivo}
-                            title={motivo || "Correr con instrucciones de ajuste"}
-                            aria-label={`Ajustar y correr ${FASE_LABEL[f.fase] ?? f.fase}`}
-                            aria-expanded={abierta === f.fase}
+                    <Button size="sm" variant="ghost" disabled={!!reason}
+                            title={reason || "Correr con instrucciones de ajuste"}
+                            aria-label={`Ajustar y correr ${PHASE_LABEL[f.fase] ?? f.fase}`}
+                            aria-expanded={openPhase === f.fase}
                             aria-controls={`ajuste-${f.fase}`}
                             onClick={() => {
-                              setAbierta(abierta === f.fase ? null : f.fase); setInstrucciones("")
+                              setOpenPhase(openPhase === f.fase ? null : f.fase); setInstructions("")
                             }}>
                       ▾
                     </Button>
@@ -140,30 +142,32 @@ export function Timeline({ fases, runs, activo, ticketId, onRun }: {
                 )}
               </div>
 
-              {motivo && f.disponible && f.estado !== "corriendo" && (
-                <p className="pb-2 text-xs text-muted-foreground">{motivo}</p>
+              {reason && f.disponible && f.estado !== "corriendo" && (
+                <p className="pb-2 text-xs text-muted-foreground">{reason}</p>
               )}
 
               {f.estado === "error" && f.motivo && (
                 <p className="pb-2 text-xs text-destructive">{f.motivo}</p>
               )}
 
-              {/* La reserva de un `parcial`: la huella se declaró, pero con matices
-                  (p.ej. `openspec validate` no pasó). Va junto a la huella, en el mismo
-                  ámbar que ya usa este estado — no reemplaza la fila del artefacto. */}
+              {/* The reserve of a `parcial`: the footprint was declared, but with
+                  caveats (e.g. `openspec validate` didn't pass). Goes next to the
+                  footprint, in the same amber this state already uses — doesn't
+                  replace the artifact row. */}
               {f.estado === "parcial" && f.motivo && (
                 <p className="pb-2 text-xs text-amber-600 dark:text-amber-500">{f.motivo}</p>
               )}
 
-              {/* La rama que preparó `implement`, tratada igual que la ruta del artefacto
-                  (mismo mono, mismo tamaño): un dato técnico hermano, no un elemento
-                  nuevo. Va FUERA del bloque de la huella y no dentro: el runner ya cambió
-                  de rama todos los repos del ticket antes de lanzar al agente, así que una
-                  corrida que cierra con `nada` o que revienta deja los repos igual de
-                  movidos — y ahí es justo cuando hace falta saber dónde mirar. El diseño
-                  acepta dejarlos en la rama nueva porque "es visible y reversible";
-                  anidada bajo la huella solo era visible cuando no hacía falta.
-                  Sin hueco cuando no hay rama — es lo normal en el resto de fases. */}
+              {/* The branch `implement` prepared, treated the same as the artifact path
+                  (same monospace, same size): a sibling technical fact, not a new
+                  element. Goes OUTSIDE the footprint block, not inside: the runner
+                  already switched all the ticket's repos to the new branch before
+                  launching the agent, so a run that closes with `nada` or crashes
+                  leaves the repos just as moved — and that's exactly when it matters
+                  to know where to look. The design accepts leaving them on the new
+                  branch because "it's visible and reversible"; nested under the
+                  footprint it was only visible when it wasn't needed.
+                  No slot when there's no branch — that's normal for the rest of the phases. */}
               {branch && (
                 <div className="flex flex-wrap items-center gap-x-2 pb-2 text-xs">
                   <span className="text-muted-foreground">Rama</span>
@@ -183,18 +187,18 @@ export function Timeline({ fases, runs, activo, ticketId, onRun }: {
                           {h.ruta}
                         </span>
                         <span className="text-muted-foreground">
-                          {h.archivos === 1 ? tamaño(h.bytes) : `${h.archivos} archivos · ${tamaño(h.bytes)}`}
+                          {h.archivos === 1 ? formatSize(h.bytes) : `${h.archivos} archivos · ${formatSize(h.bytes)}`}
                         </span>
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {items.map(it => (
-                          <button key={it.ruta} onClick={() => ver(it.ruta)}
+                          <button key={it.ruta} onClick={() => viewArtifact(it.ruta)}
                                   title={it.ruta}
-                                  aria-pressed={visor?.ruta === it.ruta}
-                                  className={`${CHIP} ${visor?.ruta === it.ruta
+                                  aria-pressed={viewer?.ruta === it.ruta}
+                                  className={`${CHIP} ${viewer?.ruta === it.ruta
                                     ? "border-ring bg-accent text-accent-foreground"
                                     : "border-border text-muted-foreground"}`}>
-                            {cargando === it.ruta ? "cargando…" : it.etiqueta}
+                            {loading === it.ruta ? "cargando…" : it.etiqueta}
                           </button>
                         ))}
                       </div>
@@ -208,47 +212,47 @@ export function Timeline({ fases, runs, activo, ticketId, onRun }: {
                 </div>
               )}
 
-              {abierta === f.fase && (
+              {openPhase === f.fase && (
                 <div id={`ajuste-${f.fase}`} className="pb-3">
-                  <Textarea rows={2} value={instrucciones}
-                            placeholder={`Ajuste para ${FASE_LABEL[f.fase] ?? f.fase}…`}
-                            aria-label={`Ajuste para ${FASE_LABEL[f.fase] ?? f.fase}`}
-                            onChange={e => setInstrucciones(e.target.value)} />
-                  <Button size="sm" className="mt-2" disabled={!instrucciones || !!motivo}
+                  <Textarea rows={2} value={instructions}
+                            placeholder={`Ajuste para ${PHASE_LABEL[f.fase] ?? f.fase}…`}
+                            aria-label={`Ajuste para ${PHASE_LABEL[f.fase] ?? f.fase}`}
+                            onChange={e => setInstructions(e.target.value)} />
+                  <Button size="sm" className="mt-2" disabled={!instructions || !!reason}
                           onClick={() => {
-                            onRun(f.fase, instrucciones); setInstrucciones(""); setAbierta(null)
+                            onRun(f.fase, instructions); setInstructions(""); setOpenPhase(null)
                           }}>
                     Correr con este ajuste
                   </Button>
                 </div>
               )}
 
-              {/* La ruta va guardada junto al mensaje: con analyze y design mostrando huella
-                  a la vez, un 400 al abrir un archivo de una fase no debe pintarse también
-                  bajo la otra. */}
-              {error && rutas.includes(error.ruta) && (
+              {/* The path travels along with the message: with analyze and design both
+                  showing a footprint at the same time, a 400 opening one phase's file
+                  shouldn't also render under the other. */}
+              {error && paths.includes(error.ruta) && (
                 <p className="pb-2 text-xs text-destructive">{error.msg}</p>
               )}
 
-              {visor && rutas.includes(visor.ruta) && (
+              {viewer && paths.includes(viewer.ruta) && (
                 <div className="mb-3 overflow-hidden rounded-md border border-border">
                   <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/50 px-3 py-1.5 text-xs">
                     <span className="text-muted-foreground">Viendo</span>
-                    <span className="font-mono text-foreground">{visor.ruta}</span>
-                    <span className="text-muted-foreground">· {tamaño(visor.bytes)}</span>
-                    {visor.truncado && (
+                    <span className="font-mono text-foreground">{viewer.ruta}</span>
+                    <span className="text-muted-foreground">· {formatSize(viewer.bytes)}</span>
+                    {viewer.truncado && (
                       <span className="text-amber-600 dark:text-amber-500">
                         · truncado a 512 KB, se muestra solo el inicio
                       </span>
                     )}
-                    <button onClick={() => setVisor(null)}
+                    <button onClick={() => setViewer(null)}
                             className={`${CHIP} ml-auto border-transparent text-muted-foreground`}>
                       cerrar
                     </button>
                   </div>
                   <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words
                                   px-3 py-2 font-mono text-xs leading-relaxed text-foreground">
-                    {visor.texto}
+                    {viewer.texto}
                   </pre>
                 </div>
               )}

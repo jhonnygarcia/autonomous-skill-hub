@@ -1,39 +1,39 @@
-"""Sustituto de `claude -p` para tests: imprime sus args y respeta FAKE_FAIL."""
+"""Stand-in for `claude -p` in tests: prints its args and honors FAKE_FAIL."""
 import json
 import os
 import sys
 
-sys.stdout.reconfigure(encoding="utf-8")  # el CLI real emite UTF-8; en Windows print usa cp1252
+sys.stdout.reconfigure(encoding="utf-8")  # the real CLI emits UTF-8; on Windows print uses cp1252
 
 print("FAKE-CLAUDE ARGS:", " ".join(sys.argv[1:]))
 if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
     print("FAKE-CLAUDE SAW-API-KEY")
 print('{"type":"assistant","text":"analizando..."}')
 if os.environ.get("FAKE_BIG") == "1":
-    # Una sola línea por encima del límite de 64 KiB del lector de líneas de asyncio,
-    # con acentos para que se note si un carácter se parte entre dos trozos.
+    # A single line above the 64 KiB limit of asyncio's line reader, with accented
+    # characters so it's noticeable if one gets split across two chunks.
     print('{"type":"assistant","text":"' + "ácido" * 20000 + '"}')
 if os.environ.get("FAKE_FAIL") == "1":
     print("boom", file=sys.stderr)
     sys.exit(1)
 if os.environ.get("FAKE_SKILL_LEAK") == "1":
-    # Imita el cuerpo de un SKILL.md colándose en el log (el tool_result de cargar la
-    # skill): trae los tres sellos en prosa, ANTES del sello de cierre real, tal como
-    # pasa en la corrida de verdad.
-    cuerpo = (
+    # Mimics a SKILL.md body leaking into the log (the tool_result from loading the
+    # skill): it carries the three stamps in prose, BEFORE the real closing stamp,
+    # exactly as happens on a real run.
+    body = (
         "## Cierre\n"
         "Termina siempre con una de estas tres líneas exactas:\n"
         "HUELLA: ok — docs/tickets/<id>-analysis.md\n"
         "HUELLA: parcial — docs/tickets/<id>-analysis.md\n"
         "HUELLA: nada — <motivo>\n"
     )
-    # ensure_ascii=False: así es como el CLI real (Node) vuelca el stream-json — sin
-    # escapar el guion largo a `—`. Con el escape por defecto de json.dumps, los
-    # tres sellos de esta prosa nunca calzaban con la regex y el test de anclaje
-    # pasaba sin ejercitar nada (`hits` tenía un solo elemento: el sello real).
-    print('{"type":"tool_result","text":' + json.dumps(cuerpo, ensure_ascii=False) + '}')
-sello = os.environ.get("FAKE_HUELLA")
-if sello:
-    # Simula el sello de cierre obligatorio de las skills.
-    print('{"type":"assistant","text":"resumen del cierre. HUELLA: ' + sello + '"}')
+    # ensure_ascii=False: that's how the real (Node) CLI dumps stream-json — without
+    # escaping the em dash to `—`. With json.dumps' default escaping, the three stamps
+    # in this prose never matched the regex and the anchoring test passed without
+    # exercising anything (`hits` had a single element: the real stamp).
+    print('{"type":"tool_result","text":' + json.dumps(body, ensure_ascii=False) + '}')
+stamp = os.environ.get("FAKE_HUELLA")
+if stamp:
+    # Simulates the skills' mandatory closing stamp.
+    print('{"type":"assistant","text":"resumen del cierre. HUELLA: ' + stamp + '"}')
 print('{"type":"result","subtype":"success"}')

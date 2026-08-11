@@ -1,25 +1,25 @@
 # Autonomous Skill Hub
 
-Marketplace personal de plugins de Claude Code. Cada plugin empaqueta experiencia
-real como skills, comandos, agents y hooks, instalable en cualquier proyecto.
+Personal marketplace of Claude Code plugins. Each plugin packages real
+experience as skills, commands, agents and hooks, installable in any project.
 
-**Estado del proyecto** (qué está hecho, qué falta, decisiones): [docs/STATUS.md](docs/STATUS.md)
+**Project status** (what's done, what's missing, decisions): [docs/STATUS.md](docs/STATUS.md)
 
-## Instalar en un proyecto
+## Install in a project
 
-    /plugin marketplace add <url-o-ruta-de-este-repo>
+    /plugin marketplace add <url-or-path-to-this-repo>
     /plugin install ticket-agent@autonomous-skill-hub
 
 ## Plugins
 
-| Plugin | Qué hace | Estado |
+| Plugin | What it does | Status |
 |---|---|---|
-| [ticket-agent](plugins/ticket-agent/) | Comprende tickets de Azure DevOps → análisis estructurado | Fase 1 |
+| [ticket-agent](plugins/ticket-agent/) | Understands Azure DevOps tickets → structured analysis | Phase 1 |
 
-## Convenciones para agregar un plugin
+## Conventions for adding a plugin
 
-1. Carpeta en `plugins/<nombre>/` con `.claude-plugin/plugin.json` (name, description, version).
-2. Skills en `skills/<nombre>/SKILL.md`, comandos en `commands/*.md` (auto-descubiertos).
-3. Registrar el plugin en `.claude-plugin/marketplace.json`.
-4. `claude plugin validate .` debe pasar antes de commitear.
-5. Diseños en `docs/superpowers/specs/`, planes en `docs/superpowers/plans/`.
+1. Folder at `plugins/<name>/` with `.claude-plugin/plugin.json` (name, description, version).
+2. Skills at `skills/<name>/SKILL.md`, commands at `commands/*.md` (auto-discovered).
+3. Register the plugin in `.claude-plugin/marketplace.json`.
+4. `claude plugin validate .` must pass before committing.
+5. Designs in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`.

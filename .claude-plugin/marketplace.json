@@ -9,7 +9,7 @@
     {
       "name": "ticket-agent",
       "source": "./plugins/ticket-agent",
-      "description": "Comprende tickets de Azure DevOps a cabalidad y produce análisis estructurados"
+      "description": "Fully understands Azure DevOps tickets and produces structured analyses"
     }
   ]
 }

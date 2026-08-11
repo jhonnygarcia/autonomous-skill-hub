@@ -1,5 +1,5 @@
 ---
-description: Ejecuta el plan de cambios de un work item ya planificado, en una rama
+description: Executes the change plan of an already-planned work item, on a branch
 ---
 
-Usa la skill `change-implementation` para ejecutar el plan del work item $ARGUMENTS.
+Use the `change-implementation` skill to execute the plan for work item $ARGUMENTS.

@@ -1,43 +1,44 @@
 import { useEffect, useState } from "react"
 import { api, type ActiveRun, type Project, type Ticket, type TicketDetail as Detail } from "@/api"
+import { Models } from "@/Models"
 import { ProjectHeader } from "@/ProjectHeader"
 import { Projects } from "@/Projects"
 import { Sidebar } from "@/Sidebar"
 import { TicketDetail } from "@/TicketDetail"
 import { TicketList } from "@/TicketList"
 
-// Tres vistas conmutadas a mano. Sin router: es una app local de un usuario y
-// `react-router` sería una dependencia a cambio de nada.
+// Three views switched by hand. No router: it's a single-user local app and
+// `react-router` would be a dependency for nothing.
 type View =
-  | { kind: "proyecto" }
+  | { kind: "project" }
   | { kind: "ticket"; id: number }
-  | { kind: "ajustes"; nuevo?: boolean }
+  | { kind: "settings"; isNew?: boolean }
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [current, setCurrent] = useState<string | null>(null)
   const [tickets, setTickets] = useState<Ticket[]>([])
-  const [activo, setActivo] = useState<ActiveRun | null>(null)
+  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
-  const [view, setView] = useState<View>({ kind: "proyecto" })
+  const [view, setView] = useState<View>({ kind: "project" })
   const [error, setError] = useState("")
 
   const fail = (e: unknown) => setError(String(e))
 
-  // `select` lo manda Ajustes tras guardar, para que un renombrado no cambie de
-  // proyecto activo por debajo (el nombre viejo ya no existe en la lista).
+  // `select` is sent by Settings after saving, so a rename doesn't change the
+  // active project out from under it (the old name is no longer in the list).
   const refreshProjects = (select?: string) =>
     api.projects().then(ps => {
       setProjects(ps)
       setCurrent(c => {
-        const quiere = select ?? c
-        return ps.some(p => p.name === quiere) ? quiere : (ps[0]?.name ?? null)
+        const wanted = select ?? c
+        return ps.some(p => p.name === wanted) ? wanted : (ps[0]?.name ?? null)
       })
     }).catch(fail)
 
   const refresh = () => {
     api.tickets().then(setTickets).catch(fail)
-    api.activeRun().then(setActivo).catch(fail)
+    api.activeRun().then(setActiveRun).catch(fail)
     if (view.kind === "ticket") api.detail(view.id).then(setDetail).catch(() => setDetail(null))
   }
 
@@ -50,9 +51,9 @@ export default function App() {
   }, [view.kind, view.kind === "ticket" ? view.id : null])
 
   const project = projects.find(p => p.name === current) ?? null
-  // El ticket guarda el proyecto de ADO, no la clave del catálogo.
-  // ponytail: hoy coinciden; si algún día difieren, hace falta `project_key` en tickets.
-  const míos = project ? tickets.filter(t => t.project === project.project) : []
+  // The ticket stores the ADO project, not the catalog key.
+  // ponytail: today they match; if they ever diverge, tickets need a `project_key`.
+  const myTickets = project ? tickets.filter(t => t.project === project.project) : []
 
   const act = (fn: () => Promise<unknown>) => { setError(""); return fn().then(refresh).catch(fail) }
 
@@ -60,44 +61,47 @@ export default function App() {
     project && act(() => api.create(adoId, project.name))
 
   const open = (id: number) => { setDetail(null); setView({ kind: "ticket", id }) }
-  const back = () => { setDetail(null); setView({ kind: "proyecto" }) }
+  const back = () => { setDetail(null); setView({ kind: "project" }) }
 
   return (
     <div className="mx-auto flex w-full max-w-[92rem] gap-6 p-6">
-      <Sidebar projects={projects} current={current} settings={view.kind === "ajustes"}
+      <Sidebar projects={projects} current={current} settings={view.kind === "settings"}
                onSelect={n => { setCurrent(n); back() }}
-               onNew={() => setView({ kind: "ajustes", nuevo: true })}
-               onSettings={() => setView({ kind: "ajustes" })} />
+               onNew={() => setView({ kind: "settings", isNew: true })}
+               onSettings={() => setView({ kind: "settings" })} />
 
       <main className="min-w-0 flex-1 space-y-4">
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        {view.kind === "ajustes" && (
-          // el `key` fuerza remontaje al pulsar "+ Nuevo" estando ya en Ajustes
-          <Projects key={view.nuevo ? "nuevo" : "lista"} projects={projects}
-                    startNew={view.nuevo} onChange={refreshProjects} />
+        {view.kind === "settings" && (
+          <>
+            {/* the `key` forces a remount when "+ Nuevo" is pressed while already in Settings */}
+            <Projects key={view.isNew ? "new" : "list"} projects={projects}
+                      startNew={view.isNew} onChange={refreshProjects} />
+            <Models />
+          </>
         )}
 
-        {view.kind !== "ajustes" && !project && (
+        {view.kind !== "settings" && !project && (
           <p className="text-sm text-muted-foreground">
             Aún no hay proyectos.{" "}
-            <button className="underline" onClick={() => setView({ kind: "ajustes" })}>
+            <button className="underline" onClick={() => setView({ kind: "settings" })}>
               Agrega uno
             </button>{" "}
             para poder encolar tickets.
           </p>
         )}
 
-        {view.kind === "proyecto" && project && (
+        {view.kind === "project" && project && (
           <>
             <ProjectHeader project={project} />
-            <TicketList tickets={míos} activo={activo} onAdd={addTicket} onOpen={open}
+            <TicketList tickets={myTickets} activeRun={activeRun} onAdd={addTicket} onOpen={open}
                         onRun={id => act(() => api.run(id))} />
           </>
         )}
 
         {view.kind === "ticket" && project && detail && (
-          <TicketDetail detail={detail} activo={activo} projectName={project.name}
+          <TicketDetail detail={detail} activeRun={activeRun} projectName={project.name}
                         onBack={back}
                         onRun={(ins, phase) => act(() => api.run(detail.ticket.id, ins, phase))}
                         onDelete={() => { act(() => api.remove(detail.ticket.id)); back() }} />

@@ -36,15 +36,15 @@ def _repos(client):
 def test_projects_endpoint(client):
     [p] = client.get("/projects").json()
     assert p["name"] == "Demo" and p["org"] == "DemoOrg" and p["project"] == "Demo"
-    # una sola lista; el principal viene marcado, no en un campo aparte
+    # a single list; the primary one is flagged, not in a separate field
     assert len(p["repos"]) == 2
-    principal = [r for r in p["repos"] if r["primary"]]
-    assert len(principal) == 1 and principal[0]["label"] == "front"
+    primary = [r for r in p["repos"] if r["primary"]]
+    assert len(primary) == 1 and primary[0]["label"] == "front"
     assert all(Path(r["path"]).is_dir() for r in p["repos"])
     assert [r["label"] for r in p["repos"] if not r["primary"]] == ["backend"]
 
 
-def test_project_crud_rejects_rutas_inexistentes(client):
+def test_project_crud_rejects_nonexistent_paths(client):
     bad = client.post("/projects", json={
         "name": "Roto", "org": "O", "project": "P",
         "repos": [{"path": "/no/existe", "primary": True}],
@@ -55,60 +55,60 @@ def test_project_crud_rejects_rutas_inexistentes(client):
     }).status_code == 409
 
 
-def test_project_exige_un_unico_principal(client):
+def test_project_requires_a_single_primary(client):
     repos = _repos(client)
-    sin = client.post("/projects", json={
+    without_primary = client.post("/projects", json={
         "name": "Sin", "org": "O", "project": "P",
         "repos": [{**r, "primary": False} for r in repos],
     })
-    assert sin.status_code == 400 and "principal" in sin.json()["detail"]
+    assert without_primary.status_code == 400 and "principal" in without_primary.json()["detail"]
 
-    dos = client.post("/projects", json={
+    two_primaries = client.post("/projects", json={
         "name": "Dos", "org": "O", "project": "P",
         "repos": [{**r, "primary": True} for r in repos],
     })
-    assert dos.status_code == 400 and "principal" in dos.json()["detail"]
+    assert two_primaries.status_code == 400 and "principal" in two_primaries.json()["detail"]
 
-    vacio = client.post("/projects", json={"name": "V", "org": "O", "project": "P", "repos": []})
-    assert vacio.status_code == 400 and "al menos un repo" in vacio.json()["detail"]
+    empty = client.post("/projects", json={"name": "V", "org": "O", "project": "P", "repos": []})
+    assert empty.status_code == 400 and "al menos un repo" in empty.json()["detail"]
 
 
-def test_cambiar_cual_es_el_principal(client):
+def test_change_which_repo_is_primary(client):
     repos = _repos(client)
-    volteados = [{**r, "primary": not r["primary"]} for r in repos]
+    flipped = [{**r, "primary": not r["primary"]} for r in repos]
     r = client.put("/projects/Demo", json={
-        "name": "Demo", "org": "DemoOrg", "project": "Demo", "repos": volteados,
+        "name": "Demo", "org": "DemoOrg", "project": "Demo", "repos": flipped,
     })
     assert r.status_code == 200
-    nuevo = [x for x in r.json()["repos"] if x["primary"]][0]
-    assert nuevo["label"] == "backend"
-    # y el ticket que se cree ahora usa ese repo como cwd
+    new_primary = [x for x in r.json()["repos"] if x["primary"]][0]
+    assert new_primary["label"] == "backend"
+    # and the ticket created now uses that repo as cwd
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
-    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == nuevo["path"]
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == new_primary["path"]
 
 
-def test_renombrar_proyecto(client):
+def test_rename_project(client):
     repos = _repos(client)
-    cuerpo = {"org": "DemoOrg", "project": "Demo", "repos": repos}
-    # un ticket creado antes conserva sus rutas: no apunta al catálogo
+    body = {"org": "DemoOrg", "project": "Demo", "repos": repos}
+    # a ticket created earlier keeps its paths: it doesn't point at the catalog
     tid = client.post("/tickets", json={"ado_id": 7, "project": "Demo"}).json()["id"]
-    antes = client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"]
+    before = client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"]
 
-    r = client.put("/projects/Demo", json={"name": "Demo2", **cuerpo})
+    r = client.put("/projects/Demo", json={"name": "Demo2", **body})
     assert r.status_code == 200 and r.json()["name"] == "Demo2"
     assert [p["name"] for p in client.get("/projects").json()] == ["Demo2"]
-    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == antes
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == before
 
-    # y el nombre sigue siendo único
-    client.post("/projects", json={"name": "Otro", **cuerpo})
-    choque = client.put("/projects/Otro", json={"name": "Demo2", **cuerpo})
-    assert choque.status_code == 409
+    # and the name is still unique
+    client.post("/projects", json={"name": "Otro", **body})
+    conflict = client.put("/projects/Otro", json={"name": "Demo2", **body})
+    assert conflict.status_code == 409
 
 
-def test_project_update_y_delete(client):
-    principal = [r for r in _repos(client) if r["primary"]]
+def test_project_update_and_delete(client):
+    primary_repos = [r for r in _repos(client) if r["primary"]]
     r = client.put("/projects/Demo", json={
-        "name": "Demo", "org": "OtraOrg", "project": "Demo", "repos": principal,
+        "name": "Demo", "org": "OtraOrg", "project": "Demo", "repos": primary_repos,
     })
     assert r.status_code == 200 and r.json()["org"] == "OtraOrg" and len(r.json()["repos"]) == 1
     assert client.delete("/projects/Demo").status_code == 204
@@ -116,11 +116,11 @@ def test_project_update_y_delete(client):
     assert client.delete("/projects/Demo").status_code == 404
 
 
-def test_ticket_hereda_extra_dirs_del_proyecto(client):
+def test_ticket_inherits_extra_dirs_from_project(client):
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     t = client.get(f"/tickets/{tid}").json()["ticket"]
     assert len(json.loads(t["extra_dirs"])) == 1
-    # el ticket conserva su copia aunque el proyecto desaparezca del catálogo
+    # the ticket keeps its own copy even if the project disappears from the catalog
     client.delete("/projects/Demo")
     assert client.get(f"/tickets/{tid}").json()["ticket"]["repo_path"] == t["repo_path"]
 
@@ -130,30 +130,30 @@ import sys
 from pathlib import Path
 
 
-def _use_fake_claude(monkeypatch, fail=False, huella=None, skill_leak=False):
+def _use_fake_claude(monkeypatch, fail=False, stamp=None, skill_leak=False):
     fake = Path(__file__).parent / "fake_claude.py"
     monkeypatch.setenv("ORCH_CLAUDE_CMD", json.dumps([sys.executable, str(fake)]))
     monkeypatch.setenv("FAKE_FAIL", "1" if fail else "0")
     monkeypatch.setenv("FAKE_SKILL_LEAK", "1" if skill_leak else "0")
-    if huella is None:
+    if stamp is None:
         monkeypatch.delenv("FAKE_HUELLA", raising=False)
     else:
-        monkeypatch.setenv("FAKE_HUELLA", huella)
+        monkeypatch.setenv("FAKE_HUELLA", stamp)
 
 
 def test_run_success_writes_log_and_states(client, monkeypatch):
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3311-analysis.md")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     r = client.post(f"/tickets/{tid}/run", json={})
     assert r.status_code == 202
-    detail = client.get(f"/tickets/{tid}").json()  # TestClient corre el background task antes
+    detail = client.get(f"/tickets/{tid}").json()  # TestClient runs the background task before
     run = detail["runs"][0]
     assert run["status"] == "success" and run["phase"] == "analyze"
     assert "/ticket-agent:analyze 3311" in detail["log_tail"]
 
 
-def test_run_design_invoca_el_comando_plan(client, monkeypatch):
-    """La fase decide el comando: design NO puede lanzar el analyze."""
+def test_run_design_invokes_plan_command(client, monkeypatch):
+    """The phase decides the command: design must NOT be able to launch analyze."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
@@ -163,8 +163,8 @@ def test_run_design_invoca_el_comando_plan(client, monkeypatch):
     assert detail["runs"][0]["phase"] == "design"
 
 
-def test_huella_ok_deja_la_corrida_bien(client, monkeypatch):
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3323-analysis.md")
+def test_stamp_ok_leaves_run_successful(client, monkeypatch):
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
@@ -173,30 +173,31 @@ def test_huella_ok_deja_la_corrida_bien(client, monkeypatch):
     assert run["artifact_path"] == "docs/tickets/3323-analysis.md"
 
 
-def test_huella_parcial_la_corrida_vale_y_conserva_la_reserva(client, monkeypatch):
-    """La reserva de un `parcial` viaja EN el sello, tras ` · ` — no en el resumen. El
-    runner la separa de la ruta: `artifact_path` se queda limpio (lista blanca del
-    visor) y la reserva sale por `fases_de` como `motivo`, igual que ya hace `error`."""
+def test_stamp_partial_run_counts_and_keeps_reserve(client, monkeypatch):
+    """The reserve of a `parcial` travels WITHIN the stamp, after ` · ` — not in the
+    summary. The runner splits it from the path: `artifact_path` stays clean (the
+    viewer's whitelist) and the reserve comes out via `phases_for` as `motivo`, just
+    like `error` already does."""
     _use_fake_claude(
         monkeypatch,
-        huella="parcial — openspec/changes/3323-xpo · openspec validate no pasó",
+        stamp="parcial — openspec/changes/3323-xpo · openspec validate no pasó",
     )
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     detail = client.get(f"/tickets/{tid}").json()
     run = detail["runs"][0]
     assert run["status"] == "success" and run["artifact_state"] == "parcial"
-    # la ruta queda limpia, sin la reserva colgando detrás
+    # the path stays clean, without the reserve hanging off the back
     assert run["artifact_path"] == "openspec/changes/3323-xpo"
     fase = detail["fases"][1]
     assert fase["estado"] == "parcial"
     assert fase["motivo"] == "openspec validate no pasó"
 
 
-def test_huella_parcial_sin_reserva_sigue_funcionando(client, monkeypatch):
-    """Un `parcial` sin ` · ` no tiene reserva: tiene que seguir funcionando igual que
-    antes de este cambio, sin `motivo`."""
-    _use_fake_claude(monkeypatch, huella="parcial — openspec/changes/3323-xpo")
+def test_stamp_partial_without_reserve_still_works(client, monkeypatch):
+    """A `parcial` without ` · ` has no reserve: it has to keep working the same as
+    before this change, with no `motivo`."""
+    _use_fake_claude(monkeypatch, stamp="parcial — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     detail = client.get(f"/tickets/{tid}").json()
@@ -208,8 +209,8 @@ def test_huella_parcial_sin_reserva_sigue_funcionando(client, monkeypatch):
     assert "motivo" not in fase
 
 
-def test_huella_nada_deja_la_corrida_en_error(client, monkeypatch):
-    _use_fake_claude(monkeypatch, huella="nada — falta el análisis de la Fase 1")
+def test_stamp_nothing_leaves_run_in_error(client, monkeypatch):
+    _use_fake_claude(monkeypatch, stamp="nada — falta el análisis de la Fase 1")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
@@ -217,11 +218,11 @@ def test_huella_nada_deja_la_corrida_en_error(client, monkeypatch):
     assert "falta el análisis" in run["artifact_path"]
 
 
-def test_sin_sello_la_corrida_es_error_en_cualquier_fase(client, monkeypatch):
-    """`claude -p` sale con 0 aunque el agente se haya detenido sin hacer nada. Sin
-    sello no hay forma de distinguir eso de una corrida real. Antes analyze estaba
-    exento; ahora el contrato es de todas."""
-    _use_fake_claude(monkeypatch)  # sin FAKE_HUELLA
+def test_without_stamp_run_is_error_in_any_phase(client, monkeypatch):
+    """`claude -p` exits 0 even when the agent stopped without doing anything. Without
+    a stamp there's no way to tell that apart from a real run. Before, analyze was
+    exempt; now the contract applies to all of them."""
+    _use_fake_claude(monkeypatch)  # no FAKE_HUELLA
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
@@ -229,57 +230,58 @@ def test_sin_sello_la_corrida_es_error_en_cualquier_fase(client, monkeypatch):
     assert "no declaró huella" in run["artifact_path"]
 
 
-def test_el_sello_se_ancla_en_la_ultima_coincidencia(client, monkeypatch):
-    """El tool_result de cargar el SKILL.md deja los tres sellos en prosa dentro del
-    log, ANTES del cierre real. Comprobar presencia hace que la comprobación se
-    encuentre a sí misma y dé por buena una corrida que cerró con `nada`."""
-    _use_fake_claude(monkeypatch, skill_leak=True, huella="nada — falta el análisis")
+def test_stamp_anchors_on_last_match(client, monkeypatch):
+    """The tool_result of loading SKILL.md leaves the three stamps in prose inside the
+    log, BEFORE the real closing one. Checking for mere presence makes the check find
+    itself and wrongly approve a run that actually closed with `nada`."""
+    _use_fake_claude(monkeypatch, skill_leak=True, stamp="nada — falta el análisis")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
     assert run["status"] == "error" and run["artifact_state"] == "nada"
 
 
-def test_sello_legado_PLAN_se_sigue_entendiendo(client, monkeypatch):
-    """Los logs de las corridas del 3323 se escribieron con `PLAN:`. Traducirlos evita
-    que el historial existente aparezca como fallido el día que se mira el timeline."""
+def test_legacy_PLAN_stamp_still_understood(client, monkeypatch):
+    """The 3323 run logs were written with `PLAN:`. Translating them keeps existing
+    history from showing up as failed the day the timeline is looked at."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     import app
     log = Path(client.get(f"/tickets/{tid}").json()["runs"][0]["log_path"])
     log.write_text("bla\nPLAN: validado — todo bien\n", encoding="utf-8")
-    assert app.leer_huella(log) == ("ok", "todo bien")
+    assert app.read_stamp(log) == ("ok", "todo bien")
     log.write_text("PLAN: sin-validar — falló\n", encoding="utf-8")
-    assert app.leer_huella(log)[0] == "parcial"
+    assert app.read_stamp(log)[0] == "parcial"
     log.write_text("PLAN: no-escrito — sin análisis\n", encoding="utf-8")
-    assert app.leer_huella(log)[0] == "nada"
+    assert app.read_stamp(log)[0] == "nada"
 
 
-def test_leer_huella_con_la_forma_real_del_stream_json(tmp_path):
-    """El log real de `claude -p --output-format stream-json` no es una línea plana:
-    el sello viaja anidado en `message.content[].text`, seguido en la misma línea por
-    `stop_reason`, `usage`, `session_id`, `uuid` y más. Con `(.+)` voraz, `leer_huella`
-    devolvía la ruta con toda esa cola pegada detrás — justo lo que la Fase de guardias
-    (Tarea 4) usaría como ruta servible."""
+def test_read_stamp_with_real_stream_json_shape(tmp_path):
+    """The real log from `claude -p --output-format stream-json` is not a flat line:
+    the stamp travels nested in `message.content[].text`, followed on the same line by
+    `stop_reason`, `usage`, `session_id`, `uuid` and more. With a greedy `(.+)`,
+    `read_stamp` used to return the path with all that trailer stuck behind it — exactly
+    what the guards phase (Task 4) would use as the servable path."""
     import app
-    linea = (
+    line = (
         '{"type":"assistant","message":{"content":[{"type":"text",'
         '"text":"resumen. HUELLA: ok — docs/tickets/3323-analysis.md"}],'
         '"stop_reason":null},"session_id":"sess-1","uuid":"uuid-1",'
         '"timestamp":"2026-08-10T00:00:00Z","request_id":"req_1"}\n'
     )
     log = tmp_path / "run.log"
-    log.write_text(linea, encoding="utf-8")
-    assert app.leer_huella(log) == ("ok", "docs/tickets/3323-analysis.md")
+    log.write_text(line, encoding="utf-8")
+    assert app.read_stamp(log) == ("ok", "docs/tickets/3323-analysis.md")
 
 
-def test_current_phase_ya_no_existe(tmp_path, monkeypatch):
-    """Antes este test corría sobre una BD recién creada por el fixture `client`, cuyo
-    `CREATE TABLE` nunca incluyó `current_phase`: pasaba sin ejecutar jamás el
-    `ALTER TABLE ... DROP COLUMN` que decía proteger — placebo puro. Aquí se arma a
-    mano una BD con el esquema VIEJO (con `current_phase`, sin `artifact_state` ni
-    `artifact_path`) y se deja que `init_db` migre de verdad."""
+def test_current_phase_no_longer_exists(tmp_path, monkeypatch):
+    """Before, this test ran against a DB freshly created by the `client` fixture,
+    whose `CREATE TABLE` never included `current_phase`: it passed without ever
+    running the `ALTER TABLE ... DROP COLUMN` it claimed to protect — pure placebo.
+    Here a DB with the OLD schema is built by hand (with `current_phase`, without
+    `artifact_state` or `artifact_path`) and `init_db` is left to migrate it for
+    real."""
     import sqlite3 as sq
 
     db_path = tmp_path / "vieja.db"
@@ -323,8 +325,9 @@ def test_current_phase_ya_no_existe(tmp_path, monkeypatch):
     assert {"artifact_state", "artifact_path", "artifact_note"} <= cols_runs
 
 
-def test_fase_declarada_pero_no_ejecutable_da_400(client, monkeypatch):
-    """guards está en PHASES pero no existe: se rechaza sin lanzar subproceso."""
+def test_declared_but_unlaunchable_phase_gives_400(client, monkeypatch):
+    """guards is in PHASES but not launchable: it's rejected without spawning a
+    subprocess."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     r = client.post(f"/tickets/{tid}/run", json={"phase": "guards"})
@@ -332,8 +335,9 @@ def test_fase_declarada_pero_no_ejecutable_da_400(client, monkeypatch):
     assert client.get(f"/tickets/{tid}").json()["runs"] == []
 
 
-def test_run_sin_fase_sigue_siendo_analyze(client, monkeypatch):
-    """Compatibilidad: quien ya llamaba sin fase no se entera del cambio."""
+def test_run_without_phase_defaults_to_analyze(client, monkeypatch):
+    """Compatibility: whoever already called without a phase doesn't notice the
+    change."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
@@ -342,34 +346,34 @@ def test_run_sin_fase_sigue_siendo_analyze(client, monkeypatch):
     assert "/ticket-agent:analyze 3311" in detail["log_tail"]
 
 
-def test_bash_va_acotado_a_openspec(client, monkeypatch):
-    """La Fase 2 necesita invocar `@fission-ai/openspec`; nada más. Bash suelto sería
-    otra cosa.
+def test_bash_is_scoped_to_openspec(client, monkeypatch):
+    """Phase 2 needs to invoke `@fission-ai/openspec`; nothing else. A bare Bash would
+    be a different thing.
 
-    Se comprueba sobre los argumentos REALES del subproceso, no sobre una subcadena
-    del log: `assert " Bash " not in log` buscaba "Bash" rodeado de espacios por los
-    dos lados, y un "Bash" pelado al FINAL de la lista de `--allowedTools` queda
-    seguido de un salto de línea, no de un espacio — la comprobación no lo veía ahí."""
+    Checked against the REAL subprocess arguments, not a substring of the log:
+    `assert " Bash " not in log` looked for "Bash" surrounded by spaces on both
+    sides, and a bare "Bash" at the END of the `--allowedTools` list is followed by a
+    newline, not a space — the check didn't see it there."""
     _use_fake_claude(monkeypatch)
     import asyncio
 
-    capturado = {}
+    captured = {}
     original = asyncio.create_subprocess_exec
 
-    async def espia(*args, **kwargs):
-        capturado["argv"] = args
+    async def spy(*args, **kwargs):
+        captured["argv"] = args
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", espia)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in capturado["argv"]
-    assert "Bash" not in capturado["argv"]       # nunca Bash a secas, como argumento exacto
+    assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in captured["argv"]
+    assert "Bash" not in captured["argv"]       # never a bare Bash, as an exact argument
 
 
-def test_bash_incluye_las_dos_formas_de_invocar_openspec_en_design(client, monkeypatch):
-    """El especificador tiene que calzar literalmente con el principio del comando:
-    hacen falta las dos formas (`npx --yes ...@latest` y `npx ...` a secas)."""
+def test_bash_includes_both_ways_to_invoke_openspec_in_design(client, monkeypatch):
+    """The specifier has to match literally with the start of the command: both forms
+    are needed (`npx --yes ...@latest` and bare `npx ...`)."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
@@ -378,148 +382,214 @@ def test_bash_incluye_las_dos_formas_de_invocar_openspec_en_design(client, monke
     assert "Bash(npx @fission-ai/openspec:*)" in log
 
 
-def _espiar_argv(monkeypatch):
-    """Sobre los argumentos REALES del subproceso, no sobre una subcadena del log."""
+def _spy_argv(monkeypatch):
+    """Against the REAL subprocess arguments, not a substring of the log."""
     import asyncio
-    capturado = {}
+    captured = {}
     original = asyncio.create_subprocess_exec
 
-    async def espia(*args, **kwargs):
-        capturado["argv"] = args
+    async def spy(*args, **kwargs):
+        captured["argv"] = args
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", espia)
-    return capturado
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    return captured
 
 
-def test_implement_lleva_bash_pelado_y_settings(client, monkeypatch, tmp_path):
-    """El hook no vale por estar mencionado, vale por su forma: se parsea el JSON de
-    `--settings` y se afirma sobre su estructura.
+def test_implement_carries_bare_bash_and_settings(client, monkeypatch, tmp_path):
+    """The hook isn't valid because it's mentioned, it's valid because of its shape:
+    the `--settings` JSON is parsed and asserted on its structure.
 
-    Buscar la subcadena `deny_push.py` en el argumento dejaba pasar cuatro mutaciones
-    que anulan el hook por completo, verificadas una a una: `PreToolUse`→`PostToolUse`
-    (correría DESPUÉS del push, con el `exit 2` ya sin nada que impedir), otro
-    `matcher` (no se dispararía con Bash), otro `type` (Claude no lo ejecuta) y una
-    ruta de script que no existe en disco."""
+    Looking for the substring `deny_push.py` in the argument let four mutations
+    through that neuter the hook completely, verified one by one: `PreToolUse`→
+    `PostToolUse` (it would run AFTER the push, with the `exit 2` already having
+    nothing left to stop), a different `matcher` (it wouldn't fire on Bash), a
+    different `type` (Claude doesn't execute it), and a script path that doesn't
+    exist on disk."""
     import app
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
     argv = cap["argv"]
-    assert "Bash" in argv                      # pelado, no un especificador
+    assert "Bash" in argv                      # bare, not a specifier
     assert "--settings" in argv
 
     cfg = json.loads(argv[argv.index("--settings") + 1])
-    # ANTES del push, o no es una contención: es una crónica.
+    # BEFORE the push, or it isn't a containment: it's a chronicle.
     assert list(cfg["hooks"]) == ["PreToolUse"]
-    [entrada] = cfg["hooks"]["PreToolUse"]
-    assert entrada["matcher"] == "Bash"        # la única tool que puede empujar nada
-    [gancho] = entrada["hooks"]
-    assert gancho["type"] == "command"
-    # El comando es `"<python>" "<script>"`: la última cadena entrecomillada es el hook,
-    # y tiene que ser un archivo que exista de verdad — un `--settings` que apunte a un
-    # script inexistente es un hook que no corre.
-    ruta = Path(gancho["command"].split('"')[-2])
-    assert ruta.name == "deny_push.py" and ruta.is_file()
+    [entry] = cfg["hooks"]["PreToolUse"]
+    assert entry["matcher"] == "Bash"          # the only tool that could push anything
+    [hook] = entry["hooks"]
+    assert hook["type"] == "command"
+    # The command is `"<python>" "<script>"`: the last quoted string is the hook, and
+    # it has to be a file that really exists — a `--settings` pointing at a script
+    # that doesn't exist is a hook that never runs.
+    hook_path = Path(hook["command"].split('"')[-2])
+    assert hook_path.name == "deny_push.py" and hook_path.is_file()
 
 
-def test_analyze_no_lleva_settings_ni_bash(client, monkeypatch):
-    """Que la lista no vuelva a viajar fija para todas las fases: fue justo lo que
-    hizo que la Fase 1, declarada de solo lectura, acabara ejecutando shell."""
+def test_models_default_empty(client):
+    """With nothing configured, every launchable phase comes out empty: the CLI
+    resolves the model from the destination repo, which is how it worked before this
+    existed."""
+    m = client.get("/modelos").json()
+    assert set(m) == {"analyze", "design", "implement"}
+    assert all(v == {"model": "", "effort": ""} for v in m.values())
+
+
+def test_model_and_effort_per_phase_reach_argv(client, monkeypatch):
+    """What's configured in Settings has to show up in the subprocess argv; a phase
+    left unconfigured carries no flags and keeps the repo's default."""
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    client.put("/modelos", json={"analyze": {"model": "sonnet", "effort": "low"}})
+    cap = _spy_argv(monkeypatch)
+
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    argv = cap["argv"]
+    assert argv[argv.index("--model") + 1] == "sonnet"
+    assert argv[argv.index("--effort") + 1] == "low"
+
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    assert "--model" not in cap["argv"] and "--effort" not in cap["argv"]
+
+
+def test_models_are_read_at_launch_not_at_startup(client, monkeypatch):
+    """Changing the model in Settings affects the next run without restarting the
+    backend — which on Windows is exactly what can't be done live."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "--model" not in cap["argv"]
+
+    client.put("/modelos", json={"analyze": {"model": "opus", "effort": ""}})
+    client.post(f"/tickets/{tid}/run", json={})
+    argv = cap["argv"]
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert "--effort" not in argv       # vacío = no se pasa la bandera
+
+
+@pytest.mark.parametrize("payload", [
+    {"guards": {"model": "opus"}},           # fase declarada pero no lanzable
+    {"analyze": {"model": "--dangerously"}},  # se colaría como otra bandera del CLI
+    {"analyze": {"model": "opus 5"}},
+    {"analyze": {"effort": "altísimo"}},
+])
+def test_models_reject_garbage(client, payload):
+    assert client.put("/modelos", json=payload).status_code == 400
+
+
+def test_models_do_not_save_partially(client):
+    """Validates everything before writing anything: if the second phase is invalid,
+    the first one doesn't get saved either."""
+    r = client.put("/modelos", json={"analyze": {"model": "opus"},
+                                     "implement": {"effort": "turbo"}})
+    assert r.status_code == 400
+    assert client.get("/modelos").json()["analyze"]["model"] == ""
+
+
+def test_analyze_carries_no_settings_or_bash(client, monkeypatch):
+    """The list must not go back to traveling fixed for all phases: that's exactly
+    what made Phase 1, declared read-only, end up running shell."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     assert "--settings" not in cap["argv"]
     assert "Bash" not in cap["argv"]
 
 
-def _prompt_de(cap):
-    """El `-p` real del subproceso, que es lo único que el agente llega a leer."""
+def _prompt_from(cap):
+    """The real `-p` of the subprocess, which is the only thing the agent gets to
+    read."""
     argv = cap["argv"]
     return argv[argv.index("-p") + 1]
 
 
-def test_prompt_de_implement_declara_escribibles_los_repos_extra(client, monkeypatch, tmp_path):
-    """Decisión 4 del diseño: en `implement` TODO repo montado del ticket es escribible.
+def test_implement_prompt_declares_extra_repos_writable(client, monkeypatch, tmp_path):
+    """Design decision 4: in `implement` EVERY mounted repo of the ticket is writable.
 
-    No es un matiz de redacción: la skill `change-implementation` (sección 3) manda al
-    agente obedecer al prompt cuando el mapa del plan y el prompt difieren, así que un
-    prompt que dice "legibles / se escribe en el principal" es la instrucción
-    equivocada con prioridad máxima — y el 3320 tiene todo su código en un `extra_dir`.
+    This isn't a wording nuance: the `change-implementation` skill (section 3) tells
+    the agent to obey the prompt when the plan's map and the prompt differ, so a
+    prompt that says "readable / writes go to the primary" is the wrong instruction
+    with maximum priority — and 3320 has all its code in an `extra_dir`.
     """
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
-    prompt = _prompt_de(cap)
-    assert "backend-repo" in prompt            # el extra se sigue nombrando
-    assert "escribibles" in prompt
-    assert "legibles" not in prompt
-    assert "se sigue escribiendo en el principal" not in prompt
+    prompt = _prompt_from(cap)
+    assert "backend-repo" in prompt            # the extra is still named
+    assert "writable" in prompt
+    assert "readable" not in prompt
+    assert "is still written in the main one" not in prompt
 
 
-def test_prompt_de_analyze_mantiene_los_repos_extra_como_legibles(client, monkeypatch):
-    """El otro lado de la ramificación. Un test que solo mirara `implement` pasaría
-    igual con el texto de escritura viajando en TODAS las fases — que es exactamente el
-    defecto simétrico: la Fase 1 es de solo lectura."""
+def test_analyze_prompt_keeps_extra_repos_readable(client, monkeypatch):
+    """The other side of the branch. A test that only looked at `implement` would pass
+    just the same with the writable text traveling in ALL phases — which is exactly
+    the symmetric defect: Phase 1 is read-only."""
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
-    prompt = _prompt_de(cap)
+    prompt = _prompt_from(cap)
     assert "backend-repo" in prompt
-    assert "legibles" in prompt
-    assert "el análisis se sigue escribiendo en el principal" in prompt
-    assert "escribibles" not in prompt
+    assert "readable" in prompt
+    assert "the analysis is still written in the main one" in prompt
+    assert "writable" not in prompt
 
 
-def test_ajuste_en_implement_no_manda_regenerar_el_archivo(client, monkeypatch, tmp_path):
-    """En `implement` no hay "el archivo" que regenerar: el entregable es el código, y
-    el único archivo que la fase reescribe es `tasks.md`, el registro de avance.
-    Mandarle regenerarlo es mandarle borrar lo que permite retomar la corrida."""
+def test_adjustment_in_implement_does_not_ask_to_regenerate_the_file(client, monkeypatch, tmp_path):
+    """In `implement` there's no "the file" to regenerate: the deliverable is the
+    code, and the only file the phase rewrites is `tasks.md`, the progress log.
+    Telling it to regenerate that is telling it to erase what lets the run be
+    resumed."""
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run",
                 json={"phase": "implement", "instructions": "usa el patrón del handler"})
-    prompt = _prompt_de(cap)
+    prompt = _prompt_from(cap)
     assert "usa el patrón del handler" in prompt
-    assert "regenera el archivo" not in prompt
+    assert "regenerate the file" not in prompt
     assert "tasks.md" in prompt
 
 
-def test_ajuste_en_design_sigue_mandando_regenerar_el_archivo(client, monkeypatch):
-    """El otro lado: donde el entregable SÍ es un archivo, re-correr es regenerarlo."""
+def test_adjustment_in_design_still_asks_to_regenerate_the_file(client, monkeypatch):
+    """The other side: where the deliverable IS a file, re-running means regenerating
+    it."""
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run",
                 json={"phase": "design", "instructions": "acota el alcance"})
-    prompt = _prompt_de(cap)
+    prompt = _prompt_from(cap)
     assert "acota el alcance" in prompt
-    assert "regenera el archivo" in prompt
+    assert "regenerate the file" in prompt
 
 
-def test_las_cuatro_tablas_incluyen_implement():
+def test_the_four_tables_include_implement():
     import app
-    for tabla in (app.PHASE_COMMANDS, app.PHASE_DONE,
+    for table in (app.PHASE_COMMANDS, app.PHASE_DONE,
                   app.PHASE_ALLOWED_TOOLS, app.PHASE_NOUN):
-        assert "implement" in tabla
+        assert "implement" in table
     assert app.PHASE_DONE["implement"] == "implemented"
 
 
-def test_bash_no_aparece_en_fase_analyze(client, monkeypatch):
-    """C1: la Fase 1 es de solo lectura. Antes del fix, Bash viajaba en TODAS las
-    corridas porque --allowedTools no miraba la fase; una corrida real de analyze
-    llegó a ejecutar `ls`, `find` y `git remote -v` en el repo de un cliente."""
+def test_bash_does_not_appear_in_analyze_phase(client, monkeypatch):
+    """C1: Phase 1 is read-only. Before the fix, Bash traveled in ALL runs because
+    --allowedTools didn't look at the phase; a real analyze run went as far as
+    running `ls`, `find` and `git remote -v` in a client's repo."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
@@ -527,18 +597,19 @@ def test_bash_no_aparece_en_fase_analyze(client, monkeypatch):
     assert "Bash" not in log
 
 
-def test_run_sobrevive_a_una_linea_gigante(client, monkeypatch):
-    """El stream-json pasa de 64 KiB en una sola línea cuando el agente escribe un
-    archivo grande. Leer por líneas reventaba ahí y marcaba `error` una corrida buena."""
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3322-analysis.md")
+def test_run_survives_a_giant_line(client, monkeypatch):
+    """The stream-json goes past 64 KiB in a single line when the agent writes a
+    large file. Reading line by line used to blow up there and marked a good run as
+    `error`."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3322-analysis.md")
     monkeypatch.setenv("FAKE_BIG", "1")
     tid = client.post("/tickets", json={"ado_id": 3322, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     detail = client.get(f"/tickets/{tid}").json()
     assert detail["runs"][0]["status"] == "success"
-    entero = Path(detail["runs"][0]["log_path"]).read_text(encoding="utf-8")
-    assert "ácido" * 20000 in entero          # llegó completa y sin partir un carácter
-    assert "�" not in entero             # ningún carácter roto entre trozos
+    whole = Path(detail["runs"][0]["log_path"]).read_text(encoding="utf-8")
+    assert "ácido" * 20000 in whole          # arrived whole, no character split
+    assert "�" not in whole              # no broken character between chunks
 
 
 def test_run_error_state(client, monkeypatch):
@@ -549,15 +620,15 @@ def test_run_error_state(client, monkeypatch):
     assert detail["runs"][0]["status"] == "error"
 
 
-def test_prompt_design_no_menciona_analisis(client, monkeypatch):
-    """I6: el entregable de una corrida design es el plan, no el análisis — decirle
-    "análisis" al agente ahí lo manda a re-trabajar el archivo equivocado."""
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+def test_design_prompt_does_not_mention_analysis(client, monkeypatch):
+    """I6: the deliverable of a design run is the plan, not the analysis — telling
+    the agent "the analysis" there sends it to rework the wrong file."""
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design", "instructions": "ajusta el alcance"})
     log = client.get(f"/tickets/{tid}").json()["log_tail"]
-    assert "análisis" not in log
-    assert "el plan" in log
+    assert "the analysis" not in log
+    assert "the plan" in log
 
 
 def test_rework_passes_instructions(client, monkeypatch):
@@ -570,7 +641,7 @@ def test_rework_passes_instructions(client, monkeypatch):
 
 
 def test_run_strips_api_key_so_subscription_is_used(client, monkeypatch):
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/11-analysis.md")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/11-analysis.md")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-no-debe-llegar")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tampoco")
     tid = client.post("/tickets", json={"ado_id": 11, "project": "Demo"}).json()["id"]
@@ -586,8 +657,8 @@ def test_runs_active(client):
     assert client.get("/runs/active").json() is None
 
     tid = client.post("/tickets", json={"ado_id": 3322, "project": "Demo"}).json()["id"]
-    # Se inserta la corrida a mano: con TestClient el background task termina antes de
-    # que vuelva la respuesta, así que no hay forma de observar una corrida "en vuelo".
+    # The run is inserted by hand: with TestClient the background task finishes before
+    # the response comes back, so there's no way to observe a run "in flight".
     conn = sq.connect(os.environ["ORCH_DB"])
     conn.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'analyze','running')", (tid,))
     conn.commit()
@@ -597,19 +668,19 @@ def test_runs_active(client):
     assert a["ado_id"] == 3322 and a["project"] == "Demo" and a["ticket_id"] == tid
 
 
-def test_run_pasa_allowed_tools_y_add_dir(client, monkeypatch):
+def test_run_passes_allowed_tools_and_add_dir(client, monkeypatch):
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     log = client.get(f"/tickets/{tid}").json()["log_tail"]
-    # Sin --allowedTools, en headless las tools del MCP se auto-deniegan y el
-    # agente se queda sin poder leer el work item.
+    # Without --allowedTools, in headless mode the MCP tools auto-deny and the agent
+    # is left unable to read the work item.
     assert "--allowedTools mcp__azure-devops" in log
-    # Los repos hermanos del proyecto viajan como --add-dir...
+    # The project's sibling repos travel as --add-dir...
     assert "--add-dir" in log and "backend-repo" in log
-    # ...y además se nombran en el prompt con su etiqueta: montarlos no basta para
-    # que el agente los mire (lo comprobamos con Tenant en la corrida del 3322).
-    assert "Repos adicionales montados" in log and "— backend" in log
+    # ...and are also named in the prompt with their label: mounting them isn't
+    # enough for the agent to look at them (verified with Tenant in the 3322 run).
+    assert "Extra repos mounted" in log and "— backend" in log
 
 
 def test_run_conflict_when_active(client, monkeypatch):
@@ -624,24 +695,24 @@ def test_run_conflict_when_active(client, monkeypatch):
     assert client.post(f"/tickets/{tid}/run", json={}).status_code == 409
 
 
-def test_fases_sin_corridas(client):
+def test_phases_without_runs(client):
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
-    fases = client.get(f"/tickets/{tid}").json()["fases"]
-    # `test` no está: las pruebas se escriben dentro de `implement`, no en una fase aparte.
-    assert [f["fase"] for f in fases] == ["analyze", "design", "implement", "guards", "pr"]
-    assert fases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
+    phases = client.get(f"/tickets/{tid}").json()["fases"]
+    # `test` isn't there: tests are written inside `implement`, not in a phase of their own.
+    assert [f["fase"] for f in phases] == ["analyze", "design", "implement", "guards", "pr"]
+    assert phases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
-    assert fases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
+    assert phases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
-    # una fase no ejecutable no informa estado: no hay nada que informar
-    assert fases[3] == {"fase": "guards", "disponible": False}
+    # a non-launchable phase reports no state: there's nothing to report
+    assert phases[3] == {"fase": "guards", "disponible": False}
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 
-def test_fases_con_una_corrida_por_fase(client, monkeypatch, tmp_path):
+def test_phases_with_one_run_each(client, monkeypatch, tmp_path):
     (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
     (tmp_path / "repo" / "docs" / "tickets" / "3323-analysis.md").write_text("x" * 500)
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3323-analysis.md")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     f = client.get(f"/tickets/{tid}").json()["fases"][0]
@@ -650,42 +721,42 @@ def test_fases_con_una_corrida_por_fase(client, monkeypatch, tmp_path):
                            "archivos": 1, "bytes": 500,
                            "nombres": ["3323-analysis.md"]}
     assert isinstance(f["duracion_s"], int)
-    # y el estado del ticket se pliega de ahí, sin leer ninguna columna
+    # and the ticket's status folds from that, without reading any column
     assert client.get("/tickets").json()[0]["status"] == "analyzed"
 
 
-def test_la_fase_toma_el_estado_de_su_corrida_mas_reciente(client, monkeypatch, tmp_path):
+def test_phase_takes_the_state_of_its_most_recent_run(client, monkeypatch, tmp_path):
     (tmp_path / "repo" / "a.md").write_text("uno")
-    _use_fake_claude(monkeypatch, huella="nada — se cayó")
+    _use_fake_claude(monkeypatch, stamp="nada — se cayó")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
-    _use_fake_claude(monkeypatch, huella="ok — a.md")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
     client.post(f"/tickets/{tid}/run", json={})
     f = client.get(f"/tickets/{tid}").json()["fases"][0]
     assert f["estado"] == "ok" and f["corridas"] == 2 and f["fallidas"] == 1
 
 
-def test_una_recorrida_del_analisis_no_borra_que_hay_plan(client, monkeypatch, tmp_path):
-    """El defecto que mata este diseño: `tickets.status` se sobrescribía y el plan
-    desaparecía del mundo al re-correr la Fase 1."""
+def test_a_rerun_of_analysis_does_not_erase_that_a_plan_exists(client, monkeypatch, tmp_path):
+    """The defect that kills this design: `tickets.status` used to get overwritten
+    and the plan vanished from the world when Phase 1 was re-run."""
     (tmp_path / "repo" / "a.md").write_text("uno")
-    _use_fake_claude(monkeypatch, huella="ok — a.md")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    client.post(f"/tickets/{tid}/run", json={})          # re-corre el análisis
+    client.post(f"/tickets/{tid}/run", json={})          # re-runs the analysis
     d = client.get(f"/tickets/{tid}").json()
     assert [f["estado"] for f in d["fases"][:2]] == ["ok", "ok"]
     assert d["ticket"]["status"] == "planned"
     assert client.get("/tickets").json()[0]["status"] == "planned"
 
 
-def test_huella_de_un_directorio_cuenta_y_lista_sus_archivos(client, monkeypatch, tmp_path):
+def test_stamp_of_a_directory_counts_and_lists_its_files(client, monkeypatch, tmp_path):
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
     for n in ("proposal.md", "tasks.md", "design.md"):
         (d / n).write_text("abc")
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     h = client.get(f"/tickets/{tid}").json()["fases"][1]["huella"]
@@ -693,16 +764,16 @@ def test_huella_de_un_directorio_cuenta_y_lista_sus_archivos(client, monkeypatch
     assert sorted(h["nombres"]) == ["design.md", "proposal.md", "tasks.md"]
 
 
-def test_huella_de_un_directorio_baja_a_subdirectorios(client, monkeypatch, tmp_path):
-    """Un change de OpenSpec anida `specs/<capability>/spec.md`. Mirar solo los hijos
-    directos deja ese archivo fuera de la cuenta, de los bytes y de `nombres` — justo el
-    caso más común del entregable de `design`."""
+def test_stamp_of_a_directory_descends_into_subdirectories(client, monkeypatch, tmp_path):
+    """An OpenSpec change nests `specs/<capability>/spec.md`. Looking only at direct
+    children leaves that file out of the count, the bytes and `nombres` — exactly the
+    most common shape of `design`'s deliverable."""
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     (d / "specs" / "pagos").mkdir(parents=True)
     (d / "proposal.md").write_text("ab")
     (d / "tasks.md").write_text("cde")
     (d / "specs" / "pagos" / "spec.md").write_text("fghij")
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     h = client.get(f"/tickets/{tid}").json()["fases"][1]["huella"]
@@ -711,18 +782,18 @@ def test_huella_de_un_directorio_baja_a_subdirectorios(client, monkeypatch, tmp_
     assert "specs/pagos/spec.md" in h["nombres"]
 
 
-def test_ruta_declarada_que_no_existe_en_disco_no_se_oculta(client, monkeypatch):
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/fantasma.md")
+def test_declared_path_that_does_not_exist_on_disk_is_not_hidden(client, monkeypatch):
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/fantasma.md")
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     f = client.get(f"/tickets/{tid}").json()["fases"][0]
-    assert f["estado"] == "ok"                      # la fase conserva su estado
-    assert f["huella"]["existe"] is False           # y la huella se delata
+    assert f["estado"] == "ok"                      # the phase keeps its state
+    assert f["huella"]["existe"] is False           # and the stamp gives itself away
     assert f["huella"]["archivos"] == 0
 
 
-def test_fase_en_error_lleva_el_motivo_del_sello(client, monkeypatch):
-    _use_fake_claude(monkeypatch, huella="nada — falta el análisis de la Fase 1")
+def test_phase_in_error_carries_the_stamp_reason(client, monkeypatch):
+    _use_fake_claude(monkeypatch, stamp="nada — falta el análisis de la Fase 1")
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     f = client.get(f"/tickets/{tid}").json()["fases"][1]
@@ -730,11 +801,11 @@ def test_fase_en_error_lleva_el_motivo_del_sello(client, monkeypatch):
     assert "huella" not in f
 
 
-def test_corrida_historica_success_sin_huella_no_dice_que_fallo(client, monkeypatch):
-    """Las 5 corridas históricas de antes de este contrato salieron con status=success
-    (el CLI cerró en 0) y sin sello — no fallaron. `fases_de` las pinta como `error`
-    porque no puede confiar en un artefacto sin declarar, pero el motivo no puede decir
-    "falló" ahí: sería mentir sobre lo que de verdad pasó."""
+def test_historical_success_run_without_stamp_does_not_say_it_failed(client, monkeypatch):
+    """The 5 historical runs from before this contract came out with status=success
+    (the CLI exited 0) and no stamp — they didn't fail. `phases_for` paints them as
+    `error` because it can't trust an undeclared artifact, but the reason can't say
+    "falló" there: that would be lying about what really happened."""
     import os
     import sqlite3 as sq
 
@@ -755,38 +826,38 @@ def test_corrida_historica_success_sin_huella_no_dice_que_fallo(client, monkeypa
     assert "anterior a este contrato" in f["motivo"]
 
 
-TOPE = 512 * 1024
+CAP = 512 * 1024
 
 
-def _con_artefacto(client, monkeypatch, tmp_path, rel, contenido="hola"):
-    destino = tmp_path / "repo" / rel
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    destino.write_text(contenido, encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella=f"ok — {rel}")
+def _with_artifact(client, monkeypatch, tmp_path, rel, content="hola"):
+    destination = tmp_path / "repo" / rel
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(content, encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp=f"ok — {rel}")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     return tid
 
 
-def test_artefacto_sirve_lo_declarado(client, monkeypatch, tmp_path):
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/3323-analysis.md", "# Análisis")
+def test_artifact_serves_the_declared_path(client, monkeypatch, tmp_path):
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/tickets/3323-analysis.md", "# Análisis")
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "docs/tickets/3323-analysis.md"})
     assert r.status_code == 200
     assert r.json()["texto"] == "# Análisis" and r.json()["truncado"] is False
 
 
-def test_artefacto_sirve_lo_declarado_por_una_corrida_parcial_con_reserva(
+def test_artifact_serves_the_declared_path_from_a_partial_run_with_reserve(
     client, monkeypatch, tmp_path
 ):
-    """Regresión del hallazgo A: separar la reserva de la ruta en `artifact_path` no
-    puede ensuciar la lista blanca del visor — un `parcial` con reserva se sigue
-    sirviendo exactamente igual que uno sin ella."""
+    """Regression of finding A: splitting the reserve from the path in `artifact_path`
+    must not dirty the viewer's whitelist — a `parcial` with a reserve keeps being
+    served exactly like one without it."""
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
     (d / "proposal.md").write_text("propuesta", encoding="utf-8")
     _use_fake_claude(
         monkeypatch,
-        huella="parcial — openspec/changes/3323-xpo · openspec validate no pasó",
+        stamp="parcial — openspec/changes/3323-xpo · openspec validate no pasó",
     )
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
@@ -795,102 +866,103 @@ def test_artefacto_sirve_lo_declarado_por_una_corrida_parcial_con_reserva(
     assert r.status_code == 200 and r.json()["texto"] == "propuesta"
 
 
-def test_artefacto_sirve_un_hijo_directo_de_un_directorio_declarado(client, monkeypatch, tmp_path):
+def test_artifact_serves_a_direct_child_of_a_declared_directory(client, monkeypatch, tmp_path):
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
     (d / "tasks.md").write_text("- [ ] uno", encoding="utf-8")
     (d / "specs" / "pagos").mkdir(parents=True)
     (d / "specs" / "pagos" / "spec.md").write_text("# spec de pagos", encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     r = client.get(f"/tickets/{tid}/artefacto",
                    params={"ruta": "openspec/changes/3323-xpo/tasks.md"})
     assert r.status_code == 200 and r.json()["texto"] == "- [ ] uno"
-    # y un nieto: `stat_huella` cuenta recursivo, así que el visor tiene que admitirlo.
+    # and a grandchild: `stamp_stat` counts recursively, so the viewer has to allow it.
     r2 = client.get(f"/tickets/{tid}/artefacto",
                     params={"ruta": "openspec/changes/3323-xpo/specs/pagos/spec.md"})
     assert r2.status_code == 200 and r2.json()["texto"] == "# spec de pagos"
 
 
-def test_artefacto_rechaza_ruta_no_declarada(client, monkeypatch, tmp_path):
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+def test_artifact_rejects_undeclared_path(client, monkeypatch, tmp_path):
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/tickets/a.md")
     (tmp_path / "repo" / "secreto.env").write_text("TOKEN=xxx", encoding="utf-8")
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "secreto.env"})
     assert r.status_code == 400
 
 
-def test_artefacto_rechaza_travesia(client, monkeypatch, tmp_path):
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
-    for ruta in ("../../etc/passwd", "docs/../../fuera.md", "docs/tickets/../../../x"):
-        assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": ruta}).status_code == 400
+def test_artifact_rejects_traversal(client, monkeypatch, tmp_path):
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    for path_ in ("../../etc/passwd", "docs/../../fuera.md", "docs/tickets/../../../x"):
+        assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": path_}).status_code == 400
 
 
-def test_artefacto_ruta_con_byte_nulo_da_400_no_500(client, monkeypatch, tmp_path):
-    """`ruta` llega tal cual de la query string. Un byte nulo hace que `Path(...).resolve()`
-    reviente con `ValueError` sin capturar — eso era un 500 en vez del 400 que le
-    corresponde a una entrada inválida del cliente."""
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+def test_artifact_path_with_null_byte_gives_400_not_500(client, monkeypatch, tmp_path):
+    """`ruta` arrives as-is from the query string. A null byte makes
+    `Path(...).resolve()` blow up with an uncaught `ValueError` — that was a 500
+    instead of the 400 that an invalid client input deserves."""
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/tickets/a.md")
     import app
 
     try:
-        app.artefacto(tid, "docs\x00tickets/a.md")
-        assert False, "debía levantar HTTPException"
+        app.artifact(tid, "docs\x00tickets/a.md")
+        assert False, "should have raised HTTPException"
     except app.HTTPException as exc:
         assert exc.status_code == 400
 
 
-def test_artefacto_rechaza_ruta_absoluta_fuera_del_repo(client, monkeypatch, tmp_path):
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
-    fuera = tmp_path / "fuera.md"
-    fuera.write_text("no", encoding="utf-8")
+def test_artifact_rejects_absolute_path_outside_repo(client, monkeypatch, tmp_path):
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    outside = tmp_path / "fuera.md"
+    outside.write_text("no", encoding="utf-8")
     assert client.get(f"/tickets/{tid}/artefacto",
-                      params={"ruta": str(fuera)}).status_code == 400
+                      params={"ruta": str(outside)}).status_code == 400
 
 
-def test_artefacto_rechaza_un_directorio(client, monkeypatch, tmp_path):
+def test_artifact_rejects_a_directory(client, monkeypatch, tmp_path):
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
     (d / "tasks.md").write_text("x", encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     assert client.get(f"/tickets/{tid}/artefacto",
                       params={"ruta": "openspec/changes/3323-xpo"}).status_code == 400
 
 
-def test_artefacto_declarado_por_OTRO_ticket_no_vale(client, monkeypatch, tmp_path):
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/tickets/a.md")
-    otro = client.post("/tickets", json={"ado_id": 9999, "project": "Demo"}).json()["id"]
-    assert client.get(f"/tickets/{otro}/artefacto",
+def test_artifact_declared_by_another_ticket_is_invalid(client, monkeypatch, tmp_path):
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/tickets/a.md")
+    other = client.post("/tickets", json={"ado_id": 9999, "project": "Demo"}).json()["id"]
+    assert client.get(f"/tickets/{other}/artefacto",
                       params={"ruta": "docs/tickets/a.md"}).status_code == 400
 
 
-def test_artefacto_trunca_a_512kb(client, monkeypatch, tmp_path):
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "grande.md", "á" * TOPE)
+def test_artifact_truncates_at_512kb(client, monkeypatch, tmp_path):
+    tid = _with_artifact(client, monkeypatch, tmp_path, "grande.md", "á" * CAP)
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "grande.md"}).json()
-    assert r["truncado"] is True and len(r["texto"]) <= TOPE
-    assert "�" not in r["texto"]      # no se parte un carácter multibyte al cortar
+    assert r["truncado"] is True and len(r["texto"]) <= CAP
+    assert "�" not in r["texto"]      # no multibyte character split at the cut
 
 
-def test_artefacto_sirve_exactamente_512kb_sin_truncar(client, monkeypatch, tmp_path):
-    """Frontera del tope: ni un byte de más entra en el corte, así que un archivo de
-    exactamente TOPE bytes se sirve entero."""
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "justo.md", "x" * TOPE)
+def test_artifact_serves_exactly_512kb_without_truncating(client, monkeypatch, tmp_path):
+    """Boundary of the cap: not one byte extra enters the cut, so a file of exactly
+    CAP bytes is served whole."""
+    tid = _with_artifact(client, monkeypatch, tmp_path, "justo.md", "x" * CAP)
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "justo.md"}).json()
-    assert r["truncado"] is False and r["bytes"] == TOPE and len(r["texto"]) == TOPE
+    assert r["truncado"] is False and r["bytes"] == CAP and len(r["texto"]) == CAP
 
 
-def test_artefacto_rechaza_travesia_desde_directorio_declarado(client, monkeypatch, tmp_path):
-    """CRÍTICO de la ronda 1: contra un directorio declarado (no un archivo), `..` sin
-    normalizar dejaba fugarse a cualquier archivo del repo — verificado leyendo
-    `secreto.env` fuera del change declarado. La regla 1 tiene que resolver la ruta
-    ANTES de decidir si cae bajo lo declarado, igual que ya hacía la regla 2."""
+def test_artifact_rejects_traversal_from_declared_directory(client, monkeypatch, tmp_path):
+    """CRITICAL from round 1: against a declared directory (not a file), an
+    unnormalized `..` let it escape to any file in the repo — verified by reading
+    `secreto.env` outside the declared change. Rule 1 has to resolve the path
+    BEFORE deciding whether it falls under the declared path, just like rule 2
+    already did."""
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
     (d / "tasks.md").write_text("x", encoding="utf-8")
     (tmp_path / "repo" / "secreto.env").write_text("DB_PASSWORD=superclave", encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     posix = "openspec/changes/3323-xpo/../../../secreto.env"
@@ -899,10 +971,10 @@ def test_artefacto_rechaza_travesia_desde_directorio_declarado(client, monkeypat
     assert client.get(f"/tickets/{tid}/artefacto", params={"ruta": windows}).status_code == 400
 
 
-def test_artefacto_artifact_path_vacio_no_es_comodin(client, monkeypatch, tmp_path):
-    """IMPORTANTE de la ronda 1: un sello degenerado puede guardar `artifact_path=''`.
-    `PurePosixPath('')` vale `.`, que "pertenece" a los `.parents` de cualquier ruta
-    relativa — sin el filtro `!= ''` eso convierte la lista blanca en un comodín."""
+def test_artifact_empty_artifact_path_is_not_a_wildcard(client, monkeypatch, tmp_path):
+    """IMPORTANT from round 1: a degenerate stamp can save `artifact_path=''`.
+    `PurePosixPath('')` equals `.`, which "belongs" to the `.parents` of any relative
+    path — without the `!= ''` filter that turns the whitelist into a wildcard."""
     import os
     import sqlite3 as sq
 
@@ -919,30 +991,30 @@ def test_artefacto_artifact_path_vacio_no_es_comodin(client, monkeypatch, tmp_pa
                       params={"ruta": ".env"}).status_code == 400
 
 
-def test_artefacto_declarada_punto_no_es_comodin(client, monkeypatch, tmp_path):
-    """RONDA 2: al pasar la regla 1 a rutas resueltas, `artifact_path='.'` resuelve a
-    la raíz misma del repo, que sigue siendo un comodín aunque ya no sea `''`. La
-    propiedad correcta es "estrictamente DENTRO de una raíz", no "distinto de ''"."""
+def test_artifact_declared_dot_is_not_a_wildcard(client, monkeypatch, tmp_path):
+    """ROUND 2: once rule 1 moves to resolved paths, `artifact_path='.'` resolves to
+    the repo's own root, which is still a wildcard even though it's no longer `''`.
+    The correct property is "strictly INSIDE a root", not "different from ''"."""
     (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/a.md")
-    _use_fake_claude(monkeypatch, huella="ok — .")
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/a.md")
+    _use_fake_claude(monkeypatch, stamp="ok — .")
     client.post(f"/tickets/{tid}/run", json={})
     assert client.get(f"/tickets/{tid}/artefacto",
                       params={"ruta": ".env"}).status_code == 400
 
 
-def test_artefacto_declarada_doble_punto_no_es_comodin_y_alcanza_extra_dirs(
+def test_artifact_declared_dotdot_is_not_a_wildcard_and_reaches_extra_dirs(
     client, monkeypatch, tmp_path
 ):
-    """RONDA 2, el vector CRÍTICO verificado por el revisor: `artifact_path='..'`
-    resuelve por encima del repo, y desde ahí `..` en la regla 2 vuelve a entrar tanto
-    al repo principal como a los `extra_dirs` — cualquier archivo de cualquiera de los
-    dos quedaba servible. `HUELLA: ok — ..` es alcanzable de verdad desde el sello de
-    cierre de una skill degenerada."""
+    """ROUND 2, the CRITICAL vector verified by the reviewer: `artifact_path='..'`
+    resolves above the repo, and from there `..` in rule 2 goes back into both the
+    primary repo and the `extra_dirs` — any file in either one was servable.
+    `HUELLA: ok — ..` is genuinely reachable from a degenerate skill's closing
+    stamp."""
     (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
     (tmp_path / "backend-repo" / "secreto-hermano.env").write_text("OTRO=1", encoding="utf-8")
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/a.md")
-    _use_fake_claude(monkeypatch, huella="ok — ..")
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/a.md")
+    _use_fake_claude(monkeypatch, stamp="ok — ..")
     client.post(f"/tickets/{tid}/run", json={})
     assert client.get(f"/tickets/{tid}/artefacto",
                       params={"ruta": ".env"}).status_code == 400
@@ -950,22 +1022,22 @@ def test_artefacto_declarada_doble_punto_no_es_comodin_y_alcanza_extra_dirs(
                       params={"ruta": "../backend-repo/secreto-hermano.env"}).status_code == 400
 
 
-def test_artefacto_declarada_dir_punto_punto_no_es_comodin(client, monkeypatch, tmp_path):
-    """RONDA 2: `docs/..` resuelve a la raíz del repo igual que `.` — otra grafía para
-    el mismo comodín, y la razón de que el arreglo tenga que ir por propiedad y no por
-    lista de grafías prohibidas."""
+def test_artifact_declared_dir_dotdot_is_not_a_wildcard(client, monkeypatch, tmp_path):
+    """ROUND 2: `docs/..` resolves to the repo root just like `.` — another spelling
+    of the same wildcard, and the reason the fix has to go by property, not by a list
+    of forbidden spellings."""
     (tmp_path / "repo" / ".env").write_text("SECRETO=1", encoding="utf-8")
-    tid = _con_artefacto(client, monkeypatch, tmp_path, "docs/a.md")
-    _use_fake_claude(monkeypatch, huella="ok — docs/..")
+    tid = _with_artifact(client, monkeypatch, tmp_path, "docs/a.md")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/..")
     client.post(f"/tickets/{tid}/run", json={})
     assert client.get(f"/tickets/{tid}/artefacto",
                       params={"ruta": ".env"}).status_code == 400
 
 
-def test_artefacto_declarada_solo_espacios_no_es_comodin(client, monkeypatch, tmp_path):
-    """RONDA 2: `leer_huella` hace `.strip()` sobre el sello, así que un `artifact_path`
-    de solo espacios no puede llegar por el camino normal de una corrida — se simula
-    insertando la fila directo, igual que el caso de `''` de la ronda 1."""
+def test_artifact_declared_whitespace_only_is_not_a_wildcard(client, monkeypatch, tmp_path):
+    """ROUND 2: `read_stamp` does `.strip()` on the stamp, so a whitespace-only
+    `artifact_path` can't arrive through the normal run path — simulated by
+    inserting the row directly, just like the `''` case from round 1."""
     import os
     import sqlite3 as sq
 
@@ -982,57 +1054,57 @@ def test_artefacto_declarada_solo_espacios_no_es_comodin(client, monkeypatch, tm
                       params={"ruta": ".env"}).status_code == 400
 
 
-def test_artefacto_directorio_de_primer_nivel_sigue_sirviendo(client, monkeypatch, tmp_path):
-    """El filtro por propiedad de la ronda 2 no puede llevarse por delante el caso
-    normal: una declarada legítima que sea un directorio de primer nivel del repo
-    (aquí `docs`) sigue quedando estrictamente DENTRO de la raíz, así que sus hijos
-    se siguen sirviendo."""
+def test_artifact_top_level_directory_still_serves(client, monkeypatch, tmp_path):
+    """The property filter from round 2 can't sweep away the normal case: a
+    legitimate declared path that is a top-level directory of the repo (here `docs`)
+    still ends up strictly INSIDE the root, so its children keep being served."""
     (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
     (tmp_path / "repo" / "docs" / "tickets" / "a.md").write_text("hola", encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella="ok — docs")
+    _use_fake_claude(monkeypatch, stamp="ok — docs")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "docs/tickets/a.md"})
     assert r.status_code == 200 and r.json()["texto"] == "hola"
 
 
-def test_artefacto_travesia_que_vuelve_a_entrar_al_declarado_sirve(client, monkeypatch, tmp_path):
-    """Una ruta con `..` no es sospechosa por tener `..`: lo que importa es dónde
-    resuelve. Si vuelve a entrar al mismo directorio declarado, tiene que servirse
-    igual que la forma directa — la regla 1 compara sobre `real`, ya resuelta."""
+def test_artifact_traversal_that_reenters_declared_path_serves(client, monkeypatch, tmp_path):
+    """A path with `..` isn't suspicious for having `..`: what matters is where it
+    resolves. If it re-enters the same declared directory, it has to be served just
+    like the direct form — rule 1 compares against `real`, already resolved."""
     d = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
     d.mkdir(parents=True)
     (d / "tasks.md").write_text("- [ ] uno", encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3323-xpo")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    ruta = "openspec/changes/3323-xpo/../3323-xpo/tasks.md"
-    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": ruta})
+    path_ = "openspec/changes/3323-xpo/../3323-xpo/tasks.md"
+    r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": path_})
     assert r.status_code == 200 and r.json()["texto"] == "- [ ] uno"
 
 
-def test_artefacto_declarada_dentro_de_un_extra_dir_sirve_su_hijo(client, monkeypatch, tmp_path):
-    """Caso legítimo que no tenía cobertura propia: una declarada puede navegar fuera
-    del `repo_path` hasta un `extra_dir` (son ambos raíces válidas del ticket), y su
-    hijo se sigue sirviendo."""
+def test_artifact_declared_inside_an_extra_dir_serves_its_child(client, monkeypatch, tmp_path):
+    """A legitimate case with no coverage of its own: a declared path can navigate
+    outside the `repo_path` into an `extra_dir` (both are valid roots of the
+    ticket), and its child keeps being served."""
     (tmp_path / "backend-repo" / "report.md").write_text("informe", encoding="utf-8")
-    _use_fake_claude(monkeypatch, huella="ok — ../backend-repo/report.md")
+    _use_fake_claude(monkeypatch, stamp="ok — ../backend-repo/report.md")
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     r = client.get(f"/tickets/{tid}/artefacto", params={"ruta": "../backend-repo/report.md"})
     assert r.status_code == 200 and r.json()["texto"] == "informe"
 
 
-def test_artefacto_extra_dir_ancestro_del_principal_no_reactiva_el_comodin(
+def test_artifact_extra_dir_ancestor_of_primary_does_not_reactivate_wildcard(
     client, monkeypatch, tmp_path
 ):
-    """RONDA 3: `any(rd != r and r in rd.parents for r in raices)` (ronda 2) funde dos
-    preguntas — basta con que la declarada quede dentro de ALGUNA raíz, aunque SEA
-    otra raíz. En un monorepo donde el `extra_dir` es ANCESTRO del `repo_path`
-    (principal `Tenant/Web`, extra `Tenant`; `check_dirs` lo acepta porque solo mira
-    `is_dir`), `.` resuelve al repo principal, que está estrictamente DENTRO del
-    extra — y volvía a colar como huella, reactivando la vulnerabilidad original por
-    configuración con el mismo disparador alcanzable (`HUELLA: ok — .`)."""
+    """ROUND 3: `any(rd != r and r in rd.parents for r in raices)` (round 2) fuses
+    two questions — it's enough for the declared path to fall inside SOME root, even
+    if it IS another root. In a monorepo where the `extra_dir` is an ANCESTOR of the
+    `repo_path` (primary `Tenant/Web`, extra `Tenant`; `check_dirs` accepts it
+    because it only looks at `is_dir`), `.` resolves to the primary repo, which is
+    strictly INSIDE the extra — and it slipped back in as a stamp, reactivating the
+    original vulnerability through configuration with the same reachable trigger
+    (`HUELLA: ok — .`)."""
     (tmp_path / "Tenant" / "Web").mkdir(parents=True)
     (tmp_path / "Tenant" / "Api").mkdir(parents=True)
     (tmp_path / "Tenant" / "Web" / ".env").write_text("SECRETO=1", encoding="utf-8")
@@ -1046,8 +1118,8 @@ def test_artefacto_extra_dir_ancestro_del_principal_no_reactiva_el_comodin(
         ],
     })
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Anidado"}).json()["id"]
-    for huella in (".", "docs/..", ".."):
-        _use_fake_claude(monkeypatch, huella=f"ok — {huella}")
+    for stamp in (".", "docs/..", ".."):
+        _use_fake_claude(monkeypatch, stamp=f"ok — {stamp}")
         client.post(f"/tickets/{tid}/run", json={})
         assert client.get(f"/tickets/{tid}/artefacto",
                           params={"ruta": ".env"}).status_code == 400
@@ -1055,13 +1127,13 @@ def test_artefacto_extra_dir_ancestro_del_principal_no_reactiva_el_comodin(
                           params={"ruta": "../Api/appsettings.json"}).status_code == 400
 
 
-def test_artefacto_extra_dir_descendiente_del_principal_sigue_rechazando_comodin(
+def test_artifact_extra_dir_descendant_of_primary_still_rejects_wildcard(
     client, monkeypatch, tmp_path
 ):
-    """Dirección contraria del caso anidado: el `extra_dir` es DESCENDIENTE del
-    `repo_path` (p. ej. un `vendor/` montado como repo aparte dentro del principal).
-    `.` y `sub/..` siguen resolviendo a la raíz del repo principal, que sigue siendo
-    una raíz — se descartan igual que en el caso plano."""
+    """Opposite direction of the nested case: the `extra_dir` is a DESCENDANT of the
+    `repo_path` (e.g. a `vendor/` mounted as a separate repo inside the primary one).
+    `.` and `sub/..` still resolve to the primary repo's root, which is still a root
+    — discarded just like in the flat case."""
     (tmp_path / "repo2" / "vendor").mkdir(parents=True)
     (tmp_path / "repo2" / ".env").write_text("SECRETO=1", encoding="utf-8")
     client.post("/projects", json={
@@ -1072,8 +1144,8 @@ def test_artefacto_extra_dir_descendiente_del_principal_sigue_rechazando_comodin
         ],
     })
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Descendiente"}).json()["id"]
-    for huella in (".", "vendor/.."):
-        _use_fake_claude(monkeypatch, huella=f"ok — {huella}")
+    for stamp in (".", "vendor/.."):
+        _use_fake_claude(monkeypatch, stamp=f"ok — {stamp}")
         client.post(f"/tickets/{tid}/run", json={})
         assert client.get(f"/tickets/{tid}/artefacto",
                           params={"ruta": ".env"}).status_code == 400
@@ -1085,12 +1157,13 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 def _app(monkeypatch, tmp_path):
-    """`app` se importa DENTRO de cada test porque conftest lo saca de `sys.modules`
-    para que relea `ORCH_DB`. Estos tests no usan el fixture `client`, así que replican
-    a mano su aislamiento (ver `test_current_phase_ya_no_existe`, línea ~312): sin fijar
-    `ORCH_DB`/`ORCH_LOGS` y sin sacar `app` de `sys.modules`, un primer import real
-    dispara `init_db()` contra la BD y los logs reales del backend — y lo que acaba en
-    disco depende de qué test corrió primero."""
+    """`app` is imported INSIDE each test because conftest pulls it out of
+    `sys.modules` so it rereads `ORCH_DB`. These tests don't use the `client`
+    fixture, so they replicate its isolation by hand (see
+    `test_current_phase_no_longer_exists`, line ~312): without fixing
+    `ORCH_DB`/`ORCH_LOGS` and without pulling `app` out of `sys.modules`, a first
+    real import fires `init_db()` against the backend's real DB and logs — and what
+    ends up on disk depends on which test ran first."""
     monkeypatch.setenv("ORCH_DB", str(tmp_path / "orch_test.db"))
     monkeypatch.setenv("ORCH_LOGS", str(tmp_path / "logs"))
     sys.path.insert(0, str(BACKEND_DIR))
@@ -1101,7 +1174,7 @@ def _app(monkeypatch, tmp_path):
 
 
 def _git_init(path):
-    """Un repo con un commit: `git switch -c` necesita algo de donde colgar."""
+    """A repo with one commit: `git switch -c` needs something to hang off of."""
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
@@ -1110,156 +1183,157 @@ def _git_init(path):
     subprocess.run(["git", "commit", "-qm", "seed"], cwd=path, check=True)
 
 
-def test_guarda_bloquea_un_trackeado_modificado(tmp_path, monkeypatch):
-    """Sin esto, `git switch -c` arrastra tu trabajo sin commitear a la rama del
-    agente y el agente lo commitea como suyo.
+def test_guard_blocks_a_modified_tracked_file(tmp_path, monkeypatch):
+    """Without this, `git switch -c` drags your uncommitted work onto the agent's
+    branch and the agent commits it as its own.
 
-    El repo vive en un SUBdirectorio de `tmp_path`, nunca en `tmp_path` mismo: `_app`
-    apunta `ORCH_DB`/`ORCH_LOGS` a `tmp_path`, y si el repo fuera `tmp_path` esa BD
-    quedaría *dentro* del árbol bajo prueba — un `?? orch_test.db` parásito que
-    `git status --porcelain` vería siempre, sin importar la lógica que el test dice
-    ejercitar."""
+    The repo lives in a SUBdirectory of `tmp_path`, never in `tmp_path` itself: `_app`
+    points `ORCH_DB`/`ORCH_LOGS` at `tmp_path`, and if the repo were `tmp_path` that DB
+    would end up *inside* the tree under test — a parasitic `?? orch_test.db` that
+    `git status --porcelain` would always see, regardless of the logic the test claims
+    to exercise."""
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
     (repo / "seed.txt").write_text("v2\n", encoding="utf-8")
-    assert app.sucio(str(repo)) is True
+    assert app.is_dirty(str(repo)) is True
 
 
-def test_guarda_tolera_los_no_trackeados(tmp_path, monkeypatch):
-    """El caso que hace la fase lanzable: el repo principal SIEMPRE tiene
-    `openspec/` y `docs/tickets/` sin trackear, que son artefactos del agente.
-    Si este test falla, la fase implement es inlanzable para siempre."""
+def test_guard_tolerates_untracked_files(tmp_path, monkeypatch):
+    """The case that makes the phase launchable: the primary repo ALWAYS has
+    untracked `openspec/` and `docs/tickets/`, which are the agent's artifacts.
+    If this test fails, the implement phase is unlaunchable forever."""
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
     (repo / "openspec").mkdir()
     (repo / "openspec" / "changes.md").write_text("x", encoding="utf-8")
-    assert app.sucio(str(repo)) is False
+    assert app.is_dirty(str(repo)) is False
 
 
-def test_guarda_ve_lo_que_esta_en_stage(tmp_path, monkeypatch):
+def test_guard_sees_what_is_staged(tmp_path, monkeypatch):
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
     (repo / "nuevo.txt").write_text("x", encoding="utf-8")
     subprocess.run(["git", "add", "nuevo.txt"], cwd=repo, check=True)
-    assert app.sucio(str(repo)) is True
+    assert app.is_dirty(str(repo)) is True
 
 
-def test_check_limpios_nombra_los_repos_sucios(tmp_path, monkeypatch):
+def test_check_clean_names_the_dirty_repos(tmp_path, monkeypatch):
     app = _app(monkeypatch, tmp_path)
     from fastapi import HTTPException
-    limpio, sucio_ = tmp_path / "a", tmp_path / "b"
-    limpio.mkdir(); sucio_.mkdir()
-    _git_init(limpio); _git_init(sucio_)
-    (sucio_ / "seed.txt").write_text("v2\n", encoding="utf-8")
+    clean, dirty_ = tmp_path / "a", tmp_path / "b"
+    clean.mkdir(); dirty_.mkdir()
+    _git_init(clean); _git_init(dirty_)
+    (dirty_ / "seed.txt").write_text("v2\n", encoding="utf-8")
     with pytest.raises(HTTPException) as e:
-        app.check_limpios([str(limpio), str(sucio_)])
+        app.check_clean([str(clean), str(dirty_)])
     assert e.value.status_code == 409
-    assert str(sucio_) in e.value.detail
-    assert str(limpio) not in e.value.detail
+    assert str(dirty_) in e.value.detail
+    assert str(clean) not in e.value.detail
 
 
-def test_un_directorio_que_no_es_git_da_409(tmp_path, monkeypatch):
+def test_a_directory_that_is_not_git_gives_409(tmp_path, monkeypatch):
     app = _app(monkeypatch, tmp_path)
     from fastapi import HTTPException
     (tmp_path / "pelado").mkdir()
     with pytest.raises(HTTPException) as e:
-        app.check_limpios([str(tmp_path / "pelado")])
+        app.check_clean([str(tmp_path / "pelado")])
     assert e.value.status_code == 409
 
 
-def test_preparar_rama_la_crea_y_se_situa_en_ella(tmp_path, monkeypatch):
+def test_prepare_branch_creates_it_and_switches_to_it(tmp_path, monkeypatch):
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    nombre = app.preparar_rama(str(repo), 3320)
-    assert nombre == "ticket-agent/3320"
-    actual = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
+    name = app.prepare_branch(str(repo), 3320)
+    assert name == "ticket-agent/3320"
+    current = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
                             capture_output=True, text=True).stdout.strip()
-    assert actual == "ticket-agent/3320"
+    assert current == "ticket-agent/3320"
 
 
-def test_preparar_rama_dos_veces_no_falla(tmp_path, monkeypatch):
-    """Retomar una corrida parcial tiene que aterrizar en la MISMA rama. Con
-    `switch -c` a secas, la segunda llamada peta con 'already exists'."""
+def test_prepare_branch_twice_does_not_fail(tmp_path, monkeypatch):
+    """Resuming a partial run has to land on the SAME branch. With a bare
+    `switch -c`, the second call blows up with 'already exists'."""
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
-    app.preparar_rama(str(repo), 3320)
+    app.prepare_branch(str(repo), 3320)
     subprocess.run(["git", "switch", "-q", "-"], cwd=repo, check=True)
-    assert app.preparar_rama(str(repo), 3320) == "ticket-agent/3320"
-    actual = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
+    assert app.prepare_branch(str(repo), 3320) == "ticket-agent/3320"
+    current = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
                             capture_output=True, text=True).stdout.strip()
-    assert actual == "ticket-agent/3320"
-    ramas = subprocess.run(["git", "branch", "--list"], cwd=repo,
+    assert current == "ticket-agent/3320"
+    branches = subprocess.run(["git", "branch", "--list"], cwd=repo,
                            capture_output=True, text=True).stdout
-    assert ramas.count("ticket-agent/3320") == 1
+    assert branches.count("ticket-agent/3320") == 1
 
 
-def test_preparar_rama_no_confunde_un_tag_con_la_rama(tmp_path, monkeypatch):
-    """El `rev-parse` lleva `refs/heads/` a propósito. Sin ese prefijo —`rev-parse
-    --verify -q ticket-agent/3320`— un TAG homónimo resuelve igual de bien que una
-    rama, el runner cree que la rama ya existe y hace `git switch <tag>`, que git
-    rechaza ("a branch is expected"): la fase queda inlanzable con un 409.
+def test_prepare_branch_does_not_confuse_a_tag_with_the_branch(tmp_path, monkeypatch):
+    """The `rev-parse` carries `refs/heads/` on purpose. Without that prefix —
+    `rev-parse --verify -q ticket-agent/3320`— a same-named TAG resolves just as
+    well as a branch, the runner thinks the branch already exists and does
+    `git switch <tag>`, which git rejects ("a branch is expected"): the phase
+    becomes unlaunchable with a 409.
 
-    Una rama y un tag homónimos son lo único que distingue los dos casos; con solo
-    ramas de por medio, quitar `refs/heads/` deja la suite entera en verde."""
+    A same-named branch and tag are the only thing that tells the two cases apart;
+    with only branches around, removing `refs/heads/` leaves the whole suite green."""
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_init(repo)
     subprocess.run(["git", "tag", "ticket-agent/3320"], cwd=repo, check=True)
-    assert app.preparar_rama(str(repo), 3320) == "ticket-agent/3320"
-    actual = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
+    assert app.prepare_branch(str(repo), 3320) == "ticket-agent/3320"
+    current = subprocess.run(["git", "branch", "--show-current"], cwd=repo,
                             capture_output=True, text=True).stdout.strip()
-    assert actual == "ticket-agent/3320"
+    assert current == "ticket-agent/3320"
 
 
-def test_runs_tiene_columna_branch(client):
+def test_runs_has_branch_column(client):
     import app
     with app.db() as c:
         cols = [r[1] for r in c.execute("PRAGMA table_info(runs)")]
     assert "branch" in cols
 
 
-def test_un_directorio_que_no_existe_da_409(tmp_path, monkeypatch):
-    """No ya "no es un repo git": una ruta que ni siquiera está en disco. `sucio`
-    comprueba `Path.is_dir()` antes de invocar `git`, así que esto da el mismo 409
-    limpio sin necesidad de dejar que `subprocess.run` reviente con `cwd` inexistente."""
+def test_a_directory_that_does_not_exist_gives_409(tmp_path, monkeypatch):
+    """Not "not a git repo" anymore: a path that isn't even on disk. `is_dirty`
+    checks `Path.is_dir()` before invoking `git`, so this gives the same clean 409
+    without needing to let `subprocess.run` blow up with a nonexistent `cwd`."""
     app = _app(monkeypatch, tmp_path)
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as e:
-        app.sucio(str(tmp_path / "no_existe"))
+        app.is_dirty(str(tmp_path / "no_existe"))
     assert e.value.status_code == 409
 
 
-def test_git_ausente_no_se_disfraza_de_409(tmp_path, monkeypatch):
-    """Un `git` ausente del PATH es un entorno mal configurado, no "no es un
-    repositorio git": tiene que propagar, no convertirse en un 409 que miente sobre
-    la causa. Se simula la ausencia parcheando `subprocess.run` (scoped por
-    `monkeypatch`, revertido solo al terminar el test) en vez de tocar el PATH real
-    de la sesión."""
+def test_missing_git_is_not_disguised_as_409(tmp_path, monkeypatch):
+    """A `git` missing from PATH is a misconfigured environment, not "not a git
+    repository": it has to propagate, not turn into a 409 that lies about the
+    cause. The absence is simulated by patching `subprocess.run` (scoped by
+    `monkeypatch`, reverted only when the test ends) instead of touching the
+    session's real PATH."""
     app = _app(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    def _sin_git(*args, **kwargs):
+    def _no_git(*args, **kwargs):
         raise FileNotFoundError("git no encontrado")
 
-    monkeypatch.setattr(app.subprocess, "run", _sin_git)
+    monkeypatch.setattr(app.subprocess, "run", _no_git)
     with pytest.raises(FileNotFoundError):
-        app.sucio(str(repo))
+        app.is_dirty(str(repo))
 
 
-def test_implement_con_repo_sucio_da_409_y_no_encola(client, monkeypatch, tmp_path):
-    """El 409 llega ANTES de gastar un subproceso de 8 minutos."""
+def test_implement_with_dirty_repo_gives_409_and_does_not_queue(client, monkeypatch, tmp_path):
+    """The 409 arrives BEFORE spending an 8-minute subprocess."""
     import app
     _use_fake_claude(monkeypatch)
     for d in ("repo", "backend-repo"):
@@ -1271,8 +1345,8 @@ def test_implement_con_repo_sucio_da_409_y_no_encola(client, monkeypatch, tmp_pa
     assert client.get(f"/tickets/{tid}").json()["runs"] == []
 
 
-def test_implement_guarda_la_rama_en_la_corrida(client, monkeypatch, tmp_path):
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3320-x/tasks.md")
+def test_implement_saves_the_branch_on_the_run(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3320-x/tasks.md")
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
@@ -1281,22 +1355,22 @@ def test_implement_guarda_la_rama_en_la_corrida(client, monkeypatch, tmp_path):
     assert run["branch"] == "ticket-agent/3320"
 
 
-def test_analyze_no_exige_repo_limpio(client, monkeypatch):
-    """La guarda es de `implement`. Si se aplicara a todas, la Fase 1 dejaría de
-    poder correrse sobre un repo con trabajo a medias, que es lo normal."""
-    _use_fake_claude(monkeypatch, huella="ok — docs/tickets/3311-analysis.md")
+def test_analyze_does_not_require_clean_repo(client, monkeypatch):
+    """The guard belongs to `implement`. If it applied to all phases, Phase 1 would
+    no longer be able to run over a repo with half-finished work, which is normal."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
     r = client.post(f"/tickets/{tid}/run", json={})
     assert r.status_code == 202
 
 
-def test_sello_parcial_de_implement_conserva_la_reserva(client, monkeypatch, tmp_path):
-    """El contrato del sello ya existía, pero nadie lo había ejercitado con la fase
-    nueva ni con una reserva de esta forma. Falla si el parseo se ata a las rutas de
-    `docs/tickets/` o si la reserva se cuela dentro de `artifact_path`."""
+def test_implement_partial_stamp_keeps_the_reserve(client, monkeypatch, tmp_path):
+    """The stamp contract already existed, but nobody had exercised it with the new
+    phase or with a reserve of this shape. Fails if the parsing is tied to
+    `docs/tickets/` paths or if the reserve leaks into `artifact_path`."""
     _use_fake_claude(
         monkeypatch,
-        huella="parcial — openspec/changes/3320-x/tasks.md · 3/5 tareas, build en rojo")
+        stamp="parcial — openspec/changes/3320-x/tasks.md · 3/5 tareas, build en rojo")
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
@@ -1307,16 +1381,17 @@ def test_sello_parcial_de_implement_conserva_la_reserva(client, monkeypatch, tmp
     assert run["artifact_note"] == "3/5 tareas, build en rojo"
 
 
-def test_implement_con_segundo_repo_sucio_no_deja_el_primero_en_otra_rama(
+def test_implement_with_second_repo_dirty_does_not_leave_the_first_on_another_branch(
     client, monkeypatch, tmp_path
 ):
-    """El repo sucio es el SEGUNDO (`backend-repo`), con el principal limpio. Si la
-    guarda se entremezclara con la creación de rama repo a repo (comprobar y ramificar
-    uno, luego el siguiente), el principal ya habría pasado a `ticket-agent/<id>` antes
-    de que la comprobación del segundo repo fallara. `test_implement_con_repo_sucio_
-    da_409_y_no_encola` no distingue esto porque ensucia el repo principal — el primero
-    de la lista — así que una implementación entremezclada falla en la misma primera
-    iteración y ese test no la delata."""
+    """The dirty repo is the SECOND one (`backend-repo`), with the primary clean. If
+    the guard got entangled with branching repo by repo (check and branch one, then
+    the next), the primary would already have moved to `ticket-agent/<id>` before the
+    second repo's check failed.
+    `test_implement_with_dirty_repo_gives_409_and_does_not_queue` doesn't catch this
+    because it dirties the primary repo — the first one in the list — so an
+    interleaved implementation fails on that very first iteration and that test
+    doesn't expose it."""
     _use_fake_claude(monkeypatch)
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
@@ -1329,24 +1404,24 @@ def test_implement_con_segundo_repo_sucio_no_deja_el_primero_en_otra_rama(
     r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
     assert r.status_code == 409
     assert client.get(f"/tickets/{tid}").json()["runs"] == []
-    actual = subprocess.run(
+    current = subprocess.run(
         ["git", "branch", "--show-current"], cwd=tmp_path / "repo",
         capture_output=True, text=True,
     ).stdout.strip()
-    assert actual == original
+    assert current == original
 
 
-def test_implement_con_un_solo_repo_prepara_la_rama(client, monkeypatch, tmp_path):
-    """El camino sin repos extra (`extra_dirs` vacío) no se ejercitaba nunca desde
-    el endpoint: todos los tests anteriores de `implement` usan el proyecto `Demo`,
-    que siempre trae un repo extra."""
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3320-x/tasks.md")
-    solo = tmp_path / "solo-repo"
-    solo.mkdir()
-    _git_init(solo)
+def test_implement_with_a_single_repo_prepares_the_branch(client, monkeypatch, tmp_path):
+    """The path with no extra repos (empty `extra_dirs`) was never exercised from the
+    endpoint: every earlier `implement` test uses the `Demo` project, which always
+    brings an extra repo."""
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3320-x/tasks.md")
+    single_repo = tmp_path / "solo-repo"
+    single_repo.mkdir()
+    _git_init(single_repo)
     client.post("/projects", json={
         "name": "Solo", "org": "O", "project": "P",
-        "repos": [{"path": solo.as_posix(), "primary": True}],
+        "repos": [{"path": single_repo.as_posix(), "primary": True}],
     })
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Solo"}).json()["id"]
     r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
@@ -1355,80 +1430,82 @@ def test_implement_con_un_solo_repo_prepara_la_rama(client, monkeypatch, tmp_pat
     assert run["branch"] == "ticket-agent/3320"
 
 
-def _encolar_sin_correr(monkeypatch):
-    """Deja la corrida encolada sin ejecutarla y devuelve un `correr()` que la ejecuta
-    de verdad, cuando el test quiera.
+def _queue_without_running(monkeypatch):
+    """Leaves the run queued without executing it and returns a `run_now()` that
+    executes it for real, whenever the test wants.
 
-    `TestClient` corre las background tasks DENTRO del `client.post(...)`, así que sin
-    esto no hay hueco donde meterse entre "el POST pasó la guarda" y "la corrida
-    arranca" — que es justo el hueco que estos dos tests ejercitan. `run_ticket` resuelve
-    `execute_run` como global del módulo al ejecutarse, así que sustituirlo funciona."""
+    `TestClient` runs background tasks INSIDE `client.post(...)`, so without this
+    there's no gap to slip into between "the POST passed the guard" and "the run
+    starts" — which is exactly the gap these two tests exercise. `run_ticket`
+    resolves `execute_run` as a module global at call time, so substituting it
+    works."""
     import app
     import asyncio
-    pendientes = []
+    pending = []
     real = app.execute_run
-    monkeypatch.setattr(app, "execute_run", lambda *a: pendientes.append(a))
-    return lambda: asyncio.run(real(*pendientes[0]))
+    monkeypatch.setattr(app, "execute_run", lambda *a: pending.append(a))
+    return lambda: asyncio.run(real(*pending[0]))
 
 
-def test_un_arbol_que_se_ensucia_tras_el_post_no_llega_a_lanzar_el_subproceso(
+def test_a_tree_that_gets_dirty_after_the_post_never_launches_the_subprocess(
     client, monkeypatch, tmp_path
 ):
-    """La guarda del POST se evalúa al encolar, pero la corrida puede arrancar mucho
-    después, esperando el lock. Si el usuario edita archivos en ese hueco —o si otro
-    ticket sobre el MISMO repo físico se coló por la guarda, que filtra por `ticket_id`—
-    el agente arrancaría sobre un árbol que ya no es el validado y commitearía trabajo
-    ajeno como suyo. Falla si la comprobación tardía desaparece de `execute_run`: el
-    subproceso se lanzaría igual."""
+    """The POST's guard is evaluated when queuing, but the run can start much later,
+    waiting for the lock. If the user edits files in that gap — or if another ticket
+    over the SAME physical repo slipped past the guard, which filters by `ticket_id`—
+    the agent would start over a tree that's no longer the validated one and commit
+    someone else's work as its own. Fails if the late check disappears from
+    `execute_run`: the subprocess would launch anyway."""
     _use_fake_claude(monkeypatch)
-    cap = _espiar_argv(monkeypatch)
+    cap = _spy_argv(monkeypatch)
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
-    correr = _encolar_sin_correr(monkeypatch)
+    run_now = _queue_without_running(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
     r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
-    assert r.status_code == 202          # con el árbol limpio, el POST encola
+    assert r.status_code == 202          # with a clean tree, the POST queues
 
-    # El usuario edita mientras la corrida espera el lock.
+    # The user edits while the run waits for the lock.
     (tmp_path / "repo" / "seed.txt").write_text("v2\n", encoding="utf-8")
-    correr()
+    run_now()
 
-    assert "argv" not in cap             # nunca se lanzó el CLI
+    assert "argv" not in cap             # the CLI was never launched
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
     assert run["status"] == "error"
-    assert run["branch"] is None         # ni se cambió de rama
+    assert run["branch"] is None         # branch wasn't changed either
     assert (tmp_path / "repo").as_posix() in run["artifact_path"]
-    # y la fase lo cuenta con un motivo legible, no con "no declaró huella"
-    fase = [f for f in client.get(f"/tickets/{tid}").json()["fases"]
+    # and the phase reports it with a readable reason, not "no declaró huella"
+    phase = [f for f in client.get(f"/tickets/{tid}").json()["fases"]
             if f["fase"] == "implement"][0]
-    assert fase["estado"] == "error" and "sin commitear" in fase["motivo"]
-    # el repo sigue donde estaba: la corrida no lo movió antes de rendirse
-    actual = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / "repo",
+    assert phase["estado"] == "error" and "sin commitear" in phase["motivo"]
+    # the repo stays where it was: the run didn't move it before giving up
+    current = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / "repo",
                             capture_output=True, text=True).stdout.strip()
-    assert actual != "ticket-agent/3320"
+    assert current != "ticket-agent/3320"
 
 
-def test_la_rama_de_la_corrida_es_la_que_se_preparo_bajo_el_lock(
+def test_the_run_branch_is_the_one_prepared_under_the_lock(
     client, monkeypatch, tmp_path
 ):
-    """El mismo camino tardío, pero saliendo bien. La fila queda con la rama y el estado
-    correctos aunque el POST no haya preparado nada: falla si `execute_run` deja de
-    ramificar o deja de escribir `branch`, y también si la rama volviera a salir del
-    POST (aquí la corrida está encolada y el POST ya devolvió `branch=None`)."""
-    _use_fake_claude(monkeypatch, huella="ok — openspec/changes/3320-x/tasks.md")
+    """The same late path, but succeeding. The row ends up with the correct branch
+    and state even though the POST didn't prepare anything: fails if `execute_run`
+    stops branching or stops writing `branch`, and also if the branch went back to
+    coming out of the POST (here the run is queued and the POST already returned
+    `branch=None`)."""
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3320-x/tasks.md")
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
-    correr = _encolar_sin_correr(monkeypatch)
+    run_now = _queue_without_running(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
-    encolada = client.post(f"/tickets/{tid}/run", json={"phase": "implement"}).json()
-    assert encolada["branch"] is None    # el POST ya no ramifica
+    queued = client.post(f"/tickets/{tid}/run", json={"phase": "implement"}).json()
+    assert queued["branch"] is None      # the POST no longer branches
 
-    correr()
+    run_now()
 
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
     assert run["branch"] == "ticket-agent/3320"
     assert run["status"] == "success"
-    for d in ("repo", "backend-repo"):   # los DOS repos, no solo el principal
-        actual = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / d,
+    for d in ("repo", "backend-repo"):   # BOTH repos, not just the primary
+        current = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / d,
                                 capture_output=True, text=True).stdout.strip()
-        assert actual == "ticket-agent/3320"
+        assert current == "ticket-agent/3320"

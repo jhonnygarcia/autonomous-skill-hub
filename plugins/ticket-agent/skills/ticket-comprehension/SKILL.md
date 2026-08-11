@@ -1,162 +1,174 @@
 ---
 name: ticket-comprehension
-description: Comprende un ticket de Azure DevOps a cabalidad - lee el work item con relaciones, comentarios, adjuntos y wiki, absorbe las reglas del proyecto anfitrión y produce un análisis estructurado en docs/tickets/. Usar cuando se pida analizar, comprender o investigar un ticket/work item de Azure DevOps.
+description: Fully understands an Azure DevOps ticket - reads the work item with its relations, comments, attachments and wiki, absorbs the host project's rules, and produces a structured analysis in docs/tickets/. Use when asked to analyze, understand, or investigate an Azure DevOps ticket/work item.
 ---
 
-# Comprensión de tickets de Azure DevOps
+# Azure DevOps ticket comprehension
 
-Produce un análisis completo y fiel de un work item. Dos reglas de oro:
+Produces a complete, faithful analysis of a work item. Two golden rules:
 
-1. **Lo que no se pudo leer se reporta en "Información faltante"; jamás se rellena
-   con suposiciones.**
-2. **Toda cifra que no salga del work item cita su fuente** — `archivo:línea`, id de
-   commit, o el comando que la produce. Sin fuente verificada, no se escribe.
+1. **What couldn't be read is reported under "Missing information"; it is never
+   filled in with assumptions.**
+2. **Every number that doesn't come from the work item cites its source** —
+   `file:line`, a commit id, or the command that produced it. Without a verified
+   source, don't write it down.
 
-## 1. Configuración
+## 1. Configuration
 
-Lee `.claude/ticket-agent.json` del proyecto actual. Si no existe, detente y guía
-al usuario para crearlo (plantilla en el README del plugin) — no continúes sin él.
-Usa `project` para todas las consultas al MCP. Lee también `autonomy`.
+Read `.claude/ticket-agent.json` from the current project. If it doesn't exist,
+stop and guide the user to create it (template in the plugin's README) — do not
+continue without it. Use `project` for all MCP queries. Also read `autonomy`.
 
-## 2. Recolección (todo solo lectura)
+## 2. Collection (all read-only)
 
-Herramientas del MCP azure-devops. Prohibido usar cualquier herramienta `*_write`.
+Tools from the azure-devops MCP. **Never use any `*_write` tool.**
 
-1. **Work item**: `wit_work_item` action `get` con `expand: "All"` — campos,
-   descripción, criterios de aceptación, relaciones, adjuntos.
-2. **Comentarios**: `wit_work_item` action `list_comments`. Los comentarios
-   corrigen la descripción con frecuencia (alcance que entra o sale, cifras
-   revisadas): donde se contradigan, **gana el comentario más reciente** y el
-   análisis lo dice.
-3. **Relaciones — máximo 1 nivel**: del resultado anterior identifica padre, hijos
-   directos, related y PRs/commits vinculados. Delega la lectura a un subagente
-   (`Explore` o general-purpose) que devuelva POR CADA uno: id, título, tipo,
-   estado, tipo de relación y un resumen de 2-3 líneas de qué aporta al ticket
-   principal. No sigas relaciones de las relaciones. El límite de 1 nivel aplica
-   **solo a `relations`** — no excusa de leer lo que el ticket cita en su texto
-   (paso 6).
-4. **Adjuntos**: descárgalos con `wit_work_item_attachment`. Imágenes: descríbelas
-   mirando su contenido. Documentos: resume lo relevante al ticket. Ilegible o no
-   descargable → regístralo en "Información faltante" con la causa.
-5. **Wiki**: `search_wiki` con los términos clave del ticket (componentes, pantallas,
-   dominio). Máximo 5 búsquedas; incluye solo hallazgos relevantes.
-6. **Referencias citadas en el texto — LECTURA OBLIGATORIA.** Recorre la descripción
-   y los comentarios y extrae toda referencia explícita:
-   - **Work items citados por id** (p. ej. "ADO Bug #3271") → léelos con
-     `wit_work_item` action `get`. Que no estén en `relations` no los exime: son
-     una referencia, no una relación, y el límite del paso 3 no aplica.
-   - **Documentos del repo citados por ruta** (p. ej. `docs/quote-visibility-rules.md`)
-     → ábrelos y léelos.
+1. **Work item**: `wit_work_item` action `get` with `expand: "All"` — fields,
+   description, acceptance criteria, relations, attachments.
+2. **Comments**: `wit_work_item` action `list_comments`. Comments frequently
+   correct the description (scope that gets added or dropped, revised figures):
+   wherever a comment contradicts the description, **the most recent comment
+   wins**, and the
+   analysis says so.
+3. **Relations — 1 level maximum**: from the previous result, identify parent,
+   direct children, related items, and linked PRs/commits. Delegate the reading to
+   a subagent (`Explore` or general-purpose) that returns, FOR EACH ONE: id,
+   title, type, status, relation type, and a 2-3 line summary of what it
+   contributes to the main ticket. Don't follow relations of relations. The
+   1-level limit applies **only to `relations`** — it doesn't excuse skipping what
+   the ticket cites in its text (step 6).
+4. **Attachments**: download them with `wit_work_item_attachment`. Images:
+   describe them by looking at their content. Documents: summarize what's
+   relevant to the ticket. Unreadable or not downloadable → log it under "Missing
+   information" with the cause.
+5. **Wiki**: `search_wiki` with the ticket's key terms (components, screens,
+   domain). Maximum 5 searches; include only relevant findings.
+6. **References cited in the text — MANDATORY READING.** Go through the
+   description and comments and extract every explicit reference:
+   - **Work items cited by id** (e.g. "ADO Bug #3271") → read them with
+     `wit_work_item` action `get`. Not being in `relations` doesn't exempt them:
+     they're a reference, not a relation, and the step-3 limit doesn't apply.
+   - **Repo documents cited by path** (e.g. `docs/quote-visibility-rules.md`) →
+     open and read them.
 
-   No basta con listarlos como "aplicables": hay que leer el contenido. Solo van a
-   "Información faltante" si el intento de lectura **falló**, con la causa; nunca
-   por no haberlo intentado.
-7. **Reglas del proyecto anfitrión**: lee CLAUDE.md y `.claude/rules/*` si existen.
-   Claude Code carga los CLAUDE.md en cascada desde el directorio de trabajo hacia
-   arriba, así que puede haber reglas por encima de la raíz del repo — inclúyelas.
-   Estas reglas condicionan el análisis, no se reemplazan.
-8. **Código afectado**: subagente `Explore` con los archivos/componentes/clases que
-   el ticket menciona; devuelve rutas concretas y qué papel juega cada una. Si el
-   prompt te nombra **repos adicionales montados** (con su etiqueta: backend, app de
-   auth…), entran en el alcance de este paso: cuando el ticket apunte a comportamiento
-   que no vive en el repo principal, ábrelos en vez de declararlo "fuera de alcance".
-9. **Estado del trabajo ya empezado** (solo si lo hay): si el ticket está en curso,
-   puedes inspeccionar la rama, sus commits y los documentos de trabajo del repo.
-   Es material valioso, pero es **estado del repo, no contenido del ticket**: va en
-   su propia sección, y cada dato (número de commits, porcentajes de avance,
-   conteos de tests) se verifica con el comando o el `archivo:línea` que lo respalda
-   y se cita. No atribuyas a un documento un porcentaje que pertenece a una de sus
-   partes.
+   Listing them as "applicable" is not enough — the content has to be read. They
+   only go under "Missing information" if the reading attempt **failed**, with
+   the cause; never for not having been attempted.
+7. **Host project rules**: read CLAUDE.md and `.claude/rules/*` if they exist.
+   Claude Code loads CLAUDE.md files in cascade from the working directory
+   upward, so there may be rules above the repo root — include them. These rules
+   condition the analysis; they don't get replaced by it.
+8. **Affected code**: `Explore` subagent with the files/components/classes the
+   ticket mentions; it returns concrete paths and the role each one plays. If the
+   prompt names **additional mounted repos** (with their label: backend, auth
+   app…), they're in scope for this step: when the ticket points to behavior that
+   doesn't live in the main repo, open them instead of declaring that behavior
+   "out of scope".
+9. **State of work already started** (only if there is any): if the ticket is in
+   progress, you can inspect the branch, its commits, and the repo's working
+   documents. It's valuable material, but it's **repo state, not ticket content**:
+   it goes in its own section, and every figure (commit counts, progress
+   percentages, test counts) is verified against the command or the `file:line`
+   that backs it, and cited. Don't attribute to a document a percentage that
+   belongs to one of its parts.
 
-## 3. Análisis
+## 3. Analysis
 
-**Primer paso obligatorio de esta sección: crear el archivo.** Escribe
-`docs/tickets/<id>-analysis.md` (crea el directorio si falta) con EXACTAMENTE esta
-estructura. Presentar el análisis en el chat sin haber escrito el archivo es un
-fallo de la tarea, no una variante aceptable.
+**Mandatory first step of this section: create the file.** Write
+`docs/tickets/<id>-analysis.md` (create the directory if missing) with EXACTLY
+this structure. Presenting the analysis in chat without having written the file
+is a task failure, not an acceptable variant.
 
 ```markdown
-# Análisis del ticket <id>: <título>
+# Analysis of ticket <id>: <title>
 
-**Tipo/Estado:** ... · **Asignado:** ... · **Iteración:** ...
-**Analizado:** <fecha> por ticket-agent v0.5.2
+**Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
+**Analyzed:** <date> by ticket-agent v0.7.2
 
-## Qué pide
-(2-6 líneas fieles al ticket, sin interpretar de más)
+## What it asks for
+(2-6 lines, faithful to the ticket, without over-interpreting)
 
-## Criterios de aceptación
-### Explícitos
-(los escritos en el ticket, citados o parafraseados fielmente)
-### Implícitos
-(los que se deducen de la descripción/relaciones; marca cada uno como DEDUCIDO)
+## Acceptance criteria
+### Explicit
+(the ones written in the ticket, quoted or faithfully paraphrased)
+### Implicit
+(the ones deduced from the description/relations; mark each one as DEDUCED)
 
-## Ambigüedades y preguntas abiertas
-(todo lo que un implementador necesitaría preguntar antes de codificar)
+## Ambiguities and open questions
+(everything an implementer would need to ask before coding)
 
-## Contexto de relaciones
-(por cada relacionado: id, tipo de relación, resumen de qué aporta)
+## Relations context
+(for each related item: id, relation type, summary of what it contributes)
 
-## Comentarios
-(por cada comentario: fecha, autor y qué cambia respecto de la descripción;
-di explícitamente si corrige el alcance o alguna cifra. "Ninguno" si no hay)
+## Comments
+(for each comment: date, author, and what it changes relative to the
+description; state explicitly whether it corrects the scope or a figure.
+"None" if there are none)
 
-## Referencias citadas
-(por cada work item o documento citado en el texto: qué es y qué aporta,
-leído en el paso 2.6. "Ninguna" si no hay)
+## Cited references
+(for each work item or document cited in the text: what it is and what it
+contributes, read in step 2.6. "None" if there are none)
 
-## Adjuntos revisados
-(por cada uno: nombre, qué contiene, qué aporta)
+## Reviewed attachments
+(for each one: name, what it contains, what it contributes)
 
-## Reglas del proyecto aplicables
-(reglas de CLAUDE.md/.claude/rules/docs referenciados que aplican a ESTE ticket)
+## Applicable project rules
+(rules from CLAUDE.md/.claude/rules/referenced docs that apply to THIS ticket)
 
-## Código afectado
-(rutas concretas y papel de cada una)
+## Affected code
+(concrete paths and the role each one plays)
 
-## Estado del trabajo en el repo
-(solo si el ticket ya tiene trabajo empezado: rama, avance y bloqueos, con la
-fuente de cada cifra. Omite la sección entera si no hay trabajo empezado)
+## State of work in the repo
+(only if the ticket already has work started: branch, progress, and blockers,
+with the source of each figure. Omit the whole section if there's no work
+started)
 
-## Riesgos y dependencias
-(técnicos y de negocio detectados)
+## Risks and dependencies
+(technical and business, detected)
 
-## Información faltante
-(todo lo que no se pudo leer y por qué; vacío explícito si no faltó nada: "Nada")
+## Missing information
+(everything that couldn't be read and why; explicit empty state if nothing
+was missing: "None")
 ```
 
-## 4. Cierre según autonomía
+## 4. Closing based on autonomy
 
-- `supervised`: presenta un resumen del análisis al usuario con la ruta del archivo
-  y detente. No propongas implementación.
-- `autonomous`: presenta el mismo resumen y detente igual — el cierre de esta skill
-  es detenerse **en todos los casos**, sin excepción. La Fase 2 (`change-planning`)
-  no se encadena aquí: se lanza como una corrida propia del orquestador, nunca
-  dentro de la corrida de análisis.
-- Cualquier otro valor de `autonomy` se trata como `supervised` y se avisa al
-  usuario de que el valor no se reconoce.
+- `supervised`: present a summary of the analysis to the user with the file
+  path, and stop. Don't propose implementation.
+- `autonomous`: present the same summary and stop just the same — this skill's
+  closing is to stop **in all cases**, no exceptions. Phase 2 (`change-planning`)
+  is not chained here: it's launched as the orchestrator's own run, never inside
+  the analysis run.
+- Any other value of `autonomy` is treated as `supervised`, and the user is
+  warned that the value isn't recognized.
 
-**Regla obligatoria de cierre.** La última línea de tu resumen —sin nada después— tiene
-que ser exactamente este sello, seguido de la ruta del análisis relativa al repo
-principal — **siempre con `/` como separador, nunca `\`, aunque el repo esté en
-Windows**: el orquestador la usa tal cual para leer el archivo del disco y como lista
-blanca de su visor, y una barra invertida rompe la regex que la extrae del log:
+**Mandatory closing rule.** The last line of your summary —with nothing after
+it— has to be exactly this stamp, followed by the analysis path relative to the
+main repo — **always with `/` as the separator, never `\`, even if the repo is on
+Windows**: the orchestrator uses it as-is to read the file from disk and as an
+allowlist for its viewer, and a backslash breaks the regex that extracts it from
+the log:
 
-- `HUELLA: ok — docs/tickets/<id>-analysis.md` — el análisis está escrito y completo.
-- `HUELLA: parcial — docs/tickets/<id>-analysis.md · <reserva en una línea>` — está
-  escrito, pero con reservas (no pudiste leer el padre, faltan adjuntos, quedó
-  "Información faltante" con peso). La reserva va EN la línea del sello, tras la ruta,
-  separada por ` · ` (espacio, punto medio, espacio) — no en el resumen: es lo único
-  que el orquestador guarda y muestra junto a la huella. Ejemplo:
-  `HUELLA: parcial — docs/tickets/3323-analysis.md · quedó "Información faltante" con
-  el padre sin leer`.
-- `HUELLA: nada — <motivo>` — no se escribió el archivo. El motivo va detrás del guion.
+- `HUELLA: ok — docs/tickets/<id>-analysis.md` — the analysis is written and
+  complete.
+- `HUELLA: parcial — docs/tickets/<id>-analysis.md · <one-line caveat>` — it's
+  written, but with caveats (couldn't read the parent, missing attachments,
+  "Missing information" carries weight). The caveat goes ON the stamp line,
+  after the path, separated by ` · ` (space, middle dot, space) — not in the
+  summary: it's the only thing the orchestrator stores and shows alongside the
+  stamp. Example:
+  `HUELLA: parcial — docs/tickets/3323-analysis.md · left "Missing information"
+  with the parent unread`.
+- `HUELLA: nada — <reason>` — the file wasn't written. The reason goes after the
+  dash.
 
-El orquestador lee esta línea para decidir si la corrida vale: el código de salida del
-CLI no lo dice, porque sale en 0 aunque te hayas detenido sin escribir nada.
+The orchestrator reads this line to decide whether the run counts: the CLI's
+exit code doesn't say so, because it exits 0 even if you stopped without writing
+anything.
 
-## Manejo de errores
+## Error handling
 
-- Ticket inexistente o sin permisos → informa la causa exacta y detente.
-- MCP no conectado o `ADO_ORG` sin definir → indica los pasos del README del plugin.
-- Relación, referencia o adjunto inaccesible → anótalo en "Información faltante" con
-  la causa y continúa.
+- Nonexistent ticket or no permissions → report the exact cause and stop.
+- MCP not connected or `ADO_ORG` undefined → point to the plugin README's steps.
+- Inaccessible relation, reference, or attachment → note it under "Missing
+  information" with the cause and continue.

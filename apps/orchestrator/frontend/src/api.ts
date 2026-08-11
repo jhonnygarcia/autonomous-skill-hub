@@ -6,33 +6,38 @@ export type Run = {
   id: number; phase: string; instructions: string | null
   status: string; started_at: string | null; finished_at: string | null
   artifact_state: string | null; artifact_path: string | null
-  // Solo la fase que prepara rama (`implement`) la deja; el resto de corridas
-  // llega en `null`, que es el caso normal, no una ausencia de dato.
+  // Only the phase that prepares the branch (`implement`) sets this; every other
+  // run leaves it `null`, which is the normal case, not a missing value.
   branch: string | null
 }
-export type Huella = {
+export type Footprint = {
   ruta: string; existe: boolean; archivos: number; bytes: number; nombres: string[]
 }
-// `disponible: false` no lleva estado: una fase que no se puede lanzar no tiene nada
-// que informar. El resto de campos solo aparecen si hubo alguna corrida.
-export type Fase = {
+// `disponible: false` carries no `estado`: a phase that can't be launched has
+// nothing to report. The rest of the fields only show up once there's been a run.
+export type Phase = {
   fase: string; disponible: boolean
   estado?: "pendiente" | "corriendo" | "ok" | "parcial" | "error"
   corridas?: number; fallidas?: number
-  en?: string | null; duracion_s?: number | null; motivo?: string; huella?: Huella
+  en?: string | null; duracion_s?: number | null; motivo?: string; huella?: Footprint
 }
-export type Artefacto = { ruta: string; texto: string; bytes: number; truncado: boolean }
-export type TicketDetail = { ticket: Ticket; fases: Fase[]; runs: Run[]; log_tail: string }
-// El runner corre de uno en uno entre TODOS los proyectos: esto es lo que permite
-// explicar por qué no se puede lanzar, en vez de fallar con un 409 mudo.
+export type Artifact = { ruta: string; texto: string; bytes: number; truncado: boolean }
+export type TicketDetail = { ticket: Ticket; fases: Phase[]; runs: Run[]; log_tail: string }
+// The runner runs one at a time across ALL projects: this is what lets us explain
+// why something can't be launched, instead of failing with a silent 409.
 export type ActiveRun = {
   id: number; ticket_id: number; started_at: string | null; ado_id: number; project: string
 }
-// Un proyecto tiene UNA lista de repos y tú marcas cuál es el principal (el cwd de
-// la corrida). `label` no es decorativa: viaja al prompt del agente y es lo que le
-// dice cuándo mirar en ese repo — sin ella lo monta y lo ignora.
+// A project has ONE list of repos and you mark which one is primary (the cwd of
+// the run). `label` isn't decorative: it travels into the agent's prompt and is
+// what tells it when to look in that repo — without it, it's mounted but ignored.
 export type Repo = { path: string; label: string; primary: boolean }
 export type Project = { name: string; org: string; project: string; repos: Repo[] }
+// Model and effort each phase is launched with. Empty string = whatever the target
+// repo defaults to, which is what the orchestrator always did before this was
+// configurable.
+export type PhaseConfig = { model: string; effort: string }
+export type PhaseModels = Record<string, PhaseConfig>
 
 const json = async <T,>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? r.statusText)
@@ -48,12 +53,18 @@ export const api = {
     }).then(r => json<Project>(r)),
   removeProject: (name: string) =>
     fetch(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }).then(r => json<void>(r)),
+  models: () => fetch("/api/modelos").then(r => json<PhaseModels>(r)),
+  saveModels: (m: PhaseModels) =>
+    fetch("/api/modelos", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(m),
+    }).then(r => json<PhaseModels>(r)),
   tickets: () => fetch("/api/tickets").then(r => json<Ticket[]>(r)),
   activeRun: () => fetch("/api/runs/active").then(r => json<ActiveRun | null>(r)),
   detail: (id: number) => fetch(`/api/tickets/${id}`).then(r => json<TicketDetail>(r)),
-  artefacto: (id: number, ruta: string) =>
+  artifact: (id: number, ruta: string) =>
     fetch(`/api/tickets/${id}/artefacto?ruta=${encodeURIComponent(ruta)}`)
-      .then(r => json<Artefacto>(r)),
+      .then(r => json<Artifact>(r)),
   create: (ado_id: number, project: string) =>
     fetch("/api/tickets", {
       method: "POST", headers: { "Content-Type": "application/json" },

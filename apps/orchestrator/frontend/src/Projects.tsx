@@ -9,7 +9,7 @@ const EMPTY: Project = {
   repos: [{ path: "", label: "", primary: true }],
 }
 
-function Campo({ label, hint, children }: {
+function Field({ label, hint, children }: {
   label: string; hint?: string; children: React.ReactNode
 }) {
   return (
@@ -21,22 +21,22 @@ function Campo({ label, hint, children }: {
   )
 }
 
-const nuevoForm = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
+const newForm = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
 
 export function Projects({ projects, startNew, onChange }: {
   projects: Project[]
-  /** Entrar por "+ Nuevo" abre el formulario de alta directamente. El componente se
-   *  remonta al cambiar de vista, así que basta con inicializar el estado. */
+  /** Entering via "+ Nuevo" opens the creation form directly. The component
+   *  remounts on view change, so it's enough to initialize the state. */
   startNew?: boolean
-  /** `select` viaja para que, al renombrar, la barra lateral siga al mismo proyecto. */
+  /** `select` travels along so that, after a rename, the sidebar follows the same project. */
   onChange: (select?: string) => void
 }) {
-  const [form, setForm] = useState<Project | null>(startNew ? nuevoForm() : null)
-  const [original, setOriginal] = useState<string | null>(null)  // null = alta; si no, edición
+  const [form, setForm] = useState<Project | null>(startNew ? newForm() : null)
+  const [original, setOriginal] = useState<string | null>(null)  // null = creating; otherwise, editing
   const [error, setError] = useState("")
 
   const open = (p: Project | null) => {
-    setForm(p ? { ...p, repos: p.repos.map(r => ({ ...r })) } : nuevoForm())
+    setForm(p ? { ...p, repos: p.repos.map(r => ({ ...r })) } : newForm())
     setOriginal(p?.name ?? null)
     setError("")
   }
@@ -45,15 +45,15 @@ export function Projects({ projects, startNew, onChange }: {
     setForm(f => f ? { ...f, repos: fn(f.repos) } : f)
 
   const save = () => form && api
-    // las filas en blanco se descartan aquí; el backend rechaza rutas que no existan
+    // blank rows are discarded here; the backend rejects paths that don't exist
     .saveProject({ ...form, repos: form.repos.filter(r => r.path.trim()) }, original)
     .then(p => { setForm(null); onChange(p.name) }).catch(fail)
   const remove = (name: string) => api.removeProject(name).then(() => onChange()).catch(fail)
 
   return (
     <Card>
-      {/* Sin botón de alta aquí: el de la barra lateral ("+ Nuevo") ya abre esta
-          vista con el formulario desplegado, y dos botones para lo mismo confunden. */}
+      {/* No creation button here: the sidebar's ("+ Nuevo") already opens this
+          view with the form expanded, and two buttons for the same thing is confusing. */}
       <CardHeader><CardTitle className="text-base">Proyectos</CardTitle></CardHeader>
       <CardContent className="space-y-2">
         {error && <p className="text-sm text-destructive">{error}</p>}
@@ -78,20 +78,20 @@ export function Projects({ projects, startNew, onChange }: {
 
         {form && (
           <div className="space-y-4 rounded-md border p-4">
-            <Campo label="Nombre del proyecto" hint="como quieras llamarlo tú; puedes cambiarlo">
+            <Field label="Nombre del proyecto" hint="como quieras llamarlo tú; puedes cambiarlo">
               <Input placeholder="p. ej. TMS" value={form.name}
                      onChange={e => setForm({ ...form, name: e.target.value })} />
-            </Campo>
+            </Field>
 
             <div className="grid grid-cols-2 gap-3">
-              <Campo label="Organización de Azure DevOps">
+              <Field label="Organización de Azure DevOps">
                 <Input placeholder="ProvidenceSolutions" value={form.org}
                        onChange={e => setForm({ ...form, org: e.target.value })} />
-              </Campo>
-              <Campo label="Proyecto de Azure DevOps" hint="donde viven los tickets">
+              </Field>
+              <Field label="Proyecto de Azure DevOps" hint="donde viven los tickets">
                 <Input placeholder="ProvidenceTMS" value={form.project}
                        onChange={e => setForm({ ...form, project: e.target.value })} />
-              </Campo>
+              </Field>
             </div>
 
             <div>
@@ -125,11 +125,11 @@ export function Projects({ projects, startNew, onChange }: {
                     <Button size="sm" variant="ghost" title="Quitar" className="w-9"
                             disabled={form.repos.length === 1}
                             onClick={() => patch(rs => {
-                              const quedan = rs.filter((_, j) => j !== i)
-                              // si se va el principal, el primero que quede toma el relevo
-                              return quedan.some(x => x.primary)
-                                ? quedan
-                                : quedan.map((x, j) => ({ ...x, primary: j === 0 }))
+                              const remaining = rs.filter((_, j) => j !== i)
+                              // if the primary one leaves, the first one left takes over
+                              return remaining.some(x => x.primary)
+                                ? remaining
+                                : remaining.map((x, j) => ({ ...x, primary: j === 0 }))
                             })}>
                       ✕
                     </Button>

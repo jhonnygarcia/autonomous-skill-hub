@@ -1,43 +1,43 @@
 # Ticket Orchestrator
 
-Cola local de tickets de Azure DevOps que corre el flujo del ticket-agent con tu
-suscripción de Claude Code (CLI headless) sobre el repo de cada proyecto.
+Local queue of Azure DevOps tickets that runs the ticket-agent flow with your
+Claude Code subscription (headless CLI) against each project's repo.
 
-## Requisitos
+## Requirements
 - Python 3.11+, Node 20+
-- Claude Code CLI logueado (`claude` en el PATH)
-- Cada repo destino con el plugin ticket-agent instalado y configurado
+- Claude Code CLI logged in (`claude` in the PATH)
+- Each target repo with the ticket-agent plugin installed and configured
 
-## Suscripción, no API key
-El orquestador corre `claude -p` (CLI headless), que se autentica con la sesión
-de tu suscripción (el `/login` de Claude Code) — no usa `ANTHROPIC_API_KEY` en
-ninguna parte. Además, el runner **elimina** `ANTHROPIC_API_KEY` y
-`ANTHROPIC_AUTH_TOKEN` del entorno del subproceso: aunque existan en tu máquina
-por otros proyectos, las corridas jamás facturarán por API.
+## Subscription, not API key
+The orchestrator runs `claude -p` (headless CLI), which authenticates with your
+subscription session (Claude Code's `/login`) — it never uses `ANTHROPIC_API_KEY`
+anywhere. On top of that, the runner **removes** `ANTHROPIC_API_KEY` and
+`ANTHROPIC_AUTH_TOKEN` from the subprocess environment: even if they exist on
+your machine for other projects, runs will never bill through the API.
 
-Para verificar tu sesión: `claude -p "di OK"` en una terminal sin
-`ANTHROPIC_API_KEY` definida debe responder sin pedir credenciales.
+To verify your session: `claude -p "say OK"` in a terminal without
+`ANTHROPIC_API_KEY` set should respond without asking for credentials.
 
-## Configurar
-Los proyectos se dan de alta **desde la UI** (tarjeta *Proyectos*) y viven en la
-BD. Por cada uno: `name` (etiqueta local), `org` y `project` de Azure DevOps,
-`repoPath` (el repo primario — ahí corre el agente y ahí se escribe el análisis)
-y, opcionalmente, `extraDirs`: repos hermanos que el ticket necesita **leer**
-pero que están fuera del primario (p. ej. el backend, o la wiki clonada). Cada
-`extraDir` se monta con `--add-dir`.
+## Configure
+Projects are registered **from the UI** (the *Projects* card) and live in the
+DB. For each one: `name` (local label), Azure DevOps `org` and `project`,
+`repoPath` (the primary repo — where the agent runs and where the analysis is
+written) and, optionally, `extraDirs`: sibling repos the ticket needs to
+**read** but that are outside the primary one (e.g. the backend, or the cloned
+wiki). Each `extraDir` is mounted with `--add-dir`.
 
-Las rutas se validan al guardar: si no existen, el alta falla con un 400 en vez
-de reventar después dentro del subproceso.
+Paths are validated on save: if they don't exist, the registration fails with
+a 400 instead of blowing up later inside the subprocess.
 
-## Arrancar
+## Start
     # Backend
     cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
     .venv/Scripts/uvicorn app:app --port 8000
 
-    # Frontend (otra terminal)
+    # Frontend (another terminal)
     cd frontend && npm install && npm run dev
 
-Abre http://localhost:5173 — encola un ticket por ID, córrelo y sigue el log.
+Open http://localhost:5173 — queue a ticket by ID, run it and follow the log.
 
 ## Tests
     cd backend && .venv/Scripts/python -m pytest tests/ -v

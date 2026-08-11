@@ -1,16 +1,17 @@
 ---
-description: Convierte el análisis de un work item en un plan de cambios ejecutable, en formato OpenSpec
+description: Converts a work item's analysis into an executable change plan, in OpenSpec format
 ---
 
-Planifica los cambios del ticket "$ARGUMENTS" de Azure DevOps.
+Plan the changes for Azure DevOps ticket "$ARGUMENTS".
 
-Invoca la skill `ticket-agent:change-planning` y síguela al pie de la letra:
-precondiciones (el análisis de la Fase 1 y la carpeta `openspec/`), lectura del
-análisis, estudio del patrón en el código, escritura del change en
-`openspec/changes/<id>-<slug>/`, validación del change con el CLI de OpenSpec, y
-cierre según el nivel de autonomía configurado (el comando exacto de validación
-vive en la skill, no aquí).
+Invoke the `ticket-agent:change-planning` skill and follow it to the letter:
+preconditions (Phase 1's analysis and the `openspec/` folder), reading the
+analysis, studying the pattern in the code, writing the change in
+`openspec/changes/<id>-<slug>/`, validating the change with the OpenSpec CLI,
+and closing per the configured autonomy level (the exact validation command
+lives in the skill, not here).
 
-No escribas código de producto: el entregable de esta fase es el plan.
+Don't write product code — not implementation, not tests: this phase's deliverable
+is the plan.
 
-Si "$ARGUMENTS" está vacío o no es un número de work item, pide el ID y detente.
+If "$ARGUMENTS" is empty or not a work item number, ask for the ID and stop.

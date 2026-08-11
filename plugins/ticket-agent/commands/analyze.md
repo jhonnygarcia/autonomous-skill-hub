@@ -1,13 +1,13 @@
 ---
-description: Analiza y comprende a cabalidad un work item de Azure DevOps por su ID, produciendo un análisis estructurado en docs/tickets/
+description: Fully analyzes and understands an Azure DevOps work item by its ID, producing a structured analysis in docs/tickets/
 ---
 
-Analiza el ticket "$ARGUMENTS" de Azure DevOps.
+Analyze Azure DevOps ticket "$ARGUMENTS".
 
-Invoca la skill `ticket-agent:ticket-comprehension` y síguela al pie de la letra:
-configuración del proyecto, recolección solo-lectura (work item, comentarios,
-relaciones a 1 nivel, adjuntos, wiki, reglas del proyecto, código afectado),
-análisis estructurado en `docs/tickets/<id>-analysis.md`, y cierre según el nivel
-de autonomía configurado.
+Invoke the `ticket-agent:ticket-comprehension` skill and follow it to the
+letter: project configuration, read-only collection (work item, comments,
+1-level relations, attachments, wiki, project rules, affected code), structured
+analysis in `docs/tickets/<id>-analysis.md`, and closing per the configured
+autonomy level.
 
-Si "$ARGUMENTS" está vacío o no es un número de work item, pide el ID y detente.
+If "$ARGUMENTS" is empty or not a work item number, ask for the ID and stop.

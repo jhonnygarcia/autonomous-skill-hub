@@ -1,180 +1,190 @@
 ---
 name: change-planning
-description: Convierte el análisis de un ticket de Azure DevOps en un plan de cambios que otro agente pueda ejecutar - lee docs/tickets/<id>-analysis.md, estudia el patrón en el código y escribe un change de OpenSpec en el repo destino. Usar cuando se pida planificar, diseñar los cambios o preparar la implementación de un ticket ya analizado.
+description: Converts the analysis of an Azure DevOps ticket into a change plan another agent can execute - reads docs/tickets/<id>-analysis.md, studies the pattern in the code, and writes an OpenSpec change in the target repo. Use when asked to plan, design the changes, or prepare the implementation of a ticket that's already been analyzed.
 ---
 
-# Plan de cambios a partir de un análisis
+# Change plan from an analysis
 
-Produce un plan que **otro agente pueda ejecutar sin volver a investigar**. No
-escribas código de producto: el entregable es el change de OpenSpec.
+Produce a plan that **another agent can execute without re-investigating**.
+Don't write product code — not implementation, not tests: the deliverable is the
+OpenSpec change.
 
-Cinco reglas de oro:
+Five golden rules:
 
-1. **Lo que no se pudo leer se reporta; jamás se rellena con suposiciones.**
-2. **Toda cifra ajena al work item cita su fuente** — `archivo:línea`, commit o comando.
-3. **Toda tarea cita el espejo del que se copia, con `archivo:línea`.** "Crear
-   `XpoRateCall.cs`" sin decir de dónde se copia no es una tarea, es un deseo.
-4. **Lo bloqueado se declara bloqueado, no se planifica alrededor.** Si algo no se
-   puede hacer todavía, va a la sección de bloqueos con su motivo y su referencia —
-   nunca como una tarea que parece ejecutable y no lo es.
-5. **Decir "no existe" es una afirmación y necesita su fuente igual que una cifra.**
-   Un `Grep` por símbolos solo encuentra lo que los menciona, y el archivo gemelo casi
-   nunca menciona los símbolos del tuyo: buscar `UpdateApReadyToProcess` jamás va a
-   encontrar `UpdateArReadyToProcessCommandTest.cs`. Antes de escribir "no hay espejo",
-   **busca por forma de nombre** (`Glob`, p. ej. `**/*Command*Test*.cs`) y **nombra en
-   la tarea la búsqueda que hiciste**. Una ausencia vale lo que valga la búsqueda que la
-   respalda; sin ella no es honestidad, es una conjetura con tono humilde.
+1. **What couldn't be read is reported; it is never filled in with assumptions.**
+2. **Every number that doesn't come from the work item cites its source** — `file:line`,
+   commit, or command.
+3. **Every task cites the mirror it's copied from, with `file:line`.** "Create
+   `XpoRateCall.cs`" without saying where it's copied from isn't a task, it's a
+   wish.
+4. **What's blocked is declared blocked, not planned around.** If something can't
+   be done yet, it goes into the blockers section with its reason and its
+   reference — never as a task that looks executable and isn't.
+5. **Saying "it doesn't exist" is a claim and needs its source just like any
+   number.** A `Grep` for symbols only finds what mentions them, and the twin
+   file almost never mentions your file's symbols: searching for
+   `UpdateApReadyToProcess` will never find
+   `UpdateArReadyToProcessCommandTest.cs`. Before writing "no mirror exists",
+   **search by name shape** (`Glob`, e.g. `**/*Command*Test*.cs`) and **name the
+   search you did in the task**. An absence is only worth as much as the search
+   backing it; without one it isn't honesty, it's a guess in a humble tone.
 
-## 1. Configuración
+## 1. Configuration
 
-Lee `.claude/ticket-agent.json` del proyecto actual. Si no existe, detente y guía al
-usuario para crearlo (plantilla en el README del plugin). Lee `autonomy`.
+Read `.claude/ticket-agent.json` from the current project. If it doesn't exist,
+stop and guide the user to create it (template in the plugin's README). Read
+`autonomy`.
 
-## 2. Precondiciones
+## 2. Preconditions
 
-1. **El análisis.** `docs/tickets/<id>-analysis.md` debe existir. Si no está,
-   **detente** y dile al usuario que corra primero `/ticket-agent:analyze <id>`.
-   No lo generes tú: son dos fases y esta es la segunda.
-2. **OpenSpec.** Si no existe la carpeta `openspec/` en la raíz del repo, ejecuta
-   `npx --yes @fission-ai/openspec@latest init`. Si el comando no está disponible o
-   falla, **detente** y repórtalo: sin el CLI no hay validación, y la validación es
-   parte del entregable.
+1. **The analysis.** `docs/tickets/<id>-analysis.md` must exist. If it isn't
+   there, **stop** and tell the user to run `/ticket-agent:analyze <id>` first.
+   Don't generate it yourself: these are two phases and this is the second one.
+2. **OpenSpec.** If the `openspec/` folder doesn't exist at the repo root, run
+   `npx --yes @fission-ai/openspec@latest init`. If the command isn't available
+   or fails, **stop** and report it: without the CLI there's no validation, and
+   validation is part of the deliverable.
 
-## 3. Lectura del análisis
+## 3. Reading the analysis
 
-Lee `docs/tickets/<id>-analysis.md` entero. De ahí salen el alcance, los criterios de
-aceptación, el código afectado, las referencias citadas y lo que quedó bloqueado o
-sin resolver.
+Read `docs/tickets/<id>-analysis.md` in full. From it come the scope, the
+acceptance criteria, the affected code, the cited references, and whatever was
+left blocked or unresolved.
 
-**No vuelvas al MCP de Azure DevOps.** El análisis es la interfaz entre las dos
-fases. Si le falta algo que necesitas, eso es un fallo de la Fase 1: regístralo en
-"Información faltante" del plan diciendo que el análisis no lo trae, y sigue con lo
-que sí puedas planificar.
+**Don't go back to the Azure DevOps MCP.** The analysis is the interface between
+the two phases. If it's missing something you need, that's a Phase 1 failure:
+log it under "Missing information" in the plan, saying the analysis doesn't
+provide it, and continue with what you can plan.
 
-## 4. Estudio del patrón
+## 4. Studying the pattern
 
-Abre los archivos que el análisis señala. Si el cambio consiste en replicar algo que
-ya existe (otro carrier, otro proveedor, otro handler), **abre el ejemplo ya resuelto
-y léelo**: es el espejo que citarán las tareas. Cada afirmación que hagas sobre el
-código se comprueba abriéndolo, no se deduce del nombre del archivo.
+Open the files the analysis points to. If the change consists of replicating
+something that already exists (another carrier, another provider, another
+handler), **open the already-solved example and read it**: it's the mirror the
+tasks will cite. Every claim you make about the code gets verified by opening
+it, not deduced from the file name.
 
-Si el prompt te nombra repos adicionales montados con su etiqueta, entran en el
-alcance de este paso.
+If the prompt names additional mounted repos with their label, they're in scope
+for this step.
 
-**Busca el espejo por parentesco, no solo por símbolos.** Antes de dar por perdido el
-ejemplo de una tarea, prueba la simetría del propio repo: si tocas AP, busca AR; si
-tocas un comando, busca el test del comando hermano; si tocas una entidad, busca la
-entidad gemela. Un `Glob` por forma de nombre (`**/*Command*Test*.cs`,
-`**/Ar*Invoice*.cs`) encuentra en un paso lo que un `Grep` por símbolos no puede
-encontrar nunca. Un repo con dos mitades simétricas es el mejor espejo que hay, y es
-justo el que se escapa buscando por contenido.
+**Look for the mirror by kinship, not just by symbols.** Before giving up on a
+task's example, try the repo's own symmetry: if you're touching AP, look for AR;
+if you're touching a command, look for the sibling command's test; if you're
+touching an entity, look for the twin entity. A `Glob` by name shape
+(`**/*Command*Test*.cs`, `**/Ar*Invoice*.cs`) finds in one step what a `Grep` for
+symbols can never find. A repo with two symmetric halves is the best mirror
+there is, and it's exactly the one that escapes when searching by content.
 
-## 5. Escritura del change
+## 5. Writing the change
 
-Escribe en `openspec/changes/<id>-<slug>/`:
+Write into `openspec/changes/<id>-<slug>/`:
 
-- `<slug>`: el título del work item en kebab-case, sin puntuación, recortado a unas
-  5 palabras. Ejemplo: el 3323 *"Carrier API V2 Migration - XPO"* →
+- `<slug>`: the work item's title in kebab-case, no punctuation, trimmed to about
+  5 words. Example: 3323 *"Carrier API V2 Migration - XPO"* →
   `openspec/changes/3323-carrier-api-v2-migration-xpo/`.
 
-Cuatro archivos:
+Four files:
 
-**`proposal.md`** — por qué, qué y con qué impacto. Cada cambio con la forma:
-
-```markdown
-**[Nombre del comportamiento o sección]**
-- De: [estado actual]
-- A: [estado futuro]
-- Motivo: [por qué]
-- Impacto: [rompe o no rompe, a quién afecta]
-```
-
-Cierra `proposal.md` con una sección de primer nivel, `## Información faltante`, con
-lo que el análisis de la Fase 1 no trae y hace falta para planificar bien. Si no hay
-nada que registrar, omite la sección — no la dejes vacía.
-
-**`tasks.md`** — la checklist ejecutable. Cada tarea lleva destino, espejo con
-líneas, y cómo se comprueba:
+**`proposal.md`** — why, what, and with what impact. Each change in the form:
 
 ```markdown
-- [ ] Crear `ruta/al/Destino.cs`
-      Espejo: `ruta/al/Ejemplo.cs:1-140`
-      Reusar: `ruta/a/lo/que/ya/existe.cs`
-      Comprobación: [qué tiene que pasar para dar la tarea por buena]
+**[Behavior or section name]**
+- From: [current state]
+- To: [future state]
+- Reason: [why]
+- Impact: [breaking or not, who's affected]
 ```
 
-Y una sección propia, de primer nivel, para lo que **no** se puede hacer:
+Close `proposal.md` with a top-level section, `## Missing information`, with
+what Phase 1's analysis doesn't provide and is needed to plan well. If there's
+nothing to log, omit the section — don't leave it empty.
+
+**`tasks.md`** — the executable checklist. Each task carries a destination,
+mirror with lines, and how it's checked:
 
 ```markdown
-## Bloqueado
-
-- **[Qué]** — [por qué no se puede todavía], según [referencia que lo respalda].
-  Desbloquea: [qué haría falta].
+- [ ] Create `path/to/Destination.cs`
+      Mirror: `path/to/Example.cs:1-140`
+      Reuse: `path/to/what/already/exists.cs`
+      Check: [what has to pass for the task to be considered done]
 ```
 
-**`design.md`** — las decisiones técnicas y sus alternativas descartadas. Si no hay
-ninguna decisión que tomar, dilo en una línea en vez de rellenar.
+And its own top-level section for what **can't** be done:
 
-**`specs/<capability>/spec.md`** — el estado futuro de la capacidad afectada.
-`<capability>` es la **capacidad del sistema**, no el ticket: es la carpeta que
-OpenSpec reutiliza entre cambios. Si ya existe una en `openspec/specs/` que encaje,
-usa esa; no inventes una nueva por cada ticket.
+```markdown
+## Blocked
 
-## 6. Validación
+- **[What]** — [why it can't be done yet], per [reference backing it].
+  Unblocks: [what would be needed].
+```
 
-Ejecuta exactamente:
+**`design.md`** — the technical decisions and the alternatives ruled out. If
+there's no decision to make, say so in one line instead of padding it out.
+
+**`specs/<capability>/spec.md`** — the future state of the affected capability.
+`<capability>` is the **system capability**, not the ticket: it's the folder
+OpenSpec reuses across changes. If one already exists under `openspec/specs/`
+that fits, use it; don't invent a new one per ticket.
+
+## 6. Validation
+
+Run exactly:
 
     npx --yes @fission-ai/openspec@latest validate --changes --no-interactive
 
-Sin `--changes` ni `--no-interactive` el CLI entra en modo interactivo esperando una
-selección por terminal, y en headless no hay terminal que la responda: la corrida se
-queda colgada. Si falla, corrige y vuelve a validar. **A la segunda validación
-fallida, para**: deja el change escrito y reporta qué no pasa. Un change inválido que
-se puede revisar vale más que ninguno.
+Without either `--changes` or `--no-interactive` the CLI enters interactive mode
+waiting for a terminal selection, and in headless there's no terminal to answer
+it: the run hangs. If it fails, fix it and validate again. **On the second
+failed validation, stop**: leave the change written and report what doesn't
+pass. An invalid change that can be reviewed is worth more than none at all.
 
-## 7. Cierre según autonomía
+## 7. Closing based on autonomy
 
-- `supervised`: resume en el chat qué se planificó, qué quedó bloqueado y qué falta;
-  no toques el work item.
-- `autonomous`: igual, y además señala explícitamente qué decisiones tomaste solo.
-- Cualquier otro valor de `autonomy` se trata como `supervised` y se avisa al
-  usuario de que el valor no se reconoce.
+- `supervised`: summarize in chat what was planned, what was left blocked, and
+  what's missing; don't touch the work item.
+- `autonomous`: same, and also explicitly flag which decisions you made on your
+  own.
+- Any other value of `autonomy` is treated as `supervised`, and the user is
+  warned that the value isn't recognized.
 
-**Regla obligatoria de cierre.** La última línea del resumen —sin nada después— tiene
-que ser exactamente uno de estos tres sellos, seguido de la ruta del change relativa al
-repo principal (o del motivo, en el caso de `nada`) — **siempre con `/` como separador,
-nunca `\`, aunque el repo esté en Windows**: el orquestador la usa tal cual para leer el
-archivo del disco y como lista blanca de su visor, y una barra invertida rompe la regex
-que la extrae del log. El orquestador lee esta línea para decidir si la corrida vale: el
-código de salida del CLI no lo dice, porque sale en 0 aunque el agente se haya detenido
-sin escribir nada.
+**Mandatory closing rule.** The last line of the summary —with nothing after
+it— has to be exactly one of these three stamps, followed by the change path
+relative to the main repo (or by the reason, in the `nada` case) — **always with
+`/` as the separator, never `\`, even if the repo is on Windows**: the
+orchestrator uses it as-is to read the file from disk and as an allowlist for
+its viewer, and a backslash breaks the regex that extracts it from the log. The
+orchestrator reads this line to decide whether the run counts: the CLI's exit
+code doesn't say so, because it exits 0 even if the agent stopped without
+writing anything.
 
-- `HUELLA: ok — openspec/changes/<id>-<slug>` — el change está escrito y
-  `openspec validate --changes --no-interactive` pasó.
-- `HUELLA: parcial — openspec/changes/<id>-<slug> · <reserva en una línea>` — el change
-  se escribió pero la validación no pasó (dos intentos) o no llegó a correrse. La
-  reserva va EN la línea del sello, tras la ruta, separada por ` · ` (espacio, punto
-  medio, espacio) — no en el resumen: es lo único que el orquestador guarda y muestra
-  junto a la huella. Ejemplo: `HUELLA: parcial —
-  openspec/changes/3323-carrier-api-v2-migration-xpo · openspec validate no pasó tras
-  dos intentos`.
-- `HUELLA: nada — <motivo>` — no se llegó a escribir ningún change: falta el análisis,
-  `npx` no está disponible, o `openspec init` falló.
+- `HUELLA: ok — openspec/changes/<id>-<slug>` — the change is written and
+  `openspec validate --changes --no-interactive` passed.
+- `HUELLA: parcial — openspec/changes/<id>-<slug> · <one-line caveat>` — the
+  change was written but validation didn't pass (two attempts) or never ran.
+  The caveat goes ON the stamp line, after the path, separated by ` · ` (space,
+  middle dot, space) — not in the summary: it's the only thing the orchestrator
+  stores and shows alongside the stamp. Example:
+  `HUELLA: parcial —
+  openspec/changes/3323-carrier-api-v2-migration-xpo · openspec validate didn't
+  pass after two attempts`.
+- `HUELLA: nada — <reason>` — no change was ever written: the analysis is
+  missing, `npx` isn't available, or `openspec init` failed.
 
-## Manejo de errores
+## Error handling
 
-- Falta el análisis → detente, pide la Fase 1 y cierra con
-  `HUELLA: nada — falta docs/tickets/<id>-analysis.md`.
-- `npx` no disponible o `openspec init` falla → detente, repórtalo y cierra con
-  `HUELLA: nada — npx no disponible u openspec init falló`.
-- El análisis existe pero no trae el código afectado → planifica lo que puedas,
-  registra el hueco señalando que viene de la Fase 1, y cierra con `HUELLA: ok` o
-  `HUELLA: parcial` según haya pasado la validación.
-- `openspec validate` falla dos veces → deja el change escrito, reporta qué no pasa
-  y cierra con `HUELLA: parcial`.
-- No encuentras un espejo para una tarea → **primero busca por forma de nombre**
-  (regla 5): la mitad simétrica del repo suele tenerlo. Si aun así no está, dilo en la
-  tarea **citando la búsqueda que lo respalda** ("`Glob **/*Command*Test*.cs` → ningún
-  test de comando AR/AP"). Una tarea sin espejo es una tarea que el implementador
-  tendrá que investigar, y eso hay que avisarlo (no cambia el sello por sí solo). Una
-  tarea sin espejo *que sí lo tenía* es peor que una cita equivocada: nadie la revisa.
+- Missing analysis → stop, ask for Phase 1, and close with
+  `HUELLA: nada — missing docs/tickets/<id>-analysis.md`.
+- `npx` unavailable or `openspec init` fails → stop, report it, and close with
+  `HUELLA: nada — npx unavailable or openspec init failed`.
+- The analysis exists but doesn't bring the affected code → plan what you can,
+  log the gap noting it comes from Phase 1, and close with `HUELLA: ok` or
+  `HUELLA: parcial` depending on whether validation passed.
+- `openspec validate` fails twice → leave the change written, report what
+  doesn't pass, and close with `HUELLA: parcial`.
+- No mirror found for a task → **first search by name shape** (rule 5): the
+  repo's symmetric half usually has it. If it's still not there, say so in the
+  task **citing the search backing it** ("`Glob **/*Command*Test*.cs` → no
+  AR/AP command test found"). A task without a mirror is a task the implementer
+  will have to investigate, and that has to be flagged (it doesn't change the
+  stamp by itself). A task without a mirror *that actually had one* is worse
+  than a wrong citation: nobody reviews it.
