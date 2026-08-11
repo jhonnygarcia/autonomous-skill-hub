@@ -6,6 +6,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,14 +19,15 @@ LOGS_DIR = Path(os.environ.get("ORCH_LOGS", BASE / "logs"))
 
 PHASES = ["analyze", "design", "implement", "test", "guards", "pr"]
 
-# Declarar una fase no es implementarla. Solo estas dos se pueden lanzar; el resto
+# Declarar una fase no es implementarla. Solo estas tres se pueden lanzar; el resto
 # están en PHASES para que la UI sepa que existen, y se rechazan con 400.
 PHASE_COMMANDS = {
     "analyze": "/ticket-agent:analyze",
     "design": "/ticket-agent:plan",
+    "implement": "/ticket-agent:implement",
 }
 # En qué deja al ticket una corrida que sale bien.
-PHASE_DONE = {"analyze": "analyzed", "design": "planned"}
+PHASE_DONE = {"analyze": "analyzed", "design": "planned", "implement": "implemented"}
 # Bash va acotado por fase, no solo por comando: la Fase 1 es de solo lectura y no
 # lleva Bash; la Fase 2 necesita invocar el paquete de npm `@fission-ai/openspec`
 # (el CLI NO se llama `openspec`) para `init` y `validate`, y nada más. El
@@ -39,14 +41,36 @@ PHASE_ALLOWED_TOOLS = {
         "Bash(npx --yes @fission-ai/openspec@latest:*)",
         "Bash(npx @fission-ai/openspec:*)",
     ],
+    # Sin especificador y a propósito: está verificado en corrida real que
+    # `Bash(x:*)` habilita la herramienta y no la acota. Fingir lo contrario sería
+    # peor que no ponerlo. La contención va por `--settings` (ver `settings_de`).
+    "implement": ["Bash"],
 }
 # Sustantivo del entregable, para que el prompt no le diga "análisis" al agente
 # cuando la fase es design (y viceversa).
-PHASE_NOUN = {"analyze": "el análisis", "design": "el plan"}
+PHASE_NOUN = {"analyze": "el análisis", "design": "el plan",
+              "implement": "la implementación"}
 # Si alguien añade una fase a un diccionario y no a los otros, hoy eso es un
 # KeyError sin capturar dentro de un background task que deja la corrida en
 # `success` y el ticket sin actualizar.
 assert PHASE_COMMANDS.keys() == PHASE_DONE.keys() == PHASE_ALLOWED_TOOLS.keys() == PHASE_NOUN.keys()
+
+HOOK_DENY_PUSH = Path(__file__).resolve().parent / "hooks" / "deny_push.py"
+
+
+def settings_de(phase: str) -> list[str]:
+    """`--settings` acepta un JSON en línea, así que el hook viaja sin archivo de
+    configuración y sin escribir nada en el repo del cliente.
+
+    Se ramifica por fase igual que las tools: ponerlo en todas daría igual hoy —las
+    otras no tienen Bash— pero volvería a mezclar "lo que necesita esta fase" con "lo
+    que arrastran todas".
+    """
+    if phase != "implement":
+        return []
+    cfg = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": f'"{sys.executable}" "{HOOK_DENY_PUSH}"'}]}]}}
+    return ["--settings", json.dumps(cfg)]
 
 
 def now() -> str:
@@ -579,6 +603,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # El resto de tools por fase viene de PHASE_ALLOWED_TOOLS (ver arriba).
             "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
             *PHASE_ALLOWED_TOOLS[phase],
+            *settings_de(phase),
         ]
         for e in extras:
             cmd += ["--add-dir", e["path"]]

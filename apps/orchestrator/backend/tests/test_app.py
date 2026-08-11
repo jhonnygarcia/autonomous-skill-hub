@@ -324,11 +324,11 @@ def test_current_phase_ya_no_existe(tmp_path, monkeypatch):
 
 
 def test_fase_declarada_pero_no_ejecutable_da_400(client, monkeypatch):
-    """implement está en PHASES pero no existe: se rechaza sin lanzar subproceso."""
+    """guards está en PHASES pero no existe: se rechaza sin lanzar subproceso."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
-    r = client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
-    assert r.status_code == 400 and "implement" in r.json()["detail"]
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "guards"})
+    assert r.status_code == 400 and "guards" in r.json()["detail"]
     assert client.get(f"/tickets/{tid}").json()["runs"] == []
 
 
@@ -376,6 +376,53 @@ def test_bash_incluye_las_dos_formas_de_invocar_openspec_en_design(client, monke
     log = client.get(f"/tickets/{tid}").json()["log_tail"]
     assert "Bash(npx --yes @fission-ai/openspec@latest:*)" in log
     assert "Bash(npx @fission-ai/openspec:*)" in log
+
+
+def _espiar_argv(monkeypatch):
+    """Sobre los argumentos REALES del subproceso, no sobre una subcadena del log."""
+    import asyncio
+    capturado = {}
+    original = asyncio.create_subprocess_exec
+
+    async def espia(*args, **kwargs):
+        capturado["argv"] = args
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", espia)
+    return capturado
+
+
+def test_implement_lleva_bash_pelado_y_settings(client, monkeypatch, tmp_path):
+    import app
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    argv = cap["argv"]
+    assert "Bash" in argv                      # pelado, no un especificador
+    assert "--settings" in argv
+    assert "deny_push.py" in argv[argv.index("--settings") + 1]
+
+
+def test_analyze_no_lleva_settings_ni_bash(client, monkeypatch):
+    """Que la lista no vuelva a viajar fija para todas las fases: fue justo lo que
+    hizo que la Fase 1, declarada de solo lectura, acabara ejecutando shell."""
+    _use_fake_claude(monkeypatch)
+    cap = _espiar_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "--settings" not in cap["argv"]
+    assert "Bash" not in cap["argv"]
+
+
+def test_las_cuatro_tablas_incluyen_implement():
+    import app
+    for tabla in (app.PHASE_COMMANDS, app.PHASE_DONE,
+                  app.PHASE_ALLOWED_TOOLS, app.PHASE_NOUN):
+        assert "implement" in tabla
+    assert app.PHASE_DONE["implement"] == "implemented"
 
 
 def test_bash_no_aparece_en_fase_analyze(client, monkeypatch):
@@ -492,8 +539,10 @@ def test_fases_sin_corridas(client):
     assert [f["fase"] for f in fases] == ["analyze", "design", "implement", "test", "guards", "pr"]
     assert fases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
+    assert fases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
+                        "corridas": 0, "fallidas": 0}
     # una fase no ejecutable no informa estado: no hay nada que informar
-    assert fases[2] == {"fase": "implement", "disponible": False}
+    assert fases[3] == {"fase": "test", "disponible": False}
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 
