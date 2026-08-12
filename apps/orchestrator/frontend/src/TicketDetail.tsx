@@ -2,6 +2,7 @@ import { useState } from "react"
 import type { ActiveRun, TicketDetail as Detail } from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/ConfirmDialog"
 import { Timeline } from "@/Timeline"
 import { blockReason, duration, runColor, ticketStatus } from "@/status"
 
@@ -21,6 +22,7 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
 }) {
   const [showLog, setShowLog] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const t = detail.ticket
   const { label, color } = ticketStatus(t, activeRun)
   const reason = blockReason(t, activeRun)
@@ -38,7 +40,8 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
       <div className="flex items-center gap-2">
         <h2 className="text-xl font-semibold">#{t.ado_id}</h2>
         <Badge className={color}>{label}</Badge>
-        <Button size="sm" variant="destructive" className="ml-auto" onClick={onDelete}>
+        <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground"
+                onClick={() => setConfirmDelete(true)}>
           Borrar
         </Button>
       </div>
@@ -95,6 +98,12 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
           </pre>
         )}
       </div>
+
+      <ConfirmDialog open={confirmDelete} title={`¿Borrar el ticket #${t.ado_id}?`}
+                     body="Se borran sus corridas y sus logs. Los artefactos que el
+                           agente escribió en el repo se quedan donde están."
+                     onConfirm={() => { setConfirmDelete(false); onDelete() }}
+                     onCancel={() => setConfirmDelete(false)} />
     </div>
   )
 }

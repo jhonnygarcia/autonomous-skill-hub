@@ -709,6 +709,21 @@ def test_phases_without_runs(client):
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 
+def test_the_ticket_list_carries_the_phases(client):
+    """The three-dot stepper needs per-phase state, not just the folded status: `error`
+    alone doesn't say which phase failed.
+
+    Asserted against the detail view rather than against a literal list of phase names,
+    so this test doesn't have to be rewritten every time `PHASES` changes — which it
+    does in Task 9, two tasks from here. The footprint (the disk-reading part) stays
+    off, which is what made the list cheap in the first place."""
+    tid = client.post("/tickets", json={"ado_id": 7, "project": "Demo"}).json()["id"]
+    t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
+    expected = [f["fase"] for f in client.get(f"/tickets/{tid}").json()["fases"]]
+    assert [f["fase"] for f in t["fases"]] == expected
+    assert all("huella" not in f for f in t["fases"])
+
+
 def test_phases_with_one_run_each(client, monkeypatch, tmp_path):
     (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
     (tmp_path / "repo" / "docs" / "tickets" / "3323-analysis.md").write_text("x" * 500)

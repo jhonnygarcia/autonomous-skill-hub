@@ -701,8 +701,14 @@ def list_tickets():
         runs = [dict(r) for r in c.execute("SELECT * FROM runs ORDER BY id DESC")]
     # ponytail: all runs are fetched at once and grouped in memory; with thousands of
     # tickets this would need a per-ticket query or a GROUP BY. It's a local queue.
-    return [ticket_out(t, phases_for(t, [r for r in runs if r["ticket_id"] == t["id"]],
-                                     with_footprint=False)) for t in ts]
+    out = []
+    for t in ts:
+        # The footprint stays off: it's the part that touches disk, and the list doesn't
+        # show artifacts. The phases themselves are cheap and the stepper needs them —
+        # the folded `status` says `error` without saying which phase failed.
+        ph = phases_for(t, [r for r in runs if r["ticket_id"] == t["id"]], with_footprint=False)
+        out.append({**ticket_out(t, ph), "fases": ph})
+    return out
 
 
 @app.get("/tickets/{tid}")

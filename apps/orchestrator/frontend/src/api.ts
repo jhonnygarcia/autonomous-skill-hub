@@ -4,6 +4,10 @@ export type Ticket = {
   /** Read from the analysis when `analyze` closes well. `null` before that: we don't
    *  know what the ticket is about yet, and saying so is honest. */
   title: string | null
+  /** Per-phase state, for the list's three-dot stepper. Same shape as the detail
+   *  view's `fases`, but built with `with_footprint=False`: cheap enough to compute
+   *  for every ticket on every poll. */
+  fases: Phase[]
 }
 export type Run = {
   id: number; phase: string; instructions: string | null
