@@ -82,7 +82,10 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
    *  mid-word produces a run of reds that mean nothing. */
   const checkPath = (ruta: string) => {
     const v = ruta.trim()
-    if (!v || v in paths) return
+    // Only a cached `true` is trusted. A cached `false` must be re-checked on every
+    // blur: that's exactly the case where the user created the folder and blurred
+    // again to clear the red mark — skipping the request would leave it stuck.
+    if (!v || paths[v] === true) return
     api.validatePath(v)
       .then(existe => setPaths(p => ({ ...p, [v]: existe })))
       // No mark and no block: the save validates again and that is the authoritative
@@ -141,17 +144,20 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
       <Field id="campo-name" label="Nombre del proyecto" error={errors.name}
              hint="como quieras llamarlo tú; puedes cambiarlo">
         <Input id="campo-name" placeholder="p. ej. TMS" value={form.name}
+               aria-invalid={!!errors.name}
                onChange={e => setForm({ ...form, name: e.target.value })} />
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
         <Field id="campo-org" label="Organización de Azure DevOps" error={errors.org}>
           <Input id="campo-org" placeholder="ProvidenceSolutions" value={form.org}
+                 aria-invalid={!!errors.org}
                  onChange={e => setForm({ ...form, org: e.target.value })} />
         </Field>
         <Field id="campo-project" label="Proyecto de Azure DevOps" error={errors.project}
                hint="donde viven los tickets">
           <Input id="campo-project" placeholder="ProvidenceTMS" value={form.project}
+                 aria-invalid={!!errors.project}
                  onChange={e => setForm({ ...form, project: e.target.value })} />
         </Field>
       </div>
@@ -195,6 +201,7 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
                 <Input className="mt-2 font-mono" placeholder="D:/ruta/al/repo" value={r.path}
                        id={r.primary ? "campo-repos" : undefined}
                        aria-label="Ruta del repo"
+                       aria-invalid={!!errors.repos && r.primary}
                        onBlur={e => checkPath(e.target.value)}
                        onChange={e => patch(rs =>
                          rs.map((x, j) => j === i ? { ...x, path: e.target.value } : x))} />

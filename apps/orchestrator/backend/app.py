@@ -615,6 +615,9 @@ def stamp_stat(repo: str, rel: str) -> dict:
 # A checked box in `tasks.md`. The Phase 2b skill checks them off as it advances, so
 # counting lines is the whole mechanism — no stream-json parsing, which is a CLI format
 # that would have to be maintained when it changes.
+# These are line-oriented and fence-blind: a literal `- [x]` inside a fenced code block
+# in `tasks.md` would count as a real task. `tasks.md` is machine-generated today
+# without such examples, so this is a lookup for a future surprise, not a live bug.
 DONE_BOX = re.compile(r"^\s*- \[x\]", re.MULTILINE | re.IGNORECASE)
 OPEN_BOX = re.compile(r"^\s*- \[ \]", re.MULTILINE)
 
@@ -734,7 +737,10 @@ def folded_status(phases: list[dict]) -> str:
 
 
 def ticket_out(t: sqlite3.Row, phases: list[dict]) -> dict:
-    return {**dict(t), "status": folded_status(phases)}
+    # `fases` travels here so every producer (POST /tickets, GET /tickets, and the
+    # `.ticket` object inside GET /tickets/{tid}) agrees: the frontend's `Ticket` type
+    # declares it required, and `json<T>()` never checks that at runtime.
+    return {**dict(t), "status": folded_status(phases), "fases": phases}
 
 
 @app.get("/tickets")
@@ -750,7 +756,7 @@ def list_tickets():
         # show artifacts. The phases themselves are cheap and the stepper needs them —
         # the folded `status` says `error` without saying which phase failed.
         ph = phases_for(t, [r for r in runs if r["ticket_id"] == t["id"]], with_footprint=False)
-        out.append({**ticket_out(t, ph), "fases": ph})
+        out.append(ticket_out(t, ph))
     return out
 
 
@@ -929,8 +935,13 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # closes with a footprint. `title` is only written when one is found: a re-run
         # that comes out worse must not erase the title the previous one left.
         if phase == "analyze" and state in ("ok", "parcial"):
-            title = read_title(ticket_row(ticket["id"]), path)
-            if title:
+            # `DELETE /tickets/{tid}` has no guard against an in-flight run: the row
+            # can be gone by the time this runs. `t` is bound and checked before
+            # `read_title` touches it — `declared_file` does `t["id"]` unconditionally,
+            # and a `None` row would blow up this background task with a TypeError
+            # nobody catches.
+            t = ticket_row(ticket["id"])
+            if t and (title := read_title(t, path)):
                 set_ticket(ticket["id"], title=title)
         set_ticket(ticket["id"])   # only touches updated_at: the state is computed on read
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useId, useRef } from "react"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -24,6 +24,11 @@ export function ConfirmDialog({
   onCancel: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
+  // Unique per instance — three of these can exist in the tree at once (delete
+  // project, delete ticket, discard unsaved form) — so a plain literal id would
+  // collide and `aria-labelledby`/`aria-describedby` would point at the wrong dialog.
+  const titleId = useId()
+  const bodyId = useId()
 
   useEffect(() => {
     const d = ref.current
@@ -35,13 +40,15 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
+      aria-describedby={body ? bodyId : undefined}
       onCancel={e => { e.preventDefault(); onCancel() }}
       className="max-w-sm rounded-lg border border-border bg-background p-0
                  text-foreground backdrop:bg-black/40"
     >
       <div className="space-y-3 p-4">
-        <p className="text-sm font-semibold">{title}</p>
-        {body && <p className="text-sm text-muted-foreground">{body}</p>}
+        <p id={titleId} className="text-sm font-semibold">{title}</p>
+        {body && <p id={bodyId} className="text-sm text-muted-foreground">{body}</p>}
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="outline" onClick={onCancel}>Cancelar</Button>
           <Button size="sm" variant="destructive" onClick={onConfirm}>{confirmLabel}</Button>

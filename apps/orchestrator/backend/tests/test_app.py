@@ -262,7 +262,7 @@ def test_read_stamp_with_real_stream_json_shape(tmp_path):
     the stamp travels nested in `message.content[].text`, followed on the same line by
     `stop_reason`, `usage`, `session_id`, `uuid` and more. With a greedy `(.+)`,
     `read_stamp` used to return the path with all that trailer stuck behind it — exactly
-    what the guards phase (Task 4) would use as the servable path."""
+    the string a caller would hand to `declared_file` to serve as the artifact's path."""
     import app
     line = (
         '{"type":"assistant","message":{"content":[{"type":"text",'
@@ -322,6 +322,7 @@ def test_current_phase_no_longer_exists(tmp_path, monkeypatch):
         cols_tickets = {r["name"] for r in c.execute("PRAGMA table_info(tickets)")}
         cols_runs = {r["name"] for r in c.execute("PRAGMA table_info(runs)")}
     assert "current_phase" not in cols_tickets
+    assert "title" in cols_tickets
     assert {"artifact_state", "artifact_path", "artifact_note"} <= cols_runs
 
 
@@ -722,6 +723,24 @@ def test_the_ticket_list_carries_the_phases(client):
     expected = [f["fase"] for f in client.get(f"/tickets/{tid}").json()["fases"]]
     assert [f["fase"] for f in t["fases"]] == expected
     assert all("huella" not in f for f in t["fases"])
+
+
+def test_fases_travels_on_all_three_ticket_producers(client):
+    """`api.ts` declares `fases` required on `Ticket`, but `json<T>()` is an unchecked
+    cast — the hand-written types are the frontend's only safety net, and only
+    `GET /tickets` used to actually carry the field. `POST /tickets` and the `.ticket`
+    object inside `GET /tickets/{tid}` have to agree, or the type is a lie told exactly
+    at that boundary."""
+    created = client.post("/tickets", json={"ado_id": 42, "project": "Demo"}).json()
+    assert created["fases"] and created["fases"][0]["fase"] == "analyze"
+    tid = created["id"]
+    listed = next(t for t in client.get("/tickets").json() if t["id"] == tid)
+    assert listed["fases"] == created["fases"]
+    detail_ticket = client.get(f"/tickets/{tid}").json()["ticket"]
+    assert detail_ticket["fases"] == created["fases"]
+    # the detail view's OWN sibling `fases` key (read by `TicketDetail`, not by the
+    # ticket stepper) stays exactly as it was — this is additive, not a move.
+    assert client.get(f"/tickets/{tid}").json()["fases"] == created["fases"]
 
 
 def test_phases_with_one_run_each(client, monkeypatch, tmp_path):
@@ -1604,6 +1623,27 @@ def test_the_run_branch_is_the_one_prepared_under_the_lock(
         current = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path / d,
                                 capture_output=True, text=True).stdout.strip()
         assert current == "ticket-agent/3320"
+
+
+def test_delete_mid_run_does_not_crash_the_title_hook(client, monkeypatch, tmp_path):
+    """`DELETE /tickets/{tid}` has no guard against an in-flight run. A ticket deleted
+    while `analyze` is still running must not crash the background task's title hook:
+    `declared_file` does `t["id"]` unconditionally, and a `None` row from a ticket
+    deleted mid-run used to reach it uncaught, inside a background task nobody is
+    watching."""
+    (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "repo" / "docs" / "tickets" / "3311-analysis.md").write_text(
+        "# Titulo\n", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    run_now = _queue_without_running(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+
+    # The ticket (and, via the FK cascade, its queued run) disappears before the run
+    # actually executes — exactly the gap `execute_run` waits in for the lock.
+    assert client.delete(f"/tickets/{tid}").status_code == 204
+
+    run_now()  # must not raise
 
 
 def test_existing_path_is_valid(client, tmp_path):
