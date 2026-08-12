@@ -1035,6 +1035,39 @@ def test_analysis_without_heading_leaves_title_empty(client, monkeypatch, tmp_pa
     assert t["title"] is None
 
 
+def test_the_runner_stores_the_title_after_a_real_analyze_run(client, monkeypatch, tmp_path):
+    """Drives the WIRING, not the gate.
+
+    The three tests above call `read_title` directly, which proves the function works and
+    not that `execute_run` ever calls it. A test that reimplements the runner's logic in
+    order to check the runner is the exact shape of placebo this project has already
+    found five times — it passes because of its own setup. This one goes through
+    `POST /tickets/{tid}/run` with the fake CLI and reads the result off `GET /tickets`.
+    """
+    dest = tmp_path / "repo" / "docs" / "tickets"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "40-analysis.md").write_text(
+        "por ticket-agent v0.7.1\n\n# Carrier API V2 Migration - Dayton\n", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/40-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 40, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
+    assert t["title"] == "Carrier API V2 Migration - Dayton"
+
+
+def test_only_analyze_stores_a_title(client, monkeypatch, tmp_path):
+    """The hook is gated on the phase. A `design` run that declares a markdown file with
+    a heading must not stamp the plan's title onto the ticket."""
+    dest = tmp_path / "repo" / "docs"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "plan.md").write_text("# El plan, no el ticket\n", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/plan.md")
+    tid = client.post("/tickets", json={"ado_id": 41, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
+    assert t["title"] is None
+
+
 def test_title_is_not_a_second_door_to_disk(client, tmp_path):
     """A stamp declaring a traversal must not let `read_title` read outside the repo."""
     import app as app_module
@@ -1133,8 +1166,16 @@ Dos mutaciones, una por riesgo:
    Expected: `test_title_is_not_a_second_door_to_disk` en **rojo**.
 2. En `read_title`, cambiar `if line.startswith("# ")` por `if True`.
    Expected: `test_analysis_without_heading_leaves_title_empty` en **rojo**.
+3. En `execute_run`, borrar el gancho entero (las cuatro líneas del
+   `if phase == "analyze" and state in ("ok", "parcial")`).
+   Expected: `test_the_runner_stores_the_title_after_a_real_analyze_run` en **rojo**,
+   y los tres tests que llaman a `read_title` directamente **en verde** — que es
+   justamente por lo que hacía falta el cuarto.
+4. En ese mismo gancho, cambiar la condición a solo `state in ("ok", "parcial")`,
+   quitando la comprobación de fase.
+   Expected: `test_only_analyze_stores_a_title` en **rojo**.
 
-Si alguna de las dos deja todo verde, ese test no prueba nada. Revertir ambas.
+Si alguna deja todo verde, ese test no prueba nada. Revertir las cuatro.
 
 - [ ] **Step 6: Commit**
 
