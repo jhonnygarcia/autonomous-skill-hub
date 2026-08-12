@@ -1656,3 +1656,69 @@ def test_declared_file_or_none_rejects_what_the_endpoint_rejects(client, tmp_pat
     assert app_module.declared_file_or_none(t, "otro.md") is None
     # a directory is not a servable file
     assert app_module.declared_file_or_none(t, "docs") is None
+
+
+def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
+    """A ticket with a `design` run that declared a change directory, and an `implement`
+    run in flight. Returns the ticket id."""
+    import app as app_module
+
+    change = tmp_path / "repo" / "openspec" / "changes" / f"{ado_id}-x"
+    change.mkdir(parents=True, exist_ok=True)
+    if tasks_md is not None:
+        (change / "tasks.md").write_text(tasks_md, encoding="utf-8")
+    rel = f"openspec/changes/{ado_id}-x"
+    tid = client.post("/tickets", json={"ado_id": ado_id, "project": "Demo"}).json()["id"]
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+                  "VALUES(?,'design','success','ok',?)", (tid, rel))
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'implement','running')",
+                  (tid,))
+    return tid
+
+
+def _implement(client, tid):
+    return next(f for f in client.get(f"/tickets/{tid}").json()["fases"]
+                if f["fase"] == "implement")
+
+
+def test_progress_counts_the_boxes(client, tmp_path):
+    md = "## 1\n- [x] a\n- [x] b\n  - [x] c\n- [ ] d\n- [ ] e\n"
+    tid = _with_plan(client, tmp_path, md)
+    assert _implement(client, tid)["progreso"] == {"hechas": 3, "total": 5}
+
+
+def test_no_tasks_md_means_no_bar(client, tmp_path):
+    tid = _with_plan(client, tmp_path, None, ado_id=31)
+    assert _implement(client, tid).get("progreso") is None
+
+
+def test_tasks_md_without_boxes_means_no_bar(client, tmp_path):
+    tid = _with_plan(client, tmp_path, "solo prosa, ninguna casilla\n", ado_id=32)
+    assert _implement(client, tid).get("progreso") is None
+
+
+def test_no_design_run_means_no_bar(client):
+    import app as app_module
+    tid = client.post("/tickets", json={"ado_id": 33, "project": "Demo"}).json()["id"]
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'implement','running')",
+                  (tid,))
+    assert _implement(client, tid).get("progreso") is None
+
+
+def test_progress_is_not_a_second_door_to_disk(client, tmp_path):
+    """A `design` stamp that declares a traversal must not let the counter read a
+    `tasks.md` outside the ticket's repos."""
+    import app as app_module
+
+    fuera = tmp_path / "fuera"
+    fuera.mkdir(exist_ok=True)
+    (fuera / "tasks.md").write_text("- [x] a\n- [ ] b\n", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 34, "project": "Demo"}).json()["id"]
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+                  "VALUES(?,'design','success','ok','../fuera')", (tid,))
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'implement','running')",
+                  (tid,))
+    assert _implement(client, tid).get("progreso") is None

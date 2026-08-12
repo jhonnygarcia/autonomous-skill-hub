@@ -27,6 +27,9 @@ export type Phase = {
   estado?: "pendiente" | "corriendo" | "ok" | "parcial" | "error"
   corridas?: number; fallidas?: number
   en?: string | null; duracion_s?: number | null; motivo?: string; huella?: Footprint
+  /** Only on `implement` and only while running. An estimate: a big task weighs the
+   *  same as a small one, so it's shown as a count and never as a percentage. */
+  progreso?: { hechas: number; total: number } | null
 }
 export type Artifact = { ruta: string; texto: string; bytes: number; truncado: boolean }
 export type TicketDetail = { ticket: Ticket; fases: Phase[]; runs: Run[]; log_tail: string }

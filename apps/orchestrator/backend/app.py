@@ -612,6 +612,44 @@ def stamp_stat(repo: str, rel: str) -> dict:
             "nombres": names[:12]}
 
 
+# A checked box in `tasks.md`. The Phase 2b skill checks them off as it advances, so
+# counting lines is the whole mechanism — no stream-json parsing, which is a CLI format
+# that would have to be maintained when it changes.
+DONE_BOX = re.compile(r"^\s*- \[x\]", re.MULTILINE | re.IGNORECASE)
+OPEN_BOX = re.compile(r"^\s*- \[ \]", re.MULTILINE)
+
+
+def task_progress(t: sqlite3.Row, runs: list[dict]) -> dict | None:
+    """`{hechas, total}` for a running `implement`, or None.
+
+    Answers the question you actually have at minute 50 of an 83-minute run —how much is
+    left— instead of "is it still alive". It's an estimate, not a truth: a big task
+    counts the same as a small one, which is why the UI shows the count and never a
+    percentage of time.
+
+    None as soon as anything doesn't add up: no `design` run with a footprint, no
+    `tasks.md`, no boxes. Then the UI shows the stopwatch it showed before.
+    """
+    design = next((r for r in runs
+                   if r["phase"] == "design"
+                   and r["artifact_state"] in ("ok", "parcial")
+                   and r["artifact_path"]), None)
+    if not design:
+        return None
+    # Same path guard as the viewer: this is a path declared by a run of THIS ticket, and
+    # it goes through the predicate that took three rounds and 638 vectors.
+    p = declared_file_or_none(t, design["artifact_path"].rstrip("/") + "/tasks.md")
+    if not p:
+        return None
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    hechas = len(DONE_BOX.findall(text))
+    total = hechas + len(OPEN_BOX.findall(text))
+    return {"hechas": hechas, "total": total} if total else None
+
+
 def read_title(t: sqlite3.Row, rel: str) -> str | None:
     """The analysis's first `# ` heading, or None.
 
@@ -669,6 +707,11 @@ def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) ->
             else:
                 e["motivo"] = NO_STAMP_REASON
         else:
+            # Only while running, and only in the detail view: it's a disk read, and the
+            # list turns the footprint off for exactly that reason. Once finished, "19 of
+            # 19" says nothing the green check doesn't.
+            if with_footprint and name == "implement" and e["estado"] == "corriendo":
+                e["progreso"] = task_progress(t, runs)
             if e["estado"] == "parcial" and latest.get("artifact_note"):
                 e["motivo"] = latest["artifact_note"]
             if e["estado"] in ("ok", "parcial") and latest["artifact_path"] and with_footprint:
