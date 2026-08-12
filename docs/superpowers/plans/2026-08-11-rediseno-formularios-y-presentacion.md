@@ -34,7 +34,7 @@
 - Consumes: nada.
 - Produces: `is_repo_dir(path: str) -> bool` y la ruta `POST /rutas/validar` con cuerpo `{"ruta": str}` que devuelve `{"existe": bool}`. La Task 4 la consume desde el frontend.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Agregar al final de `tests/test_app.py`:
 
@@ -65,12 +65,12 @@ def test_absurd_path_does_not_blow_up(client):
     assert r.json() == {"existe": False}
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k path -v`
 Expected: los cuatro FAIL con `404 != 200` (la ruta no existe todavía).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Reemplazar `check_dirs` (`app.py:236-241`) por:
 
@@ -117,18 +117,18 @@ def validar_ruta(body: RutaIn):
     return {"existe": is_repo_dir(body.ruta)}
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: los 4 nuevos PASS y los existentes siguen PASS (`check_dirs` cambió de cuerpo pero no de contrato).
 
-- [ ] **Step 5: Verify the tests aren't placebos (mutation)**
+- [x] **Step 5: Verify the tests aren't placebos (mutation)**
 
 Cambiar temporalmente `is_repo_dir` a `return True`.
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k path -v`
 Expected: `test_nonexistent_path_is_invalid`, `test_a_file_is_not_a_repo` y `test_absurd_path_does_not_blow_up` en **rojo**. Si alguno sigue verde, el test no prueba nada. Revertir la mutación.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -146,7 +146,7 @@ git commit -m "feat(backend): la ruta se puede validar sin guardar el proyecto"
 - Consumes: `@/components/ui/button`.
 - Produces: `<ConfirmDialog open title body? confirmLabel? onConfirm onCancel />`. Lo consumen la Task 4 (descartar cambios), la Task 5 (borrar proyecto) y la Task 8 (borrar ticket).
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 ```tsx
 import { useEffect, useRef } from "react"
@@ -203,12 +203,12 @@ export function ConfirmDialog({
 }
 ```
 
-- [ ] **Step 2: Verify build and lint**
+- [x] **Step 2: Verify build and lint**
 
 Run desde `apps/orchestrator/frontend/`: `npm run build && npm run lint`
 Expected: ambos verdes. El componente todavía no lo usa nadie — eso es esperado en este paso.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/ConfirmDialog.tsx
@@ -227,7 +227,7 @@ git commit -m "feat(ui): confirmacion sobre <dialog> nativo, sin traer Radix"
 - Consumes: el tipo `Repo` de `@/api`.
 - Produces: `<RepoTable repos={Repo[]} />`. La consume la Task 5 (lista de proyectos).
 
-- [ ] **Step 1: Create the component**
+- [x] **Step 1: Create the component**
 
 ```tsx
 import type { Repo } from "@/api"
@@ -260,7 +260,7 @@ export function RepoTable({ repos }: { repos: Repo[] }) {
 }
 ```
 
-- [ ] **Step 2: Use it from `ProjectHeader`**
+- [x] **Step 2: Use it from `ProjectHeader`**
 
 Reemplazar `ProjectHeader.tsx` completo por:
 
@@ -294,14 +294,14 @@ export function ProjectHeader({ project }: { project: Project }) {
 }
 ```
 
-- [ ] **Step 3: Verify build, lint and the screen**
+- [x] **Step 3: Verify build, lint and the screen**
 
 Run: `npm run build && npm run lint`
 Expected: verdes.
 
 Verificación manual: con el backend corriendo, abrir `http://localhost:5173`, elegir un proyecto y confirmar que la tabla de repos del header se ve **exactamente igual que antes** (etiqueta a la izquierda, ruta monoespaciada a la derecha, `· principal` en el primero). Es una extracción, no un rediseño: cualquier diferencia visual es un error.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/RepoTable.tsx apps/orchestrator/frontend/src/ProjectHeader.tsx
@@ -320,7 +320,7 @@ git commit -m "refactor(ui): la tabla de repos sale de ProjectHeader para poder 
 - Consumes: `api.saveProject`, `api.validatePath` (nuevo), `ConfirmDialog` (Task 2), `Button`, `Input`.
 - Produces: `<ProjectForm initial={Project | null} onSaved={(name: string) => void} onCancel={() => void} />`. La consume la Task 5 desde `App.tsx`. Los helpers `newProject()` y `validate()` quedan **locales del módulo**: nadie fuera del archivo los usa, y exportarlos dispara `react/only-export-components` en oxlint, que sube la línea base de warnings sin comprar nada.
 
-- [ ] **Step 1: Add `validatePath` to the API client**
+- [x] **Step 1: Add `validatePath` to the API client**
 
 En `api.ts`, dentro del objeto `api`, después de `removeProject` (línea 55):
 
@@ -334,7 +334,7 @@ En `api.ts`, dentro del objeto `api`, después de `removeProject` (línea 55):
     }).then(r => json<{ existe: boolean }>(r)).then(x => x.existe),
 ```
 
-- [ ] **Step 2: Write the component**
+- [x] **Step 2: Write the component**
 
 ```tsx
 import { useEffect, useRef, useState } from "react"
@@ -568,12 +568,12 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
 }
 ```
 
-- [ ] **Step 3: Verify build and lint**
+- [x] **Step 3: Verify build and lint**
 
 Run: `npm run build && npm run lint`
 Expected: verdes. Todavía no está enganchado a `App.tsx` — eso es la Task 5.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/ProjectForm.tsx apps/orchestrator/frontend/src/api.ts
@@ -593,7 +593,7 @@ git commit -m "feat(ui): el formulario de proyecto contesta al salir de cada cam
 - Consumes: `ProjectForm` (Task 4), `ConfirmDialog` (Task 2), `RepoTable` (Task 3).
 - Produces: la vista `{ kind: "projectForm"; name: string | null }` en el `View` union de `App.tsx`.
 
-- [ ] **Step 1: Rewrite `Projects.tsx` as a list only**
+- [x] **Step 1: Rewrite `Projects.tsx` as a list only**
 
 ```tsx
 import { useState } from "react"
@@ -670,7 +670,7 @@ export function Projects({ projects, onEdit, onNew, onChange }: {
 }
 ```
 
-- [ ] **Step 2: Rewrite `App.tsx`**
+- [x] **Step 2: Rewrite `App.tsx`**
 
 ```tsx
 import { useEffect, useState } from "react"
@@ -832,11 +832,11 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 3: Drop `+ Nuevo` from the sidebar**
+- [x] **Step 3: Drop `+ Nuevo` from the sidebar**
 
 En `Sidebar.tsx`, borrar la línea 31 (`<Button size="sm" variant="outline" className="mt-1" onClick={onNew}>+ Nuevo</Button>`), quitar `onNew` de las props y de su tipo. El botón de crear vive ahora donde está la lista: dos botones para lo mismo, en dos pantallas distintas, era el salto que nadie entendía.
 
-- [ ] **Step 4: Verify build, lint and the whole flow**
+- [x] **Step 4: Verify build, lint and the whole flow**
 
 Run: `npm run build && npm run lint`
 Expected: verdes, y **cero referencias sobrantes** a `startNew` o a la prop `onNew` (el compilador de TypeScript las cazaría).
@@ -849,7 +849,7 @@ Verificación manual, con backend y frontend corriendo — los seis casos:
 5. Editar un proyecto, cambiar algo y apretar `Cancelar` abre el diálogo; `Escape` lo cierra sin salir.
 6. `Borrar` en la lista abre el diálogo; confirmar borra el proyecto y la lista se refresca.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/App.tsx apps/orchestrator/frontend/src/Projects.tsx apps/orchestrator/frontend/src/Sidebar.tsx
@@ -872,7 +872,7 @@ git commit -m "feat(ui): el formulario de proyecto vive en su propia vista"
 - Consumes: `normalize_dirs`, `ticket_row`, `db`.
 - Produces: `declared_file(t: sqlite3.Row, ruta: str) -> Path` (lanza `HTTPException(400)`) y `declared_file_or_none(t: sqlite3.Row, ruta: str) -> Path | None`. Las consumen la Task 7 (`read_title`) y la Task 10 (`task_progress`).
 
-- [ ] **Step 1: Write the failing test for the new function**
+- [x] **Step 1: Write the failing test for the new function**
 
 Agregar al final de `tests/test_app.py`:
 
@@ -903,12 +903,12 @@ def test_declared_file_or_none_rejects_what_the_endpoint_rejects(client, tmp_pat
     assert app_module.declared_file_or_none(t, "docs") is None
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k declared_file_or_none -v`
 Expected: FAIL con `AttributeError: module 'app' has no attribute 'declared_file_or_none'`.
 
-- [ ] **Step 3: Move the guard out of the handler**
+- [x] **Step 3: Move the guard out of the handler**
 
 Cortar de `artifact` (`app.py:867-940`) las reglas 1, 2 y 3 —desde el `with db() as c:` que arma `declared` hasta el `raise HTTPException(400, "No es un archivo regular")`— y pegarlas **tal cual, con todos sus comentarios**, dentro de esta función nueva, colocada justo antes de `ARTIFACT_CAP` (`app.py:856`):
 
@@ -967,18 +967,18 @@ def artifact(tid: int, ruta: str):
     # <<< el resto del comentario y del cuerpo original (líneas 942-960), sin cambios
 ```
 
-- [ ] **Step 4: Run the FULL suite**
+- [x] **Step 4: Run the FULL suite**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: los existentes PASS —**incluida toda la batería de path traversal, que sigue corriendo contra el endpoint**— más el nuevo. Un test de traversal que se volvió rojo significa que la extracción cambió el comportamiento: revertir y volver a mover, sin reformular.
 
-- [ ] **Step 5: Verify it isn't a placebo (mutation)**
+- [x] **Step 5: Verify it isn't a placebo (mutation)**
 
 Cambiar temporalmente el cuerpo de `declared_file` por `return (Path(t["repo_path"]) / ruta).resolve()`.
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: **rojo** tanto en los tests de traversal del endpoint como en `test_declared_file_or_none_rejects_what_the_endpoint_rejects`. Si el endpoint se pone rojo pero el test nuevo no, el test nuevo no está ejerciendo la función. Revertir la mutación.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -998,7 +998,7 @@ git commit -m "refactor(backend): el guardian de rutas sale del handler, movido 
 - Consumes: `declared_file_or_none` (Task 6), `ticket_row`, `set_ticket`.
 - Produces: `read_title(t: sqlite3.Row, rel: str) -> str | None`, la columna `tickets.title`, y el campo `title: string | null` en el payload de `GET /tickets` y `GET /tickets/{id}`. Lo consume la Task 8.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def _fake_analyze(client, monkeypatch, tmp_path, contenido: str):
@@ -1081,12 +1081,12 @@ def test_title_is_not_a_second_door_to_disk(client, tmp_path):
     assert app_module.read_title(t, "../secreto.md") is None
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k title -v`
 Expected: FAIL con `AttributeError: module 'app' has no attribute 'read_title'`.
 
-- [ ] **Step 3: Add the column, the reader, and the write in the runner**
+- [x] **Step 3: Add the column, the reader, and the write in the runner**
 
 En `init_db`, agregar a la tupla de `ALTER` (después de la línea 398, `ADD COLUMN branch`):
 
@@ -1153,12 +1153,12 @@ export type Ticket = {
 
 `ticket_out` devuelve `{**dict(t), ...}`, así que el campo viaja solo en cuanto existe la columna: no hay que tocar `GET /tickets` ni `GET /tickets/{id}`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: los tres nuevos PASS y los anteriores siguen PASS.
 
-- [ ] **Step 5: Verify they aren't placebos (mutation)**
+- [x] **Step 5: Verify they aren't placebos (mutation)**
 
 Dos mutaciones, una por riesgo:
 
@@ -1177,7 +1177,7 @@ Dos mutaciones, una por riesgo:
 
 Si alguna deja todo verde, ese test no prueba nada. Revertir las cuatro.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py apps/orchestrator/frontend/src/api.ts
@@ -1199,7 +1199,7 @@ git commit -m "feat(backend): el titulo del ticket sale del analisis, no de Azur
 - Consumes: `Phase` y `PHASE_LABEL`, `ConfirmDialog` (Task 2), `title` (Task 7).
 - Produces: `fases: Phase[]` en cada elemento de `GET /tickets`.
 
-- [ ] **Step 1: Write the failing test for `fases` in the list**
+- [x] **Step 1: Write the failing test for `fases` in the list**
 
 ```python
 def test_the_ticket_list_carries_the_phases(client):
@@ -1217,12 +1217,12 @@ def test_the_ticket_list_carries_the_phases(client):
     assert all("huella" not in f for f in t["fases"])
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k lista_de_tickets_trae -v`
 Expected: FAIL con `KeyError: 'fases'`.
 
-- [ ] **Step 3: Include `fases` in the list payload**
+- [x] **Step 3: Include `fases` in the list payload**
 
 Reemplazar el `return` de `list_tickets` (`app.py:645-646`):
 
@@ -1239,7 +1239,7 @@ Reemplazar el `return` de `list_tickets` (`app.py:645-646`):
 
 En `api.ts`, agregar al tipo `Ticket`: `fases: Phase[]` (mover la declaración de `Ticket` debajo de `Phase`, o declarar `Phase` antes — TypeScript resuelve los tipos sin importar el orden, así que basta con agregar el campo).
 
-- [ ] **Step 4: Rewrite `TicketList.tsx`**
+- [x] **Step 4: Rewrite `TicketList.tsx`**
 
 ```tsx
 import { useState } from "react"
@@ -1367,7 +1367,7 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
 }
 ```
 
-- [ ] **Step 5: Confirm before deleting a ticket**
+- [x] **Step 5: Confirm before deleting a ticket**
 
 En `TicketDetail.tsx`, agregar el import (`useState` ya está importado en la línea 1):
 
@@ -1398,14 +1398,14 @@ Y al final del `<div className="space-y-4">`, antes de cerrarlo:
                      onCancel={() => setConfirmDelete(false)} />
 ```
 
-- [ ] **Step 6: Run backend tests, build and lint**
+- [x] **Step 6: Run backend tests, build and lint**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v` → todos PASS.
 Run: `npm run build && npm run lint` → verdes.
 
 Verificación manual: un ticket sin analizar muestra `#3332` y tres puntos grises; después de una corrida `ok` de análisis muestra el título y el primer punto verde. `Borrar` en el detalle abre el diálogo.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py apps/orchestrator/frontend/src
@@ -1427,7 +1427,7 @@ git commit -m "feat(ui): el ticket dice de que se trata y por donde va"
 - Consumes: nada.
 - Produces: `PHASES == list(PHASE_COMMANDS)`. La Task 8 depende de esto para su aserción de tres fases.
 
-- [ ] **Step 1: Update the two assertions that expect five phases**
+- [x] **Step 1: Update the two assertions that expect five phases**
 
 En `tests/test_app.py`, línea 702:
 
@@ -1439,12 +1439,12 @@ Y borrar la línea 708 entera (`assert phases[3] == {"fase": "guards", "disponib
 
 Los otros tres usos de `guards` (líneas 329-334 y 478) **siguen valiendo tal cual**: comprueban que una fase que no está en `PHASE_COMMANDS` se rechaza con 400, y eso no cambia — `guards` deja de estar declarada, pero sigue sin ser lanzable.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k phase -v`
 Expected: FAIL en la línea 702, que sigue recibiendo cinco fases.
 
-- [ ] **Step 3: Remove the two phases**
+- [x] **Step 3: Remove the two phases**
 
 En `app.py`, reemplazar el comentario y la constante (`app.py:20-25`):
 
@@ -1470,14 +1470,14 @@ export const PHASE_LABEL: Record<string, string> = {
 
 **No se toca** la rama `if name not in PHASE_COMMANDS` de `phases_for` (`app.py:586-588`) ni el `if (!f.disponible)` de `canRunPhase` (`status.ts:104`). Quedan sin alcanzar hoy, y son el mecanismo que hace que declarar una fase futura no reviente. Borrarlos ahorraría dos líneas y costaría el próximo `guards`.
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: todos PASS. Prestar atención a cualquier test que contase fases indirectamente.
 
 Run: `npm run build && npm run lint` → verdes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py apps/orchestrator/frontend/src/status.ts
@@ -1497,7 +1497,7 @@ git commit -m "refactor: guards y pr salen del timeline hasta que existan"
 - Consumes: `declared_file_or_none` (Task 6).
 - Produces: `task_progress(t, runs) -> dict | None` y el campo `progreso?: {hechas: number; total: number} | null` en la entrada de la fase `implement` de `GET /tickets/{id}`. Lo consume la Task 11.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30,
@@ -1602,12 +1602,12 @@ def test_progress_is_not_a_second_door_to_disk(client, tmp_path):
     assert _implement(client, tid).get("progreso") is None
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `.venv/Scripts/python -m pytest tests/test_app.py -k "progress or bar" -v`
 Expected: `test_progress_counts_the_boxes` FAIL con `KeyError: 'progreso'`; los otros pasan por accidente (el campo no existe, así que `.get()` da `None`). Eso está bien: son redes para la implementación, no la prueba de que falta.
 
-- [ ] **Step 3: Implement `task_progress` and hook it in**
+- [x] **Step 3: Implement `task_progress` and hook it in**
 
 Agregar después de `stamp_stat` (`app.py:579`):
 
@@ -1674,12 +1674,12 @@ export type Phase = {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `.venv/Scripts/python -m pytest tests/ -v`
 Expected: los cinco nuevos PASS, los anteriores siguen PASS.
 
-- [ ] **Step 5: Verify they aren't placebos (mutation)**
+- [x] **Step 5: Verify they aren't placebos (mutation)**
 
 Tres mutaciones:
 
@@ -1696,7 +1696,7 @@ Tres mutaciones:
 
 Revertir las tres.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py apps/orchestrator/frontend/src/api.ts
@@ -1714,7 +1714,7 @@ git commit -m "feat(backend): el avance de implement sale de contar casillas de 
 - Consumes: `progreso` del tipo `Phase` (Task 10).
 - Produces: nada.
 
-- [ ] **Step 1: Add the bar**
+- [x] **Step 1: Add the bar**
 
 En `Timeline.tsx`, justo después del bloque `{reason && f.disponible && ...}` (línea 147) e inmediatamente antes de `{f.estado === "error" && ...}`:
 
@@ -1735,11 +1735,11 @@ En `Timeline.tsx`, justo después del bloque `{reason && f.disponible && ...}` (
               )}
 ```
 
-- [ ] **Step 2: Give the chevron a label**
+- [x] **Step 2: Give the chevron a label**
 
 En la línea 139, reemplazar `▾` por `▾ Ajustar`. Tenía `aria-label`, así que un lector de pantalla lo anunciaba, pero visualmente era un galón pelado que nadie encuentra.
 
-- [ ] **Step 3: Verify build, lint and the screen**
+- [x] **Step 3: Verify build, lint and the screen**
 
 Run: `npm run build && npm run lint` → verdes.
 
@@ -1749,7 +1749,7 @@ Verificación manual — se puede montar sin esperar 83 minutos, con `sqlite3` s
 3. Abrir el detalle: la fila **Código** muestra la barra al 60% y el texto `tarea 3 de 5`.
 4. Marcar una casilla más en `tasks.md` y esperar el poll de 3 segundos: la barra pasa a `4 de 5` sola.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/Timeline.tsx
@@ -1760,5 +1760,5 @@ git commit -m "feat(ui): la corrida larga dice por que tarea va"
 
 # Cierre
 
-- [ ] **Actualizar `docs/STATUS.md`**: marcar el rediseño como hecho, anotar el resultado de las tres fases, y tachar de "Immediate pending items" lo que este plan cerró. Anotar la deuda que sigue abierta: el interruptor de tema y el artefacto en markdown crudo.
-- [ ] **Verificación final completa**: `.venv/Scripts/python -m pytest tests/ -v` (todos verdes) y `npm run build && npm run lint` (verdes), con el conteo de tests antes y después anotado en el commit.
+- [x] **Actualizar `docs/STATUS.md`**: marcar el rediseño como hecho, anotar el resultado de las tres fases, y tachar de "Immediate pending items" lo que este plan cerró. Anotar la deuda que sigue abierta: el interruptor de tema y el artefacto en markdown crudo.
+- [x] **Verificación final completa**: `.venv/Scripts/python -m pytest tests/ -v` (todos verdes) y `npm run build && npm run lint` (verdes), con el conteo de tests antes y después anotado en el commit.

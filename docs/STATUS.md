@@ -1,7 +1,8 @@
 # Project status — Autonomous Skill Hub
 
 > Living document. Update it when closing each milestone or making a decision.
-> Last updated: 2026-08-11 (**Phase 2b built and validated**: the agent writes code)
+> Last updated: 2026-08-11 (**UI redesign of forms and presentation**, second round
+> of "it isn't intuitive" — this one on the forms and the feedback)
 
 ## Purpose
 
@@ -462,6 +463,96 @@ let `PreToolUse` be swapped for `PostToolUse` —the hook would run **after**
 the push, with `exit 2` already useless— and the 118 tests stayed green. The
 milestone's only containment mechanism wasn't held in place by anything.
 
+## Seventh session — 2026-08-11: the forms, and twelve defects in my own plan
+
+**Second round of "it isn't intuitive."** The first (2026-08-09) fixed navigation;
+this one fixed the **forms and the feedback**, which that round left untouched. Spec
+`2026-08-11-rediseno-formularios-y-presentacion-design.md`, plan with its 58
+checkboxes, executed with `subagent-driven-development`: **11 tasks, 3 internal
+phases, 33 commits, 16 files, +3086/-236**. Backend from 133 to **153 tests**.
+Frontend build and lint green at their exact two-warning baseline.
+
+The user is a **technically competent but occasional** colleague: they know what a
+repo path is, but not whether it takes `/` or `\`. That ruled out both tempting
+answers — simplifying the vocabulary, and building a wizard. The principle that
+replaced them extends 2026-08-09's lesson from space to time: *the answer has to
+arrive when the decision is made, not at the end.*
+
+What exists now: the project form is its own view with paths validated on blur
+(`POST /rutas/validar`); `Guardar` is never greyed-out-and-silent; deletes confirm;
+repos are visible in the list instead of hiding in a `title=`; tickets carry a title
+read from their analysis; the ticket list has its three-dot stepper back; `guards`
+and `pr` are gone; and a running `implement` shows "tarea 7 de 19", counted from the
+checkboxes in the plan's own `tasks.md`.
+
+**Zero new dependencies.** Confirmations run on the native `<dialog>` (focus trap,
+Escape, `::backdrop`, `inert` — all free), validation is a 15-line function instead
+of `zod`, and errors stay where they happened instead of a `sonner` toast that
+vanishes. `shadcn add alert-dialog` exists because Radix targets browsers this app
+never runs in.
+
+### The finding that matters more than the feature
+
+**Twelve defects were found in my own spec and plan. My self-review found none of
+them; the review loop found all twelve.** They sort into three kinds, and the sort
+is the useful part:
+
+| Kind | Count | Example |
+|---|---|---|
+| The document contradicted itself | 4 | Global Constraints said "code in English"; the code blocks used Spanish test names. Interfaces claimed Task 5 consumed two helpers; the `App.tsx` I wrote in that same task imports neither. |
+| The document was simply wrong about the code | 5 | `id="campo-repos"` on a `<div>` — a div without `tabindex` cannot take focus, so the "focus the first missing field" requirement was a silent no-op. A `validate()` that let a payload reach a backend that rejects it. An `aria-hidden` justified by a badge that doesn't say what the dots say. |
+| The document promised something that shouldn't happen | 1 | D5 said the global `error` in `App.tsx` disappears. It didn't, and shouldn't: ticket create/run/delete failures have nowhere else to go. The implementation was right and left the reasoning in a comment. |
+
+Plus two **omissions** — nothing written was wrong; something needed was missing.
+Those are the interesting ones, because no review of a single task could see them:
+
+- **Task 4 built an unsaved-changes guard; Task 5 wired the route around it.** Type
+  in the project form, click another project in the sidebar, and the typed data was
+  gone with no warning — while `Cancelar` and Escape both warned for the identical
+  situation. Each task was correct alone. *The gap lived only between them.* This is
+  the third time this project has learned that the gaps live in the seams.
+- **A `try/except OSError` nobody proved fires.** The reviewer rejected the
+  implementer's "low-risk defensive code" framing by asking *when this function
+  actually runs*: while `implement` rewrites the same `tasks.md` it reads, polled
+  every 3 seconds across an 83-minute run. A real TOCTOU window, not a device-file
+  curiosity.
+
+### And the one that should be framed
+
+**The test I wrote to close a coverage gap was itself a placebo.** `pathlib`
+collapses repeated separators at construction, before `resolve()`, so `Path("a//b")`
+and `Path("a/b")` are the same object: with the `.rstrip("/")` deleted, my end-to-end
+assertion still passed. The implementer caught it in the mutation step, overrode my
+instruction, and rewrote it to spy on the string handed to `declared_file_or_none` —
+the only level where the mutation is observable. The re-reviewer then verified the
+deviation was right rather than accepting it.
+
+Nine placebos found before this session, and the tenth was in the fix for one.
+
+### What went right, and is worth repeating
+
+- **The path guard survived its extraction.** `declared_file` had to move out from
+  under `/artefacto` so the title reader and the progress counter could reuse it —
+  the one change in this plan where a subtle difference is a security hole, not a
+  bug. Rule given: *move, do not rewrite.* Result: **73 of 74 lines byte-identical**,
+  the single change (`(tid,)` → `(t["id"],)`) provably equivalent, and the two
+  ordered `any(...)` calls that are the round-3 fix neither collapsed nor reordered.
+  The 638 vectors kept running **against the endpoint**, because a test that only
+  exercises the extracted function doesn't prove the endpoint uses it.
+- **The reviewer proved fidelity instead of inspecting it.** In a unified diff every
+  line with a leading space is byte-identical by construction, and the whole guard
+  travelled as context. For the gap git didn't print it closed the offset arithmetic
+  (923/926 → 945/948, constant +3). That's a proof, not a reading.
+- **Telling reviewers the brief is not a trustworthy oracle changed what they
+  found.** After the third plan defect, every review prompt carried the running
+  count. A reviewer who assumes the document is right can only find transcription
+  errors.
+- **Substituting verifications a subagent cannot perform.** Half the plan's steps
+  ended in "check it in the running app". Replaced, each time, with something
+  provable by reading: element-by-element markup comparison against `git show` of
+  the pre-extraction file; a grep for dead props that still typecheck; hand-traced
+  accessible names; hand-computed bar widths.
+
 ## Immediate pending items
 
 - [ ] **Read the 2658 lines that 3332 left on branch `ticket-agent/3332`.**
@@ -506,7 +597,28 @@ milestone's only containment mechanism wasn't held in place by anything.
 - [ ] **Add a theme switch to the UI.** The dark palette is complete and its
   contrast verified (WCAG AA ratio against `#0a0a0a`), but today it can only
   be reached by forcing the `.dark` class by hand: there's no way to get
-  there from the app.
+  there from the app. The 2026-08-11 redesign explicitly declined to smuggle
+  it in.
+- [ ] **Show the redesign to the client who asked for it.** Nobody has used any
+  of it yet: the whole 11-task branch was verified by tests, builds and reading,
+  never by a person clicking through it. That measures that the mechanism works,
+  not that the screens are intuitive — the same trap as a test that passes
+  because of its setup, and precisely what this branch was built to fix.
+  **That verdict is what says whether the second round of "it isn't intuitive"
+  landed.**
+- [ ] **Extract a shared `ErrorBanner`.** The dismissible banner markup is now
+  duplicated verbatim in `App.tsx`, `Projects.tsx` and `ProjectForm.tsx` — 12
+  lines × 3, focus-ring classes and `aria-label` included. A classic seam
+  artifact: each task added its copy correctly and no task owned the third.
+  Deferred by the final review, not forgotten.
+- [ ] **Two small holes the final review named and deferred.** `RepoTable`'s
+  `key={r.path}` collides if two repos share a path — reachable, since nothing
+  in `validate`, `check_dirs` or `split_repos` rejects duplicates, though the
+  blast radius is a React console warning in a read-only table. And the
+  `disponible: false` contract (`phases_for`'s branch, `canRunPhase`'s branch,
+  `Stepper`'s filter) is now unreachable code kept **on purpose** — it is the
+  seat `guards` returns to — but nothing tests that it still works when a phase
+  is re-declared.
 
 - [x] ~~**Model and effort per phase**~~ — done 2026-08-11. `phase_config`
   table + Settings → "Model per phase" in the UI; the runner adds
