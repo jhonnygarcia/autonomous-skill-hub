@@ -926,6 +926,12 @@ def declared_file(t: sqlite3.Row, ruta: str) -> Path:
 
     The cap and the read stay in the endpoint: those are about serving a file, not about
     deciding whether it may be read.
+
+    **`t` must be a row from `ticket_row`.** The extraction moved the ticket's scope out
+    of a path parameter and onto the caller's row: the declared-paths query is filtered
+    by `t["id"]`. A caller handing over a hand-built or partial mapping gets a `KeyError`
+    if the column is missing, or — silently, which is worse — a query scoped to the wrong
+    ticket if the `id` doesn't match the ticket whose files are being served.
     """
     # <<< aquí van, sin tocar, las líneas 867-940 originales, terminando en `return real`
 ```
