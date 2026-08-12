@@ -17,12 +17,12 @@ BASE = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("ORCH_DB", BASE / "orchestrator.db"))
 LOGS_DIR = Path(os.environ.get("ORCH_LOGS", BASE / "logs"))
 
-# `test` used to be here and was removed on 2026-08-11: it isn't a phase, it's part of
-# `implement`. Every task in the plan carries its own "Check" and the skill is required
-# to run it, so run 3332 wrote 12 test files inside the implementation itself. A phase
-# that never gets launched only takes up a slot in the timeline and promises something
-# that never arrives.
-PHASES = ["analyze", "design", "implement", "guards", "pr"]
+# Declaring a phase and being able to launch it are two different things, and a phase
+# declared without a command is a broken promise taking up a slot in the timeline. `test`
+# went first on 2026-08-11 (it isn't a phase, it's part of `implement`), and `guards` and
+# `pr` follow it: they were in this list from the start and never gained a command, so the
+# UI painted two rows out of five that never did anything. They come back when they exist.
+PHASES = ["analyze", "design", "implement"]
 
 # Declaring a phase doesn't mean implementing it. Only these three can be launched; the
 # rest are in PHASES so the UI knows they exist, and they're rejected with 400.

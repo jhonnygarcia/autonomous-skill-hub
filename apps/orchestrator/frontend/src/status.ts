@@ -55,12 +55,11 @@ export function duration(from: string | null, to: string | null): string {
   return durationText(Math.round((Date.parse(to) - Date.parse(from)) / 1000))
 }
 
-/** The pipeline's five phases, with the name shown to the user.
- *  `test` disappeared on 2026-08-11: tests are written inside `implement`,
- *  because each plan task carries its own check. It wasn't a phase, it was a step. */
+/** The pipeline's phases, with the name shown to the user.
+ *  `test` disappeared on 2026-08-11 (tests are written inside `implement`), and
+ *  `guards`/`pr` on the same date for the opposite reason: they never existed. */
 export const PHASE_LABEL: Record<string, string> = {
   analyze: "Análisis", design: "Plan", implement: "Código",
-  guards: "Revisión", pr: "PR",
 }
 
 /** Human-readable size of an artifact: bytes, KB or MB. */

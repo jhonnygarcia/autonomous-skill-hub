@@ -699,13 +699,11 @@ def test_phases_without_runs(client):
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     phases = client.get(f"/tickets/{tid}").json()["fases"]
     # `test` isn't there: tests are written inside `implement`, not in a phase of their own.
-    assert [f["fase"] for f in phases] == ["analyze", "design", "implement", "guards", "pr"]
+    assert [f["fase"] for f in phases] == ["analyze", "design", "implement"]
     assert phases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
     assert phases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
                         "corridas": 0, "fallidas": 0}
-    # a non-launchable phase reports no state: there's nothing to report
-    assert phases[3] == {"fase": "guards", "disponible": False}
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 
