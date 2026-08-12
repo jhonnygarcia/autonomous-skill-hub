@@ -118,9 +118,21 @@ Sin toasts. Un toast desaparece, y un error que exige acción no debe desaparece
 - **De campo** (ruta que no existe, nombre vacío): debajo del campo, en rojo.
 - **De acción** (guardar falló, correr falló): banner persistente arriba del botón
   que falló, descartable con `[✕]`.
-- **El `error` global de `App.tsx` desaparece.** Hoy un fallo al guardar un
-  proyecto puede aparecer en dos lugares distintos —el `error` de `App.tsx:24` y
-  el de `Projects.tsx:36`— y ninguno de los dos está cerca del campo que lo causó.
+- **El `error` global de `App.tsx` deja de ser el vertedero de todo.** Hoy un
+  fallo al guardar un proyecto puede aparecer en dos lugares distintos —el
+  `error` de `App.tsx:24` y el de `Projects.tsx:36`— y ninguno de los dos está
+  cerca del campo que lo causó.
+
+  **Corrección tras la revisión de rama (2026-08-11).** Esta decisión decía que
+  el `error` global *desaparece*, y eso era generalizar de más: razoné sobre el
+  caso de guardar un proyecto, donde sí había dos sumideros compitiendo, y no
+  miré qué más pasaba por ahí. Por `act()` viajan también crear, lanzar y borrar
+  ticket, y esos fallos no tienen otro sitio adonde ir. Lo que se implementó
+  —y es lo correcto— es que cada sumidero queda acotado a la vista donde se
+  tomó la acción: `ProjectForm` para el formulario, `Projects` para el borrado
+  de proyecto, `App` para las acciones de ticket. El fallo del poll de 3
+  segundos sí desaparece del todo. El principio de D5 se cumple; la frase
+  original no describía lo que el principio pedía.
 
 Tampoco hay acuse de éxito: después de guardar volvés a la lista y ves el
 proyecto ahí. La navegación *es* el acuse.
