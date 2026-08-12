@@ -412,6 +412,11 @@ def init_db() -> None:
             # ever wrote to it: a slot planned for this that only caused confusion.
             # Progress is computed from `runs`.
             "ALTER TABLE tickets DROP COLUMN current_phase",
+            # The ticket's title, read from the analysis when `analyze` closes well.
+            # It doesn't come from Azure DevOps: the backend has no ADO credentials —
+            # the MCP only lives inside the agent's subprocess — and giving it some
+            # would mean building a second authentication path to save a typo.
+            "ALTER TABLE tickets ADD COLUMN title TEXT",
         ):
             try:
                 c.execute(alter)
@@ -605,6 +610,32 @@ def stamp_stat(repo: str, rel: str) -> dict:
             "bytes": sum(x.stat().st_size for x in children),
             # ponytail: 12 names are enough for the timeline; a change has 4.
             "nombres": names[:12]}
+
+
+def read_title(t: sqlite3.Row, rel: str) -> str | None:
+    """The analysis's first `# ` heading, or None.
+
+    Soft contract: the skill's template writes that heading, but no plugin test protects
+    it, so every failure path returns None and the UI falls back to `#<ado_id>`.
+
+    Goes through `declared_file_or_none`, not straight to disk: a stamp that declares a
+    traversal must not become a second, laxer door.
+    """
+    p = declared_file_or_none(t, rel)
+    if not p:
+        return None
+    try:
+        with open(p, encoding="utf-8", errors="replace") as fh:
+            # The heading is at the top; a 28 KB analysis isn't read whole for a title.
+            for _ in range(50):
+                line = fh.readline()
+                if not line:
+                    break
+                if line.startswith("# "):
+                    return line[2:].strip()[:200] or None
+    except OSError:
+        return None
+    return None
 
 
 def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) -> list[dict]:
@@ -845,6 +876,13 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         path, note = split_reserve(state, rest)
         set_run(run_id, status="success" if ok else "error", finished_at=now(),
                 artifact_state=state, artifact_path=path, artifact_note=note)
+        # The title travels with the analysis, so it only gets read when that phase
+        # closes with a footprint. `title` is only written when one is found: a re-run
+        # that comes out worse must not erase the title the previous one left.
+        if phase == "analyze" and state in ("ok", "parcial"):
+            title = read_title(ticket_row(ticket["id"]), path)
+            if title:
+                set_ticket(ticket["id"], title=title)
         set_ticket(ticket["id"])   # only touches updated_at: the state is computed on read
 
 

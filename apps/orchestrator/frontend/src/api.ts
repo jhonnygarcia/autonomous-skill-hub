@@ -1,6 +1,9 @@
 export type Ticket = {
   id: number; ado_id: number; org: string; project: string
   status: string; created_at: string; updated_at: string
+  /** Read from the analysis when `analyze` closes well. `null` before that: we don't
+   *  know what the ticket is about yet, and saying so is honest. */
+  title: string | null
 }
 export type Run = {
   id: number; phase: string; instructions: string | null

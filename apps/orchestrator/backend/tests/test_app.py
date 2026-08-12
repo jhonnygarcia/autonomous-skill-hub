@@ -1303,6 +1303,53 @@ def test_runs_has_branch_column(client):
     assert "branch" in cols
 
 
+def _fake_analyze(client, monkeypatch, tmp_path, contenido: str):
+    """Runs a fake `analyze` that writes `contenido` at docs/tickets/1-analysis.md and
+    closes with the stamp pointing at it. Returns the ticket id."""
+    import app as app_module
+
+    dest = tmp_path / "repo" / "docs" / "tickets"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "1-analysis.md").write_text(contenido, encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+                  "VALUES(?,'analyze','success','ok','docs/tickets/1-analysis.md')", (tid,))
+    t = app_module.ticket_row(tid)
+    titulo = app_module.read_title(t, "docs/tickets/1-analysis.md")
+    if titulo:
+        app_module.set_ticket(tid, title=titulo)
+    return tid
+
+
+def test_title_comes_from_the_first_heading(client, monkeypatch, tmp_path):
+    tid = _fake_analyze(client, monkeypatch, tmp_path,
+                        "por ticket-agent v0.7.1\n\n# Carrier API V2 Migration - Dayton\n\ntexto\n")
+    t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
+    assert t["title"] == "Carrier API V2 Migration - Dayton"
+
+
+def test_analysis_without_heading_leaves_title_empty(client, monkeypatch, tmp_path):
+    """Soft contract: the skill's template writes the `# `, but no plugin test protects
+    it. Without a heading the list falls back to `#<ado_id>` — it must never blow up."""
+    tid = _fake_analyze(client, monkeypatch, tmp_path, "sin encabezado ninguno\n")
+    t = next(x for x in client.get("/tickets").json() if x["id"] == tid)
+    assert t["title"] is None
+
+
+def test_title_is_not_a_second_door_to_disk(client, tmp_path):
+    """A stamp declaring a traversal must not let `read_title` read outside the repo."""
+    import app as app_module
+
+    (tmp_path / "secreto.md").write_text("# secreto\n", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 2, "project": "Demo"}).json()["id"]
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+                  "VALUES(?,'analyze','success','ok','../secreto.md')", (tid,))
+    t = app_module.ticket_row(tid)
+    assert app_module.read_title(t, "../secreto.md") is None
+
+
 def test_a_directory_that_does_not_exist_gives_409(tmp_path, monkeypatch):
     """Not "not a git repo" anymore: a path that isn't even on disk. `is_dirty`
     checks `Path.is_dir()` before invoking `git`, so this gives the same clean 409
