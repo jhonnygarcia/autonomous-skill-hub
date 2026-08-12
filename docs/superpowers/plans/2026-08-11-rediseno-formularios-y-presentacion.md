@@ -1441,7 +1441,7 @@ Los otros tres usos de `guards` (líneas 329-334 y 478) **siguen valiendo tal cu
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_app.py -k fase -v`
+Run: `.venv/Scripts/python -m pytest tests/test_app.py -k phase -v`
 Expected: FAIL en la línea 702, que sigue recibiendo cinco fases.
 
 - [ ] **Step 3: Remove the two phases**
