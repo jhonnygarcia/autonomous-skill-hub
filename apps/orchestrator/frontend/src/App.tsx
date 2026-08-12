@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api, type ActiveRun, type Project, type Ticket, type TicketDetail as Detail } from "@/api"
+import { ConfirmDialog } from "@/ConfirmDialog"
 import { Models } from "@/Models"
 import { ProjectForm } from "@/ProjectForm"
 import { ProjectHeader } from "@/ProjectHeader"
@@ -30,6 +31,18 @@ export default function App() {
   // you to ignore the banner. Loading the projects is different — it runs on mount and
   // after saving, and failing silently there leaves an empty app with no explanation.
   const [error, setError] = useState("")
+
+  // The project form reports whether it has unsaved changes, and a navigation requested
+  // while it does is held here until the user confirms. The form guards its own Cancelar
+  // and Escape; without this the sidebar routes around that guard and discards what was
+  // typed — same situation, three ways out, and only two of them used to ask.
+  const [formDirty, setFormDirty] = useState(false)
+  const [pendingNav, setPendingNav] = useState<(() => void) | null>(null)
+
+  const navigate = (go: () => void) => {
+    if (view.kind === "projectForm" && formDirty) setPendingNav(() => go)
+    else go()
+  }
 
   // `select` is sent by the form after saving, so a rename doesn't change the
   // active project out from under it (the old name is no longer in the list).
@@ -77,8 +90,8 @@ export default function App() {
     <div className="mx-auto flex w-full max-w-[92rem] gap-6 p-6">
       <Sidebar projects={projects} current={current}
                settings={view.kind === "settings" || view.kind === "projectForm"}
-               onSelect={n => { setCurrent(n); back() }}
-               onSettings={() => setView({ kind: "settings" })} />
+               onSelect={n => navigate(() => { setCurrent(n); back() })}
+               onSettings={() => navigate(() => setView({ kind: "settings" }))} />
 
       <main className="min-w-0 flex-1 space-y-4">
         {error && (
@@ -103,6 +116,7 @@ export default function App() {
 
         {view.kind === "projectForm" && (
           <ProjectForm initial={projects.find(p => p.name === editing) ?? null}
+                       onDirtyChange={setFormDirty}
                        onSaved={name => { refreshProjects(name); setView({ kind: "settings" }) }}
                        onCancel={() => setView({ kind: "settings" })} />
         )}
@@ -132,6 +146,13 @@ export default function App() {
                         onDelete={() => { act(() => api.remove(detail.ticket.id)); back() }} />
         )}
       </main>
+
+      {/* Same wording and same component the form uses for Cancelar and Escape: leaving
+          by a third route shouldn't feel like a different question. */}
+      <ConfirmDialog open={!!pendingNav} title="Hay cambios sin guardar."
+                     body="Si sales ahora se pierden." confirmLabel="Descartar"
+                     onConfirm={() => { const go = pendingNav; setPendingNav(null); go?.() }}
+                     onCancel={() => setPendingNav(null)} />
     </div>
   )
 }

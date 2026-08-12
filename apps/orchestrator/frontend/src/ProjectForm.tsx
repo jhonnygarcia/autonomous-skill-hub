@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api, type Project, type Repo } from "@/api"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/ConfirmDialog"
@@ -46,11 +46,16 @@ function Field({ id, label, hint, error, children }: {
   )
 }
 
-export function ProjectForm({ initial, onSaved, onCancel }: {
+export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
   /** `null` = creating. Otherwise, the project as it is saved. */
   initial: Project | null
   onSaved: (name: string) => void
   onCancel: () => void
+  /** Reported upward so the sidebar can route its navigation through the same
+   *  confirmation this component already uses for Cancelar and Escape. Without it,
+   *  clicking another project unmounts the form and discards what was typed — the
+   *  guard exists, and the navigation walks around it. */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const original = initial?.name ?? null
   const [form, setForm] = useState<Project>(
@@ -65,6 +70,13 @@ export function ProjectForm({ initial, onSaved, onCancel }: {
 
   const dirty = JSON.stringify(form) !== snapshot.current
   const patch = (fn: (rs: Repo[]) => Repo[]) => setForm(f => ({ ...f, repos: fn(f.repos) }))
+
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  // Clears the flag when the form goes away, so a stale `true` can't make the next
+  // navigation prompt about changes that no longer exist. Its own effect and not a
+  // cleanup on the one above: that one re-runs on every `dirty` change, and clearing
+  // there would blink the flag off and on.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
   /** On blur, not debounced while typing: a path gets pasted whole, and validating
    *  mid-word produces a run of reds that mean nothing. */
