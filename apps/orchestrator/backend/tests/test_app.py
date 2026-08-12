@@ -326,8 +326,10 @@ def test_current_phase_no_longer_exists(tmp_path, monkeypatch):
 
 
 def test_declared_but_unlaunchable_phase_gives_400(client, monkeypatch):
-    """guards is in PHASES but not launchable: it's rejected without spawning a
-    subprocess."""
+    """A phase absent from PHASE_COMMANDS is rejected without spawning a
+    subprocess. `guards` used to be declared in PHASES and unlaunchable; it is no
+    longer declared at all, and the rejection is unchanged either way — what gates
+    a run is the command table, not the declaration."""
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     r = client.post(f"/tickets/{tid}/run", json={"phase": "guards"})
@@ -475,7 +477,7 @@ def test_models_are_read_at_launch_not_at_startup(client, monkeypatch):
 
 
 @pytest.mark.parametrize("payload", [
-    {"guards": {"model": "opus"}},           # fase declarada pero no lanzable
+    {"guards": {"model": "opus"}},           # fase no ejecutable: ni declarada ni con comando
     {"analyze": {"model": "--dangerously"}},  # se colaría como otra bandera del CLI
     {"analyze": {"model": "opus 5"}},
     {"analyze": {"effort": "altísimo"}},
