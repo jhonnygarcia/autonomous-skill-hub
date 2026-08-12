@@ -136,7 +136,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
                             onClick={() => {
                               setOpenPhase(openPhase === f.fase ? null : f.fase); setInstructions("")
                             }}>
-                      ▾
+                      ▾ Ajustar
                     </Button>
                   </div>
                 )}
@@ -144,6 +144,21 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
 
               {reason && f.disponible && f.estado !== "corriendo" && (
                 <p className="pb-2 text-xs text-muted-foreground">{reason}</p>
+              )}
+
+              {/* An 83-minute run used to say only "corriendo". The bar answers "how
+                  much is left"; the count next to it is the honest part — the width is
+                  a proportion of tasks, not of time. */}
+              {f.progreso && (
+                <div className="flex items-center gap-2 pb-2 text-xs">
+                  <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-blue-500 transition-all"
+                         style={{ width: `${Math.round(100 * f.progreso.hechas / f.progreso.total)}%` }} />
+                  </div>
+                  <span className="text-muted-foreground">
+                    tarea {f.progreso.hechas} de {f.progreso.total}
+                  </span>
+                </div>
               )}
 
               {f.estado === "error" && f.motivo && (
