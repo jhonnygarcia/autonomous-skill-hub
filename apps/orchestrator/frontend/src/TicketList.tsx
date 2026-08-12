@@ -18,16 +18,25 @@ const DOT: Record<string, string> = {
  *
  * It was removed in the 2026-08-09 redesign for showing six phases with five dimmed on
  * every row, and `STATUS.md` left it written that it comes back once phases 2-4 really
- * exist. They do, and with `guards`/`pr` gone there are exactly three. `aria-hidden`
- * because the status badge next to it already says the same thing in words.
+ * exist. They do, and with `guards`/`pr` gone there are exactly three.
+ *
+ * `role="img"` with one composed name — NOT `aria-hidden`, and not a label per dot. The
+ * badge beside it cannot stand in for these: `folded_status` collapses every phase into
+ * a single word, so it says "error" and never which phase failed. That detail lives only
+ * in the dots, and hiding them would leave it available on hover and nowhere else. One
+ * name because it reads as one graphic; three names would be thirty stops in a list of
+ * ten tickets. `role="img"` also makes the subtree presentational, so the per-dot
+ * `title`s stay for the mouse without being announced twice.
  */
 function Stepper({ fases }: { fases: Phase[] }) {
+  const shown = fases.filter(f => f.disponible)
+  const label = (f: Phase) => `${PHASE_LABEL[f.fase] ?? f.fase}: ${f.estado ?? "pendiente"}`
   return (
-    <span className="flex items-center" aria-hidden>
-      {fases.filter(f => f.disponible).map((f, i) => (
+    <span className="flex items-center" role="img" aria-label={shown.map(label).join(" · ")}>
+      {shown.map((f, i) => (
         <span key={f.fase} className="flex items-center">
-          {i > 0 && <span className="h-px w-3 bg-border" />}
-          <span title={`${PHASE_LABEL[f.fase] ?? f.fase}: ${f.estado ?? "pendiente"}`}
+          {i > 0 && <span aria-hidden className="h-px w-3 bg-border" />}
+          <span title={label(f)}
                 className={`h-2 w-2 rounded-full ${DOT[f.estado ?? "pendiente"]}`} />
         </span>
       ))}
