@@ -1500,7 +1500,8 @@ git commit -m "refactor: guards y pr salen del timeline hasta que existan"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
+def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30,
+               trailing_slash: bool = False):
     """A ticket with a `design` run that declared a change directory, and an `implement`
     run in flight. Returns the ticket id."""
     import app as app_module
@@ -1509,7 +1510,7 @@ def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
     change.mkdir(parents=True, exist_ok=True)
     if tasks_md is not None:
         (change / "tasks.md").write_text(tasks_md, encoding="utf-8")
-    rel = f"openspec/changes/{ado_id}-x"
+    rel = f"openspec/changes/{ado_id}-x" + ("/" if trailing_slash else "")
     tid = client.post("/tickets", json={"ado_id": ado_id, "project": "Demo"}).json()["id"]
     with app_module.db() as c:
         c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
@@ -1547,6 +1548,41 @@ def test_no_design_run_means_no_bar(client):
         c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'implement','running')",
                   (tid,))
     assert _implement(client, tid).get("progreso") is None
+
+
+def test_an_unreadable_tasks_md_means_no_bar(client, tmp_path, monkeypatch):
+    """The counter runs WHILE `implement` is writing that same file — it is polled every
+    three seconds during a run that took 83 minutes in production. That is a real TOCTOU
+    window between `declared_file_or_none`'s `is_file()` and the `read_text()` two lines
+    later, not a device-file curiosity. Without this test, deleting the `try/except`
+    outright reddens nothing."""
+    tid = _with_plan(client, tmp_path, "- [x] a\n- [ ] b\n", ado_id=35)
+    real_read = Path.read_text
+
+    def boom(self, *a, **k):
+        if self.name == "tasks.md":
+            raise OSError("el agente lo estaba reescribiendo")
+        return real_read(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", boom)
+    assert _implement(client, tid).get("progreso") is None
+
+
+def test_a_declared_path_with_a_trailing_slash_still_counts(client, tmp_path):
+    """The stamp is written by an agent obeying a markdown file, so the declared
+    directory may or may not carry its trailing slash. `rstrip("/")` covers both and
+    nothing proved it did.
+
+    CORRECCIÓN (encontrada al mutar, ver commit 6041491): la aserción end-to-end de
+    abajo **es un placebo por sí sola**. `pathlib` colapsa los separadores repetidos al
+    construir el `Path`, antes de `resolve()`, así que `Path("a//b")` y `Path("a/b")`
+    son el mismo objeto: quitando el `.rstrip("/")` el fichero se resuelve igual y el
+    test sigue verde. El único nivel donde la mutación es observable es la cadena que
+    `task_progress` entrega a `declared_file_or_none`, ANTES de que se normalice. El
+    test implementado espía ese argumento y afirma que no lleva la barra doble; ver el
+    código real en `tests/test_app.py`, que manda sobre este bloque."""
+    tid = _with_plan(client, tmp_path, "- [x] a\n- [ ] b\n", ado_id=36, trailing_slash=True)
+    assert _implement(client, tid)["progreso"] == {"hechas": 1, "total": 2}
 
 
 def test_progress_is_not_a_second_door_to_disk(client, tmp_path):
@@ -1652,7 +1688,11 @@ Tres mutaciones:
 2. Cambiar `return {...} if total else None` por `return {"hechas": hechas, "total": total}`.
    Expected: `test_tasks_md_without_boxes_means_no_bar` en **rojo**.
 3. Cambiar `DONE_BOX` a `re.compile(r"^\s*- \[.\]", re.MULTILINE)`.
-   Expected: `test_progress_counts_the_boxes` en **rojo** (contaría 5 hechas de 5).
+   Expected: `test_progress_counts_the_boxes` en **rojo**. Concretamente da
+   **5 hechas de 7**, no 5 de 5: el regex ensanchado cuenta las 5 casillas como
+   hechas, y `total = hechas + abiertas` vuelve a sumar las 2 abiertas. Lo que
+   importa es que se ponga rojo; el número exacto va aquí porque una predicción
+   equivocada en un plan hace dudar del test en vez de del plan.
 
 Revertir las tres.
 
