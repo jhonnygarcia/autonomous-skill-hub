@@ -29,6 +29,40 @@ Orchestrator — frontend (`apps/orchestrator/frontend/`): `npm run dev` (5173),
 
 Plugin: `claude plugin validate .` from the root must pass before committing.
 
+### Bringing the app up
+
+Two processes, two terminals, backend first — the frontend proxies `/api` to it and
+a Vite that starts against a dead backend just serves a UI whose every request fails.
+
+    # terminal 1 — backend
+    cd apps/orchestrator/backend
+    .venv/Scripts/uvicorn app:app --port 8000
+
+    # terminal 2 — frontend
+    cd apps/orchestrator/frontend
+    npm run dev
+
+Then open **http://localhost:5173**. That is the whole app: the frontend proxies
+`/api/*` to port 8000, so the backend is never browsed directly.
+
+**Use `localhost`, not `127.0.0.1`, for the frontend.** Vite binds to `::1` only and
+uvicorn binds to `127.0.0.1` only, so `http://127.0.0.1:5173` refuses the connection
+while `http://localhost:5173` works — on Windows `localhost` resolves to `::1` first.
+The dev proxy is unaffected either way: Vite reaches the backend server-side, not
+from the browser. Verifying the two are up:
+
+    curl http://localhost:5173/api/tickets   # through the proxy: proves both
+    curl http://127.0.0.1:8000/projects      # backend alone
+
+First run only: create the venv and install (the two lines above), and
+`npm install` in the frontend. Both are already provisioned in this working copy.
+
+If something behaves oddly, **suspect the process before the code** — see Rules. To
+check who holds the ports, in PowerShell:
+
+    Get-NetTCPConnection -LocalPort 8000,5173 -State Listen |
+      Select-Object LocalAddress, LocalPort, OwningProcess
+
 ## Architecture
 
 **ticket-agent plugin.** The logic lives in markdown, not code: each command delegates
