@@ -1658,7 +1658,8 @@ def test_declared_file_or_none_rejects_what_the_endpoint_rejects(client, tmp_pat
     assert app_module.declared_file_or_none(t, "docs") is None
 
 
-def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
+def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30,
+               trailing_slash: bool = False):
     """A ticket with a `design` run that declared a change directory, and an `implement`
     run in flight. Returns the ticket id."""
     import app as app_module
@@ -1667,7 +1668,7 @@ def _with_plan(client, tmp_path, tasks_md: str | None, ado_id: int = 30):
     change.mkdir(parents=True, exist_ok=True)
     if tasks_md is not None:
         (change / "tasks.md").write_text(tasks_md, encoding="utf-8")
-    rel = f"openspec/changes/{ado_id}-x"
+    rel = f"openspec/changes/{ado_id}-x" + ("/" if trailing_slash else "")
     tid = client.post("/tickets", json={"ado_id": ado_id, "project": "Demo"}).json()["id"]
     with app_module.db() as c:
         c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
@@ -1705,6 +1706,46 @@ def test_no_design_run_means_no_bar(client):
         c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'implement','running')",
                   (tid,))
     assert _implement(client, tid).get("progreso") is None
+
+
+def test_an_unreadable_tasks_md_means_no_bar(client, tmp_path, monkeypatch):
+    """The counter runs WHILE `implement` is writing that same file — it is polled every
+    three seconds during a run that took 83 minutes in production. That is a real TOCTOU
+    window between `declared_file_or_none`'s `is_file()` and the `read_text()` two lines
+    later, not a device-file curiosity. Without this test, deleting the `try/except`
+    outright reddens nothing."""
+    tid = _with_plan(client, tmp_path, "- [x] a\n- [ ] b\n", ado_id=35)
+    real_read = Path.read_text
+
+    def boom(self, *a, **k):
+        if self.name == "tasks.md":
+            raise OSError("el agente lo estaba reescribiendo")
+        return real_read(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", boom)
+    assert _implement(client, tid).get("progreso") is None
+
+
+def test_a_declared_path_with_a_trailing_slash_still_counts(client, tmp_path, monkeypatch):
+    """The stamp is written by an agent obeying a markdown file, so the declared
+    directory may or may not carry its trailing slash. `rstrip("/")` covers both — but
+    `pathlib` quietly collapses a doubled internal slash on its own by the time it
+    resolves, so asserting only the end-to-end `progreso` result passes even with the
+    strip removed. This pins the exact string `task_progress` hands to
+    `declared_file_or_none`, which the strip actually controls."""
+    import app as app_module
+
+    seen = {}
+    real_check = app_module.declared_file_or_none
+
+    def spy(t, ruta):
+        seen["ruta"] = ruta
+        return real_check(t, ruta)
+
+    monkeypatch.setattr(app_module, "declared_file_or_none", spy)
+    tid = _with_plan(client, tmp_path, "- [x] a\n- [ ] b\n", ado_id=36, trailing_slash=True)
+    assert _implement(client, tid)["progreso"] == {"hechas": 1, "total": 2}
+    assert seen["ruta"] == "openspec/changes/36-x/tasks.md"
 
 
 def test_progress_is_not_a_second_door_to_disk(client, tmp_path):
