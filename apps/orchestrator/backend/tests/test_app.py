@@ -1535,3 +1535,29 @@ def test_absurd_path_does_not_blow_up(client):
     r = client.post("/rutas/validar", json={"ruta": "x\x00y"})
     assert r.status_code == 200
     assert r.json() == {"existe": False}
+
+
+def test_declared_file_or_none_rejects_what_the_endpoint_rejects(client, tmp_path, monkeypatch):
+    """The internal consumers (`read_title`, `task_progress`) must not get a second,
+    laxer door to disk. Same ticket, same declared path, same verdict — the only
+    difference is `None` instead of a 400."""
+    import app as app_module
+
+    (tmp_path / "repo" / "docs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "repo" / "docs" / "a.md").write_text("# hola", encoding="utf-8")
+    (tmp_path / "secreto.txt").write_text("no", encoding="utf-8")
+
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status, artifact_state, artifact_path) "
+                  "VALUES(?,'analyze','success','ok','docs')", (tid,))
+    t = app_module.ticket_row(tid)
+
+    # declared and inside: resolves
+    assert app_module.declared_file_or_none(t, "docs/a.md") is not None
+    # traversal out of the repo: None, not an exception and not a Path
+    assert app_module.declared_file_or_none(t, "docs/../../secreto.txt") is None
+    # not declared by any run of this ticket
+    assert app_module.declared_file_or_none(t, "otro.md") is None
+    # a directory is not a servable file
+    assert app_module.declared_file_or_none(t, "docs") is None

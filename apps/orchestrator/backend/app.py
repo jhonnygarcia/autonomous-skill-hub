@@ -881,21 +881,24 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
 
 
-ARTIFACT_CAP = 512 * 1024
+def declared_file(t: sqlite3.Row, ruta: str) -> Path:
+    """Resolves `ruta` against the ticket's main repo and enforces the three rules that
+    make a path servable: declared by a run OF THIS ticket (or under a declared
+    directory, at any depth), inside the ticket's repos, and a regular file.
 
+    Extracted from `GET /tickets/{tid}/artefacto`, where it lived inline, because the
+    ticket's title and the task-progress counter need the same check from outside the
+    endpoint. **Moved, not rewritten**: same body, same order of checks, same messages.
+    That code took three rounds of adversarial review and 638 vectors, and each round
+    closed a hole the previous one had opened.
 
-@app.get("/tickets/{tid}/artefacto")
-def artifact(tid: int, ruta: str):
-    """Reads from disk starting from a request parameter, so validation can't be
-    simplified. It's not a file explorer: it's "show me what THIS run said it wrote".
-    All four conditions have to hold."""
-    t = ticket_row(tid)
-    if not t:
-        raise HTTPException(404)
+    The cap and the read stay in the endpoint: those are about serving a file, not about
+    deciding whether it may be read.
+    """
     with db() as c:
         declared = [r["artifact_path"] for r in c.execute(
             "SELECT artifact_path FROM runs WHERE ticket_id=? AND artifact_path IS NOT NULL "
-            "AND artifact_path != '' AND artifact_state IN ('ok','parcial')", (tid,))]
+            "AND artifact_path != '' AND artifact_state IN ('ok','parcial')", (t["id"],))]
             # ^ '' in addition to NULL as belt and suspenders — the real property that
             # discards wildcards lives further below, when building `real_declared`.
 
@@ -967,7 +970,34 @@ def artifact(tid: int, ruta: str):
     if not real.is_file():
         raise HTTPException(400, "No es un archivo regular")
 
-    # 4. Cap, without loading the whole file into memory: reads at most CAP+4 bytes
+    return real
+
+
+def declared_file_or_none(t: sqlite3.Row, ruta: str) -> Path | None:
+    """The same check for internal consumers, which want `None` and not a 400.
+
+    A separate door to disk is exactly what must NOT exist here: this is a wrapper, so
+    a fix to `declared_file` reaches every caller at once.
+    """
+    try:
+        return declared_file(t, ruta)
+    except HTTPException:
+        return None
+
+
+ARTIFACT_CAP = 512 * 1024
+
+
+@app.get("/tickets/{tid}/artefacto")
+def artifact(tid: int, ruta: str):
+    """Reads from disk starting from a request parameter, so validation can't be
+    simplified. It's not a file explorer: it's "show me what THIS run said it wrote"."""
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    real = declared_file(t, ruta)
+
+    # Cap, without loading the whole file into memory: reads at most CAP+4 bytes
     #    instead of the whole file, to avoid paying a memory peak equal to the full
     #    artifact size just to serve 0.5 KB of it. The real size (for the `bytes`
     #    field) comes from `stat()`, not from what was read — and that's why
