@@ -589,6 +589,57 @@ the seams between phases into marked decision points, and makes session continua
 a human choice — `-p --resume --fork-session` was verified working headless, and the
 `session_id` is already in today's logs.
 
+## Ninth session — 2026-08-13: the design built, and measured on a real ticket
+
+The 16-task plan executed end to end and merged to `main` (13 commits ahead of
+`origin`, unpushed). Plugin **v0.9.0**, **199 tests green**, build and lint clean.
+
+**What shipped.** Six launchable phases where there were three, in two routes to the
+same file. The runner gained the routing parser, the sequential fan-out with one
+child per repo, `session_id` capture and `--resume --fork-session`, and
+`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` in `implement`. The plugin gained
+three skills (`ticket-brief`, `repo-survey`, `analysis-consolidation`) and the
+`DECIDIR`/`BLOQUEA` markers in the three that existed — which finally give `autonomy`
+something to govern. The UI gained the decision counter and the fresh-vs-continue
+radio.
+
+**The measurement, which is the part that matters** (detail in section 15b of the
+design). Ticket **3320**, two real Providence repos, three phases run for real:
+
+- The survey rooted in the **secondary** repo located the root cause with `file:line`
+  — `ap-invoice.component.ts:269-273` re-derives and re-persists the flag on every
+  load. **It isn't in the primary repo**, where a single session would have hunted,
+  and the `tenant` survey separately confirmed the backend persists correctly. The two
+  halves only mean something together.
+- The contract table caught a **⚠️ same concept, two names**: the two surveys name the
+  same read endpoint differently, with different DTOs, and it changes which file gets
+  touched. Each survey is internally coherent; the defect exists only when they're put
+  in adjacent columns.
+- The brief's central ambiguity resolved **without a human decision**, and a whole
+  branch of work discarded.
+
+**Two bugs no test double had found**, both of the same kind — information the design
+assumed was transmitted and the runner never transmitted — and both failed in the safe
+direction:
+
+1. The prompt never named the **primary** repo. The agent knew the extras by label and
+   invented one for the repo it was standing in: it wrote `SONDEAR: main, tms` when the
+   label was `tenant`. The parser rejected `main`, voided the line and **widened to
+   every repo** — the optimization was lost, never the correctness. §4.4's safety net
+   did exactly what it promised.
+2. **`consolidate` couldn't reach the surveys.** Neither mounted nor named: the only
+   phase whose entire job is reading them was launched blind.
+
+**Three placebo tests of my own, rewritten until their mutation breaks them**: the
+chunk-boundary one (`FAKE_BIG` printed padding *after* the id), the failed-child one
+(the exit code decided the verdict, not the log slicing it claimed to test), and the
+routing parser's.
+
+**And the docs were lying about the shape.** The root `README.md` said "Phase 1" and
+didn't mention `apps/orchestrator/` at all — half the repo. `CLAUDE.md`'s phase table
+listed three commands. `how-it-works.md` was stale for a reason that predates this
+session: it described how a per-phase model *would* be built, days after it shipped.
+
 ## Immediate pending items
 
 - [x] ~~**Execute the multi-repo plan**~~ — **done 2026-08-13, all 16 tasks**, plugin
@@ -605,24 +656,52 @@ a human choice — `-p --resume --fork-session` was verified working headless, a
   Both Phase-1 routes write `docs/tickets/<id>-analysis.md` by design, so
   `consolidate` overwrote 3320's single-session analysis and the side-by-side
   comparison is gone for that ticket. It was untracked, so git doesn't have it either.
-- [ ] ~~Execute the multi-repo plan~~ (superseded, kept for the detail) —
-  `docs/superpowers/plans/2026-08-12-multirepo-fanout-y-humano-en-el-bucle.md`,
-  16 tasks. **The direction is decided**: a multi-repo ticket stops being handled
-  from a single session, and Phase 1 splits into one session rooted per repo. The
-  rationale doesn't rest on the unverified part — no configuration recovers a
-  mounted repo's hooks and `.mcp.json`, only a session rooted in it, and that's
-  verified. Tasks 1-6 are backend and testable with `fake_claude.py` before a single
-  skill exists; **Task 1 is worth doing on its own** whatever happens to the rest.
-  **Task 16 is the one that can't be skipped**: it measures the design's central
-  hypothesis against a real two-repo ticket, and if the split buys nothing that gets
-  written down too. **3320** is the candidate — its code lives in an `extra_dir`,
-  which also closes the oldest open assumption of Phase 2b.
-- [ ] **`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` in `implement`.** One line
-  in the runner's env, gated on `extras`. Independent of the fan-out and worth doing
-  either way: Phases 2 and 3 stay single-session in every version of the design, so
-  without it the extra repos' rules never reach the agent that writes their code.
+- [x] ~~**`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` in `implement`**~~ — done
+  2026-08-13 as task 1 of the plan, gated on `extras`.
 - [ ] **Rotate the `cr360dev` PAT.** It was pasted in a session transcript on
-  2026-08-12 to verify the token path. It worked; it should not survive.
+  2026-08-12 to verify the token path. It worked; it should not survive. Setup notes
+  for that org, credential-free, are in `docs/cr360dev.md`.
+- [ ] **Push `main`.** 13 commits ahead of `origin/main` and nothing sent. One of them
+  predates this work (the how-to-run-the-app doc).
+
+### What the multi-repo work left open
+
+Ordered by how much the next real run would gain from it. None of these block using
+what shipped.
+
+- [ ] **Nobody has planned or implemented a multi-repo ticket.** 3320's analysis is
+  written and carries the contract table, but `plan` and `implement` have never
+  consumed one. The table names an `⚠️ same concept, two names` the plan has to
+  resolve **before** it can order tasks across repos — the first real test of whether
+  the contract is usable or merely readable. This is the highest-value next step.
+- [ ] **Separate "rooted" from "one whole session per repo".** The design's gain is
+  measured, its cause isn't: how much comes from the session loading that repo's
+  rules, and how much from simply devoting a full session to each. Running the same
+  ticket with `analyze` plus `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` would
+  split them. It doesn't change the decision — hooks and `.mcp.json` are recovered by
+  nothing else — but it says how much is being paid for how much.
+- [ ] **The parallel fan-out, and only if a run gets slow.** Sequential was chosen so
+  the global lock keeps meaning something, one log preserves live progress and `runs`
+  needs no schema change. With 4+ routed repos the wall-clock may justify a
+  `parent_run_id`. Nothing measured yet; don't build it before something hurts.
+- [ ] **Survey scratch accumulates.** `logs/<run_id>/` is never cleaned — deliberate,
+  since deleting is the footgun and a re-run must never read a stale survey. It'll
+  need a retention policy eventually, not now.
+- [ ] **The children can't see each other, by design.** A survey states what it
+  expects from another repo and only the consolidation resolves it. If real runs show
+  the consolidation repeatedly answering questions a second survey pass could have,
+  the answer is a second round — not letting children talk, which would reintroduce
+  the shared context the split exists to remove.
+- [ ] **`design` and `implement` still carry MCP they may not need.** Their skills
+  consume the previous phase's file, not the work item. Dropping them from `PHASE_MCP`
+  is a real reduction in surface, and it needs one live run of each to confirm — it
+  wasn't this change's job.
+- [ ] **A fan-out phase can't be continued.** It drives several sessions and there's
+  no single one to resume, so `puede_continuar` is false for `survey` by construction.
+  Fine today; if continuing one child ever matters, `runs` needs to model children.
+- [ ] **`--resume` against a session deleted from disk** (`claude rm`, a cleaned
+  `~/.claude`) fails and the run closes with no stamp. The CLI's error is in the log,
+  which is where it's read. Probing the session store to pre-empt it isn't worth it.
 - [ ] **Read the 2658 lines that 3332 left on branch `ticket-agent/3332`.**
   Nobody has looked at them. The run came out `ok` because the build is
   green and the boxes are checked, but that measures that the mechanism
@@ -637,6 +716,9 @@ a human choice — `-p --resume --fork-session` was verified working headless, a
   hasn't been exercised: 3332 is single-repo. A ticket whose code lives in a
   mounted repo is needed —**3320** is one— with the frontend free. It's the
   one big assumption of the phase still unproven live.
+  **Closer than it was** (2026-08-13): 3320 now has a multi-repo analysis naming the
+  root cause in `ProvidenceTMS`, so planning and implementing it exercises this
+  assumption and the "has anyone planned a multi-repo ticket" one in a single run.
 - [ ] **Report the AR finding to the team.** AR auto-marking stamps
   authorship and `BilledOn` on opening the screen
   (`UpdateArReadyToProcessCommand.cs:36-43`). It's a data-integrity defect
