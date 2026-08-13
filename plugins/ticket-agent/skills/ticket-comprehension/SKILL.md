@@ -83,7 +83,7 @@ is a task failure, not an acceptable variant.
 # Analysis of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Analyzed:** <date> by ticket-agent v0.8.0
+**Analyzed:** <date> by ticket-agent v0.9.0
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)
@@ -129,7 +129,37 @@ started)
 ## Missing information
 (everything that couldn't be read and why; explicit empty state if nothing
 was missing: "None")
+
+## Decisiones para ti
+
+- [ ] **DECIDIR** — <the question>
+      Propuesta: <the proposal, with its file:line where one applies>
+      Si no respondes, sigo con la propuesta.
+
+- [ ] **BLOQUEA** — <the question>
+      <why no defensible default exists>
 ```
+
+## 3b. The open decisions
+
+The last section isn't a summary of the ambiguities already listed above: it's
+the short, bounded list of what **you need a human for**, so nobody has to read
+8 KB hunting for the weak spots. Two levels, and the difference is whether a
+defensible default exists:
+
+| Marker | Left unanswered |
+|---|---|
+| `DECIDIR` | The next phase proceeds with the proposal **and records that it did** |
+| `BLOQUEA` | The next phase doesn't start: `HUELLA: nada — <N> decisiones sin resolver` |
+
+**`BLOQUEA` only when there is genuinely no defensible default**, and the marker
+says why none is. If every ambiguity blocks, this stops being a tool that helps
+and becomes a form to fill in. `DECIDIR` never blocks — but proceeding with the
+proposal **without leaving a trace** is worse than blocking, which is why the
+next phase has to write down that it did.
+
+The human answers by editing the file: ticking the box and writing underneath.
+Same checkbox convention as `tasks.md`. Don't invent a second format.
 
 ## 4. Closing based on autonomy
 
@@ -141,6 +171,14 @@ was missing: "None")
   the analysis run.
 - Any other value of `autonomy` is treated as `supervised`, and the user is
   warned that the value isn't recognized.
+
+**Say what it would cost to redo this**, in one line, before the stamp: how many
+files you opened, how many relations and attachments you read. The human needs it
+to choose between a fresh session and continuing this one — and only they know
+whether their adjustment **adds** scope (where continuing saves the exploration)
+or **corrects** what you understood (where a fresh session keeps their correction
+from competing with the reasoning behind the mistake). Point at where you
+hesitated, too: that's usually what they'll want to correct.
 
 **Mandatory closing rule.** The last line of your summary —with nothing after
 it— has to be exactly this stamp, followed by the analysis path relative to the

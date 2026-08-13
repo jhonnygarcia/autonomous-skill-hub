@@ -71,6 +71,63 @@ and implicit acceptance criteria, ambiguities, context from related tickets,
 reviewed attachments, applicable project rules, affected code, risks, and missing
 information.
 
+### When the ticket spans more than one repo
+
+`analyze` runs in **one** session rooted in the main repo. That session loads the
+main repo's `CLAUDE.md`, skills and hooks — and `--add-dir` mounts the other
+repos' *files* but not their *configuration*. So the extra repos get analyzed
+under the main repo's conventions, confidently, with nothing to catch it.
+
+For those tickets, Phase 1 splits into three commands and one session per repo:
+
+    /ticket-agent:brief 3311        # reads the work item, decides which repos to survey
+    /ticket-agent:survey 3311       # one session rooted in EACH routed repo
+    /ticket-agent:consolidate 3311  # merges them, with the contract between repos
+
+`brief` writes `docs/tickets/3311-brief.md`, ending in a routing line you can
+edit before launching the survey:
+
+    SONDEAR: back, front
+
+If the runner can't understand that line, it surveys **every** mounted repo. The
+failure direction is always "one repo too many", never one too few.
+
+`consolidate` produces the same `docs/tickets/3311-analysis.md` that `analyze`
+would, so Phase 2 never learns which route ran — plus the table that no single
+repo could write:
+
+| Qué | Lo espera | Lo ofrece | Veredicto |
+|---|---|---|---|
+| `GET /api/trends/export` | front | back | ✅ cuadra |
+| campo `trendId` en la lista | front | — | ❌ hueco |
+
+`analyze` stays available for multi-repo tickets: it's the fallback if the split
+gets stuck, and the baseline to compare against. Both write the same file.
+
+### The open decisions
+
+The brief, the analysis and `design.md` close with `## Decisiones para ti` — a
+short, bounded list of what needs a human, so you don't have to read 8 KB looking
+for the weak spots:
+
+    - [ ] **DECIDIR** — ¿el `trendId` lo expone el back o lo calcula el front?
+          Propuesta: el back, sigue el patrón de `Controllers/Trends.cs:88`.
+          Si no respondes, sigo con la propuesta.
+
+    - [ ] **BLOQUEA** — el ticket no dice si el export respeta el filtro activo.
+
+You answer by editing the file: tick the box, write underneath. Same convention
+as `tasks.md`.
+
+| Marker | Left unanswered |
+|---|---|
+| `DECIDIR` | The next phase proceeds with the proposal **and writes down that it did** |
+| `BLOQUEA` | The next phase doesn't start |
+
+`autonomy` in `.claude/ticket-agent.json` decides what an unanswered `DECIDIR`
+does: `supervised` stops the next phase, `autonomous` proceeds and records it.
+`BLOQUEA` stops in both.
+
     /ticket-agent:plan 3311
 
 Phase 2. Reads `docs/tickets/3311-analysis.md` (must exist; if not, asks you to run

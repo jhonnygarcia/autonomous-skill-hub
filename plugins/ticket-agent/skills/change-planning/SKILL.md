@@ -56,6 +56,22 @@ the two phases. If it's missing something you need, that's a Phase 1 failure:
 log it under "Missing information" in the plan, saying the analysis doesn't
 provide it, and continue with what you can plan.
 
+**The analysis's `Decisiones para ti`, before anything else.**
+
+- An unticked `- [ ] **BLOQUEA**` **stops you**. Don't plan around it, don't pick
+  a default: the marker exists precisely because no defensible one exists. Close
+  `HUELLA: nada — <N> decisiones sin resolver` and name them.
+- An unticked `- [ ] **DECIDIR**` doesn't stop you: proceed with its proposal —
+  but **write in the plan that you did, and which one**. Proceeding silently is
+  worse than blocking, because the plan then reads as if a human had chosen.
+- A ticked `- [x]` carries the human's answer underneath. **It wins over your own
+  reading of the analysis**, including where it contradicts it.
+
+Under `autonomy: supervised` an unanswered `DECIDIR` **also stops you**: that's
+what the setting means, and it's the only thing it governs. Under `autonomous`
+you proceed with the proposals and record them. Any other value is treated as
+`supervised`.
+
 ## 4. Studying the pattern
 
 Open the files the analysis points to. If the change consists of replicating
@@ -146,6 +162,25 @@ And its own top-level section for what **can't** be done:
 **`design.md`** — the technical decisions and the alternatives ruled out. If
 there's no decision to make, say so in one line instead of padding it out.
 
+Close it with `## Decisiones para ti`, in the same two levels the analysis uses:
+
+```markdown
+## Decisiones para ti
+
+- [ ] **DECIDIR** — ¿el mapper vive en `Application` o en `Infrastructure`?
+      Propuesta: `Application`, como `OrderMapper.cs:12`.
+      Si no respondes, sigo con la propuesta.
+```
+
+This is where the human's taste is legitimate without having to justify itself —
+it's their codebase. A technical decision you made because it had to be made is
+not the same as one you made because it was obviously right, and `design.md` is
+where the difference gets recorded instead of quietly becoming a fact.
+
+Phase 2b reads these markers the same way you read the analysis's: `BLOQUEA`
+stops it, an unanswered `DECIDIR` proceeds with the proposal and gets written
+down, a ticked one wins.
+
 **`specs/<capability>/spec.md`** — the future state of the affected capability.
 `<capability>` is the **system capability**, not the ticket: it's the folder
 OpenSpec reuses across changes. If one already exists under `openspec/specs/`
@@ -171,6 +206,15 @@ pass. An invalid change that can be reviewed is worth more than none at all.
   own.
 - Any other value of `autonomy` is treated as `supervised`, and the user is
   warned that the value isn't recognized.
+- In every case, say **which `DECIDIR` you proceeded on without an answer**. A
+  plan built on unanswered proposals that doesn't say so reads as if a human had
+  chosen.
+
+**Say what it would cost to redo this**, in one line, before the stamp: how many
+files you read to find the mirror, and where you hesitated. The human uses it to
+choose between a fresh session and continuing this one — continuing saves the
+exploration when they're **adding**, a fresh session keeps their correction from
+competing with your reasoning when they're **correcting**.
 
 **Mandatory closing rule.** The last line of the summary —with nothing after
 it— has to be exactly one of these three stamps, followed by the change path

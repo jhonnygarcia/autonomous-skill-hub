@@ -99,6 +99,55 @@ wrong file. Same for an org/`organization` mismatch — nothing validates that t
 agree. Check `az account show` and `az devops project list --org ...` before
 suspecting the JSON.
 
+**A multi-repo ticket splits Phase 1 into one session per repo.** `brief` reads the
+work item and writes `docs/tickets/<id>-brief.md` ending in a `SONDEAR: back, front`
+line; `survey` runs one CLI child rooted in each routed repo — which is the only way
+that repo's `CLAUDE.md`, hooks and `.mcp.json` load at all; `consolidate` merges them
+into the same `<id>-analysis.md` that `analyze` produces, so Phase 2 never learns
+which route ran. Design and rationale in
+`docs/superpowers/specs/2026-08-12-multirepo-fanout-y-humano-en-el-bucle-design.md`.
+
+Four things that decide the shape and aren't obvious:
+
+- **The children carry no MCP.** The brief travels **inline in their prompt**, so the
+  secondary repos need no `ADO_ORG`, no token and no `ticket-agent.json`. That's also
+  why the brief has a ~4 KB budget: its cost is paid once per routed repo. And it's
+  why `PHASE_MCP` had to exist — `mcp__azure-devops` used to travel fixed in argv for
+  every phase, so an empty `PHASE_ALLOWED_TOOLS` did **not** take it away.
+- **A child mounts only the scratch dir** (`logs/<run_id>/`), never its sibling repos.
+  Mounting them would put the primary repo's rules back in front of it, which is the
+  defect the split exists to remove. The scratch holds no `.claude/`, so it leaks no
+  configuration.
+- **`SONDEAR:` fails wide.** Absent, empty, or with one unknown label → survey
+  **every** mounted repo. Routing is an optimization; a repo left out is a hole in the
+  analysis that the plan consumes without knowing. Same last-match anchoring as
+  `STAMP_RE`, and for the same reason: the skill's own example carries the literal.
+- **Each child's verdict is read from its own stretch of the log**, not from the
+  file's last stamp — otherwise a good survey vouches for a silent one that follows.
+  The run's stamp is written by the runner: the phase's verdict is the set of them,
+  and no child can speak for the rest. A fan-out records no `session_id`, so
+  `puede_continuar` stays false for it without a special case anywhere.
+
+**The seams between phases are where the human decides.** `claude -p` has no TTY, so
+a skill that stops to ask hangs until the timeout — but each phase is its own process
+with a file in between. So the deliverables close with `## Decisiones para ti`:
+`- [ ] **DECIDIR**` carries a proposal and, unanswered, the next phase proceeds with
+it **and records that it did**; `- [ ] **BLOQUEA**` has no defensible default and
+stops the next phase. The human answers by editing the file and ticking the box —
+same convention as `tasks.md`, no second format. `autonomy` finally governs
+something: it decides whether an unanswered `DECIDIR` stops the run.
+
+**Continuing a session is the human's call, and only theirs.** `runs.session_id` is
+captured from the stream (first match — the id is stable, and a run that died halfway
+is precisely one worth continuing), and `resume: true` adds `--resume … --fork-session`.
+**The slash command is not resent**: the session already ran the skill, and sending it
+again restarts the procedure from step 1 and rewrites the deliverable. The stamp
+reminder in the resume prompt isn't optional either — the runner demands `HUELLA` on
+every run. Only the human knows whether their adjustment **adds** scope (continue) or
+**corrects** what the agent understood (fresh, so the correction doesn't compete with
+the reasoning behind the mistake), which is why `puede_continuar`/`continuaciones` are
+computed in the backend and merely displayed.
+
 **Phase 2 consumes the analysis, not the work item.** If the file doesn't exist, it
 stops and asks for Phase 1 to run first — the analysis is the interface between the
 two. It writes to `openspec/changes/<id>-<slug>/` in the target repo and validates with

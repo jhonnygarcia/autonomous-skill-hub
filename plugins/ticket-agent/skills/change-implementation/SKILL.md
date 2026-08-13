@@ -37,6 +37,14 @@ subagents inherit this session's model, which is normal.
    `ticket-agent/<id>`. If it isn't, the runner didn't set it up — fixing it
    isn't this skill's job: stop, report it, and close with
    `HUELLA: nada — repo isn't on ticket-agent/<id>`.
+4. **The open decisions**, in `design.md` and in the analysis. An unticked
+   `- [ ] **BLOQUEA**` stops you: close
+   `HUELLA: nada — <N> decisiones sin resolver` and name them. Writing code on
+   top of a question nobody answered is how you end up deleting a day's work.
+   Under `autonomy: supervised`, an unticked `- [ ] **DECIDIR**` stops you too —
+   that's what the setting means. Under `autonomous` you proceed with its
+   proposal and **record it in section 6**. A ticked `- [x]` carries the human's
+   answer underneath, and **it wins over the plan's text**.
 
 ## 3. Reading the plan
 
@@ -171,6 +179,7 @@ the task it came from:
   asks for it that way.
 - Task 6 · unverified: `Check: manual`, no automated evidence.
 - Task 7 · unverified: the subagent reported no red output for `InvoiceTests`.
+- Plan · DECIDIR sin responder: el mapper fue a `Application`, por la propuesta.
 ```
 
 That file is the change's record and the human already opens it; a summary in
@@ -183,9 +192,17 @@ meaning more than it earned, so the summary says how many there were.
 
 Under `autonomy: supervised`, besides the stamp, leave a summary in chat of what
 was implemented and what was left blocked or pending. Under `autonomous`, the
-same summary, flagging which decisions you made on your own. Any other value of
-`autonomy` is treated as `supervised`, and the user is warned that the value
-isn't recognized.
+same summary, flagging which decisions you made on your own — **including every
+`DECIDIR` you proceeded on without an answer**, which also goes in `## Review
+notes`. Code built on an unanswered proposal that doesn't say so reads as if a
+human had chosen it. Any other value of `autonomy` is treated as `supervised`,
+and the user is warned that the value isn't recognized.
+
+**Say what it would cost to redo this**, in one line, before the stamp: how many
+tasks are done and what the loop already explored. It's what lets the human
+choose between a fresh session and continuing this one — continuing preserves
+what you learned when they're **adding**, a fresh session keeps their correction
+from competing with your reasoning when they're **correcting**.
 
 ## 7. Golden rules
 
