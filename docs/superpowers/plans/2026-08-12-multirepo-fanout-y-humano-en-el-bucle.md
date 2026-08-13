@@ -21,6 +21,29 @@ de prompt/argv para continuar sesiones. Las Fases 2 y 3 no cambian de forma, per
 **Tech Stack:** Python 3 + FastAPI + SQLite sin ORM (backend), pytest, markdown para
 las skills, React+TS para la UI.
 
+## Estado de ejecución — 2026-08-13
+
+**Tareas 1 a 15 hechas.** Suite: 194 verdes, `npm run build` y `npm run lint` limpios,
+`claude plugin validate .` pasa, y una prueba de humo contra el backend levantado
+confirma la cadena entera. Falta la **Tarea 16**, que necesita un ticket real de dos
+repos.
+
+Lo que se desvió del plan, y por qué:
+
+| Dónde | Desviación |
+|---|---|
+| T3 | La guarda del `repo_path` **no se implementó**: no hay endpoint que edite un ticket, así que todas sus corridas comparten directorio por construcción |
+| T5 | El filtrado de fases quedó **asimétrico**. Un ticket de un repo no recibe el fan-out; uno multi-repo **conserva `analyze`**, porque es el respaldo si el reparto se atasca y la línea base contra la que hay que medir el diseño — esconder aquello con lo que comparas hace imposible la Tarea 16 |
+| T5 | Hallazgo: `mcp__azure-devops` viajaba **fijo en el argv de todas las fases**, así que `PHASE_ALLOWED_TOOLS` vacío no lo quitaba. Nace `PHASE_MCP` |
+| T6 | Un `SONDEAR:` con una sola etiqueta **sí** lanza su hijo, en vez de cortocircuitar: el humano eligió esta fase, negarse sería confuso |
+| T6 | Los tickets ganan `repo_label`: vivía solo en el proyecto, y un principal sin etiqueta no se puede escribir en una línea de enrutado |
+| T14/15 | `canRunPhase` pasa de «la fase anterior en verde» a **prerrequisitos explícitos**: con dos rutas a la Fase 1, lo posicional exigía `analyze` antes de `brief` y `consolidate` aunque hubieras corrido `analyze` |
+| T14/15 | `api.ts` no estaba en el plan y sin él el control se pinta y no envía nada. Añadido a la Tarea 15 antes de la UI |
+
+Tres tests nacieron placebo y se reescribieron hasta que su mutación los rompe: el de
+la frontera de chunks (T2), el del hijo caído (T6) y el del parser (T4, verificado por
+mutación al escribirse junto a la implementación). Está anotado en cada tarea.
+
 ## Global Constraints
 
 - **Suscripción, jamás API key.** El runner elimina `ANTHROPIC_API_KEY` y

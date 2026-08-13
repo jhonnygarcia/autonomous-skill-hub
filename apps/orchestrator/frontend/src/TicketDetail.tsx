@@ -17,7 +17,7 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
   activeRun: ActiveRun | null
   projectName: string
   onBack: () => void
-  onRun: (instructions?: string, phase?: string) => void
+  onRun: (instructions?: string, phase?: string, resume?: boolean) => void
   onDelete: () => void
 }) {
   const [showLog, setShowLog] = useState(false)
@@ -48,7 +48,7 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
       {reason && <p className="text-xs text-amber-700 dark:text-amber-500">{reason}</p>}
 
       <Timeline phases={detail.fases} runs={detail.runs} activeRun={activeRun} ticketId={t.id}
-                onRun={(phase, ins) => onRun(ins, phase)} />
+                onRun={(phase, ins, resume) => onRun(ins, phase, resume)} />
 
       <div>
         <button className={TOGGLE} onClick={() => setShowHistory(v => !v)}>

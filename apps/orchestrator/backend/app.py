@@ -841,6 +841,33 @@ def read_title(t: sqlite3.Row, rel: str) -> str | None:
     return None
 
 
+# The markers a deliverable closes with, unticked. `- [x]` is an answered one and
+# doesn't count. The keywords are contract literals, matched byte for byte, and they
+# stay in Spanish like `HUELLA`.
+DECISION_RE = re.compile(r"^\s*- \[ \]\s*\*\*(DECIDIR|BLOQUEA)\*\*", re.MULTILINE)
+
+
+def open_decisions(t: sqlite3.Row, rel: str) -> dict | None:
+    """How many decisions the phase left waiting for a human.
+
+    Without this the `## Decisiones para ti` sections are read by nobody: today the
+    only way to find them is to open an 8 KB document and go hunting. Goes through
+    `declared_file_or_none` and not straight to disk, for the same reason the viewer
+    does: a stamp that declares a traversal must not become a second, laxer door.
+    """
+    p = declared_file_or_none(t, rel)
+    if not p:
+        return None
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    found = DECISION_RE.findall(text)
+    if not found:
+        return None
+    return {"decidir": found.count("DECIDIR"), "bloquea": found.count("BLOQUEA")}
+
+
 def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) -> list[dict]:
     """A phase's progress IS its most recent run. `runs` arrives ordered by id DESC."""
     out = []
@@ -891,6 +918,9 @@ def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) ->
                 e["motivo"] = latest["artifact_note"]
             if e["estado"] in ("ok", "parcial") and latest["artifact_path"] and with_footprint:
                 e["huella"] = stamp_stat(t["repo_path"], latest["artifact_path"])
+                pend = open_decisions(t, latest["artifact_path"])
+                if pend:
+                    e["decisiones"] = pend
         out.append(e)
     return out
 

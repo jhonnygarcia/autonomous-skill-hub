@@ -142,7 +142,7 @@ export default function App() {
         {view.kind === "ticket" && project && detail && (
           <TicketDetail detail={detail} activeRun={activeRun} projectName={project.name}
                         onBack={back}
-                        onRun={(ins, phase) => act(() => api.run(detail.ticket.id, ins, phase))}
+                        onRun={(ins, phase, resume) => act(() => api.run(detail.ticket.id, ins, phase, resume))}
                         onDelete={() => { act(() => api.remove(detail.ticket.id)); back() }} />
         )}
       </main>

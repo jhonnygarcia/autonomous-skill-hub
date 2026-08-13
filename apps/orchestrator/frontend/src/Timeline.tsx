@@ -23,10 +23,13 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
   runs: Run[]
   activeRun: ActiveRun | null
   ticketId: number
-  onRun: (phase: string, instructions?: string) => void
+  onRun: (phase: string, instructions?: string, resume?: boolean) => void
 }) {
   const [openPhase, setOpenPhase] = useState<string | null>(null)   // instructions box
   const [instructions, setInstructions] = useState("")
+  // Shared across phases, like `instructions`, so it resets on every open and on send:
+  // without that, what you chose on `analyze` shows up already ticked on `implement`.
+  const [resume, setResume] = useState(false)
   const [viewer, setViewer] = useState<Artifact | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<{ ruta: string; msg: string } | null>(null)
@@ -134,7 +137,8 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
                             aria-expanded={openPhase === f.fase}
                             aria-controls={`ajuste-${f.fase}`}
                             onClick={() => {
-                              setOpenPhase(openPhase === f.fase ? null : f.fase); setInstructions("")
+                              setOpenPhase(openPhase === f.fase ? null : f.fase)
+                              setInstructions(""); setResume(false)
                             }}>
                       ▾ Ajustar
                     </Button>
@@ -159,6 +163,26 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
                     tarea {f.progreso.hechas} de {f.progreso.total}
                   </span>
                 </div>
+              )}
+
+              {/* Without this counter nobody reads the `Decisiones para ti` sections:
+                  finding them means opening an 8 KB document and hunting. `bloquea` is
+                  destructive-coloured because it stops the next phase; `decidir` only
+                  means the agent will proceed with its own proposal. */}
+              {f.decisiones && (
+                <p className="pb-2 text-xs">
+                  {!!f.decisiones.decidir && (
+                    <span className="text-amber-600 dark:text-amber-500">
+                      {f.decisiones.decidir} decisión{f.decisiones.decidir > 1 && "es"} para ti
+                    </span>
+                  )}
+                  {!!f.decisiones.decidir && !!f.decisiones.bloquea && " · "}
+                  {!!f.decisiones.bloquea && (
+                    <span className="text-destructive">
+                      {f.decisiones.bloquea} bloquea{f.decisiones.bloquea > 1 && "n"} la fase siguiente
+                    </span>
+                  )}
+                </p>
               )}
 
               {f.estado === "error" && f.motivo && (
@@ -233,9 +257,47 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
                             placeholder={`Ajuste para ${PHASE_LABEL[f.fase] ?? f.fase}…`}
                             aria-label={`Ajuste para ${PHASE_LABEL[f.fase] ?? f.fase}`}
                             onChange={e => setInstructions(e.target.value)} />
+
+                  {/* Two mutually exclusive routes, so a radio and not a checkbox:
+                      they read against each other. `Sesión nueva` is the default
+                      because it's the safe one — continuing drags along the very
+                      reasoning the adjustment may be correcting. */}
+                  <fieldset className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    <legend className="sr-only">Cómo aplicar el ajuste</legend>
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name={`modo-${f.fase}`} checked={!resume}
+                             onChange={() => setResume(false)} />
+                      Sesión nueva
+                    </label>
+                    <label className="flex items-center gap-1.5"
+                           title={f.puede_continuar
+                             ? undefined
+                             : "Esta fase no tiene una sesión previa que continuar"}>
+                      <input type="radio" name={`modo-${f.fase}`} checked={resume}
+                             disabled={!f.puede_continuar}
+                             onChange={() => setResume(true)} />
+                      <span className={f.puede_continuar ? "" : "text-muted-foreground"}>
+                        Continuar la anterior
+                      </span>
+                    </label>
+                    {!!f.continuaciones && (
+                      <span className="text-muted-foreground">
+                        {f.continuaciones + 1}ª continuación
+                      </span>
+                    )}
+                  </fieldset>
+
+                  {/* The criterion, written down: it's the one decision only the human
+                      can make, and it doesn't survive as something to remember. */}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Si <strong>añades</strong> alcance, continuar ahorra la exploración.
+                    Si <strong>corriges</strong> lo que entendió, sesión nueva.
+                  </p>
+
                   <Button size="sm" className="mt-2" disabled={!instructions || !!reason}
                           onClick={() => {
-                            onRun(f.fase, instructions); setInstructions(""); setOpenPhase(null)
+                            onRun(f.fase, instructions, resume)
+                            setInstructions(""); setResume(false); setOpenPhase(null)
                           }}>
                     Correr con este ajuste
                   </Button>

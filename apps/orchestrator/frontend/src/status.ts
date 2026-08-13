@@ -59,7 +59,22 @@ export function duration(from: string | null, to: string | null): string {
  *  `test` disappeared on 2026-08-11 (tests are written inside `implement`), and
  *  `guards`/`pr` on the same date for the opposite reason: they never existed. */
 export const PHASE_LABEL: Record<string, string> = {
-  analyze: "Análisis", design: "Plan", implement: "Código",
+  analyze: "Análisis", brief: "Brief", survey: "Sondeo",
+  consolidate: "Consolidación", design: "Plan", implement: "Código",
+}
+
+/** What each phase needs in green before it can run, as a list of alternatives.
+ *
+ *  Explicit and not positional: Phase 1 has TWO routes to the same file — `analyze` in
+ *  one session, or `brief`→`survey`→`consolidate` with one session per repo — and a
+ *  multi-repo ticket shows both. Asking for "the previous phase in the list" would
+ *  demand `analyze` before `brief`, and `consolidate` even when the human took the
+ *  single-session route. Alternatives that aren't on screen are ignored, so a
+ *  single-repo ticket resolves `design` against `analyze` alone. */
+const PHASE_NEEDS: Record<string, string[]> = {
+  analyze: [], brief: [],
+  survey: ["brief"], consolidate: ["survey"],
+  design: ["analyze", "consolidate"], implement: ["design"],
 }
 
 /** Human-readable size of an artifact: bytes, KB or MB. */
@@ -103,9 +118,10 @@ export function canRunPhase(
   if (!f.disponible) return "esta fase todavía no existe"
   const m = activeRunReason(activeRun, ticketId)
   if (m) return m
-  const previous = phases.slice(0, i).filter(p => p.disponible).pop()
-  if (previous && previous.estado !== "ok" && previous.estado !== "parcial") {
-    return `necesita ${PHASE_LABEL[previous.fase]} en verde`
-  }
-  return ""
+  const options = (PHASE_NEEDS[f.fase] ?? [])
+    .map(name => phases.find(p => p.fase === name && p.disponible))
+    .filter((p): p is Phase => !!p)
+  if (!options.length) return ""
+  if (options.some(p => p.estado === "ok" || p.estado === "parcial")) return ""
+  return `necesita ${options.map(p => PHASE_LABEL[p.fase] ?? p.fase).join(" o ")} en verde`
 }

@@ -651,6 +651,32 @@ def test_a_multi_repo_ticket_gets_the_fan_out_and_keeps_analyze(client):
     assert names == ["analyze", "brief", "survey", "consolidate", "design", "implement"]
 
 
+def test_a_phase_counts_the_decisions_it_left_open(client, monkeypatch, tmp_path):
+    """Without the count nobody reads the `Decisiones para ti` sections: the only way
+    to find them today is to open an 8 KB document and go hunting. A ticked box is an
+    answered decision and must not keep asking."""
+    (tmp_path / "repo" / "a.md").write_text(
+        "# Analysis\n"
+        "## Decisiones para ti\n"
+        "- [ ] **DECIDIR** — ¿el back o el front?\n"
+        "- [x] **DECIDIR** — ya respondida, no cuenta\n"
+        "- [ ] **BLOQUEA** — el ticket no dice si respeta el filtro\n",
+        encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 50, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert _phase(client, tid, "analyze")["decisiones"] == {"decidir": 1, "bloquea": 1}
+
+
+def test_a_deliverable_without_decisions_says_nothing(client, monkeypatch, tmp_path):
+    """Absence is not zero: a phase with nothing to decide must not paint a counter."""
+    (tmp_path / "repo" / "a.md").write_text("# Analysis\nsin decisiones\n", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 51, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "decisiones" not in _phase(client, tid, "analyze")
+
+
 def _write_brief(tmp_path, ado_id, routing="SONDEAR: front, backend"):
     d = tmp_path / "repo" / "docs" / "tickets"
     d.mkdir(parents=True, exist_ok=True)

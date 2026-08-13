@@ -30,6 +30,16 @@ export type Phase = {
   /** Only on `implement` and only while running. An estimate: a big task weighs the
    *  same as a small one, so it's shown as a count and never as a percentage. */
   progreso?: { hechas: number; total: number } | null
+  /** Unticked markers in the deliverable. Absent when there are none — absence is not
+   *  zero, and a phase with nothing to decide must not paint a counter. */
+  decisiones?: { decidir: number; bloquea: number }
+  /** Whether this phase has a previous session to continue. Computed in the backend:
+   *  it's the same condition that decides whether the resume applies or falls back to
+   *  fresh, and a second copy here would drift from it. */
+  puede_continuar?: boolean
+  /** The CURRENT chain of continuations, not the historical total — a fresh run breaks
+   *  it. Says how much context has piled up in the session now in play. */
+  continuaciones?: number
 }
 export type Artifact = { ruta: string; texto: string; bytes: number; truncado: boolean }
 export type TicketDetail = { ticket: Ticket; fases: Phase[]; runs: Run[]; log_tail: string }
@@ -87,10 +97,10 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ado_id, project }),
     }).then(r => json<Ticket>(r)),
-  run: (id: number, instructions?: string, phase = "analyze") =>
+  run: (id: number, instructions?: string, phase = "analyze", resume = false) =>
     fetch(`/api/tickets/${id}/run`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instructions: instructions || null, phase }),
+      body: JSON.stringify({ instructions: instructions || null, phase, resume }),
     }).then(r => json<Run>(r)),
   remove: (id: number) => fetch(`/api/tickets/${id}`, { method: "DELETE" }).then(r => json<void>(r)),
 }
