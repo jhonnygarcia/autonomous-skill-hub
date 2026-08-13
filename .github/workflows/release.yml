@@ -1,0 +1,74 @@
+name: Release
+
+# Tag-driven, no branching ceremony: `git tag v0.9.1 && git push --tags` publishes.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:        # so a release can be rebuilt without moving the tag
+
+permissions:
+  contents: write           # required to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/orchestrator/frontend/package-lock.json
+
+      - name: Build the UI
+        working-directory: apps/orchestrator/frontend
+        run: npm ci && npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Test the backend
+        working-directory: apps/orchestrator/backend
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest tests/ -q
+
+      # The zip mirrors the repo's layout under apps/orchestrator/, because app.py
+      # finds the UI at ../frontend/dist relative to itself. Excluded: the venv, the
+      # database, the logs, and the frontend sources — the build is what ships.
+      - name: Assemble the package
+        run: |
+          set -eu
+          OUT=orchestrator
+          mkdir -p "$OUT/backend" "$OUT/frontend"
+          cp -r apps/orchestrator/backend/app.py \
+                apps/orchestrator/backend/requirements.txt \
+                apps/orchestrator/backend/hooks "$OUT/backend/"
+          cp -r apps/orchestrator/frontend/dist "$OUT/frontend/dist"
+          cp apps/orchestrator/run.cmd apps/orchestrator/run.sh "$OUT/"
+          cp apps/orchestrator/README.md "$OUT/README.md"
+          cp INSTALL.md USAGE.md RELEASE.md LICENSE "$OUT/"
+          chmod +x "$OUT/run.sh"
+          zip -qr "orchestrator-${GITHUB_REF_NAME}.zip" "$OUT"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: orchestrator-*.zip
+          generate_release_notes: true
+          body: |
+            **The plugin does not need this.** To use ticket-agent, install it from the
+            marketplace — no download required:
+
+                /plugin marketplace add jhonnygarcia/autonomous-skill-hub
+                /plugin install ticket-agent@autonomous-skill-hub
+
+            This zip is the **optional local app**: a queue and a UI over the same
+            plugin. Unzip it and run `run.cmd` (Windows) or `./run.sh` (macOS/Linux),
+            then open http://localhost:8000.
+
+            Needs on the machine: Python 3.11+, Node 20+ with `npx`, the Claude Code
+            CLI logged in, and an Azure DevOps credential. Setup is in the included
+            `INSTALL.md`; day-to-day use in `USAGE.md`.

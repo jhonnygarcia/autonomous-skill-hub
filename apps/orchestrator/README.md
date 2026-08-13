@@ -3,6 +3,44 @@
 Local queue of Azure DevOps tickets that runs the ticket-agent flow with your
 Claude Code subscription (headless CLI) against each project's repo.
 
+## How you get it
+
+**Not through `/plugin install`.** That installs plugins; this is an application, and
+there's no marketplace for those. Two ways in:
+
+**Download the release** — the packaged build, one process, nothing to compile.
+Full instructions, including what it still needs on the machine and how to update:
+[RELEASE.md](../../RELEASE.md). The short version:
+
+1. Grab `orchestrator-vX.Y.Z.zip` from
+   [Releases](https://github.com/jhonnygarcia/autonomous-skill-hub/releases).
+2. Unzip it anywhere.
+3. Run `run.cmd` (Windows) or `./run.sh` (macOS/Linux). First run creates the venv
+   and installs three packages; later runs start straight away.
+4. Open **http://localhost:8000**.
+
+**Or clone the repo**, which is what you want if you're going to change the code:
+
+    git clone https://github.com/jhonnygarcia/autonomous-skill-hub
+    cd autonomous-skill-hub/apps/orchestrator
+
+The zip still needs Python 3.11+ on the machine — it packages the built UI, not an
+interpreter. It doesn't remove the other prerequisites either (Claude Code logged in,
+Node with `npx`, an Azure credential): those are what the app *drives*, and no
+packaging can make them optional.
+
+The plugin and the app are independent. **The plugin doesn't need this** — it works
+from any Claude Code session ([INSTALL.md](../../INSTALL.md),
+[USAGE.md](../../USAGE.md)). This only adds a queue, a history, and buttons instead
+of typing the commands. And it needs the plugin installed **in each target repo**
+anyway: the app doesn't contain the agent, it launches it.
+
+**What it is, so nobody deploys it by mistake:** one process on your own machine,
+bound to localhost, no authentication, no users, SQLite in a file next to the code.
+It runs `claude -p` with *your* logged-in session, so it can only ever work where
+that session lives. Putting it on a shared server would hand everyone with the URL
+your Claude subscription and write access to your repos. Run it locally.
+
 ## Requirements
 - Python 3.11+, Node 20+
 - Claude Code CLI logged in (`claude` in the PATH)
@@ -30,14 +68,37 @@ Paths are validated on save: if they don't exist, the registration fails with
 a 400 instead of blowing up later inside the subprocess.
 
 ## Start
-    # Backend
+
+From the release zip it's one command — `run.cmd` / `./run.sh` — and one URL,
+http://localhost:8000, because the backend serves the built UI itself. The rest of
+this section is **developing on the source**, where the UI is rebuilt on save.
+
+Two processes, two terminals, **backend first** — the frontend proxies `/api` to it,
+and a Vite started against a dead backend just serves a UI whose every request fails.
+The `python -m venv` and `npm install` lines are first run only.
+
+    # Backend — Windows
     cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
     .venv/Scripts/uvicorn app:app --port 8000
 
-    # Frontend (another terminal)
+    # Backend — macOS / Linux
+    cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+    .venv/bin/uvicorn app:app --port 8000
+
+    # Frontend (another terminal, either platform)
     cd frontend && npm install && npm run dev
 
-Open http://localhost:5173 — queue a ticket by ID, run it and follow the log.
+Open **http://localhost:5173** — queue a ticket by ID, run it and follow the log.
+
+Two things that will cost you an hour otherwise, both Windows-specific:
+
+- **Use `localhost`, not `127.0.0.1`.** Vite binds to `::1` and uvicorn to
+  `127.0.0.1`, so `http://127.0.0.1:5173` refuses the connection while `localhost`
+  works. The dev proxy is fine either way — it reaches the backend server-side.
+- **Never `uvicorn --reload`.** The reloader leaves orphaned children holding port
+  8000, and the backend keeps serving stale code with no warning. When something
+  behaves oddly, suspect the process before the code.
 
 ## Tests
-    cd backend && .venv/Scripts/python -m pytest tests/ -v
+    cd backend && .venv/Scripts/python -m pytest tests/ -v    # Windows
+    cd backend && .venv/bin/python -m pytest tests/ -v        # macOS / Linux
