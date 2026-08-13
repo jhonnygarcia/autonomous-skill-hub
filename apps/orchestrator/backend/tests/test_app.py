@@ -130,11 +130,12 @@ import sys
 from pathlib import Path
 
 
-def _use_fake_claude(monkeypatch, fail=False, stamp=None, skill_leak=False):
+def _use_fake_claude(monkeypatch, fail=False, stamp=None, skill_leak=False, no_session=False):
     fake = Path(__file__).parent / "fake_claude.py"
     monkeypatch.setenv("ORCH_CLAUDE_CMD", json.dumps([sys.executable, str(fake)]))
     monkeypatch.setenv("FAKE_FAIL", "1" if fail else "0")
     monkeypatch.setenv("FAKE_SKILL_LEAK", "1" if skill_leak else "0")
+    monkeypatch.setenv("FAKE_NO_SESSION", "1" if no_session else "0")
     if stamp is None:
         monkeypatch.delenv("FAKE_HUELLA", raising=False)
     else:
@@ -548,6 +549,44 @@ def test_analyze_prompt_keeps_extra_repos_readable(client, monkeypatch):
     assert "readable" in prompt
     assert "the analysis is still written in the main one" in prompt
     assert "writable" not in prompt
+
+
+def test_run_captures_the_session_id(client, monkeypatch):
+    """Without it there's no continuing a phase: `--resume` needs the id, and the only
+    place it exists is the stream the runner is already reading."""
+    from fake_claude import FAKE_SESSION
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert client.get(f"/tickets/{tid}").json()["runs"][0]["session_id"] == FAKE_SESSION
+
+
+def test_a_run_without_session_id_still_finishes(client, monkeypatch):
+    """A missing id must not cost a good run. It only takes away the option to
+    continue it — which is what `puede_continuar` reports."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/12-analysis.md", no_session=True)
+    tid = client.post("/tickets", json={"ado_id": 12, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["session_id"] is None and run["status"] == "success"
+
+
+def test_the_session_id_is_found_beyond_the_first_chunk(client, monkeypatch):
+    """The stream is read in 64 KiB chunks. In a real run the id arrives in the first
+    event, which makes "look at the first chunk and be done" the tempting shortcut —
+    and it fails silently: the run comes out fine and simply can't be continued, with
+    nothing saying why. Here the id is pushed past the first read.
+
+    What this does NOT cover: the id landing astride two chunks. A pipe read can
+    return short, so that boundary can't be placed deterministically from a test. The
+    `carry` in the loop covers it without a test proving it, and that's stated
+    where it lives."""
+    from fake_claude import FAKE_SESSION
+    _use_fake_claude(monkeypatch)
+    monkeypatch.setenv("FAKE_SESSION_LATE", "1")
+    tid = client.post("/tickets", json={"ado_id": 13, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert client.get(f"/tickets/{tid}").json()["runs"][0]["session_id"] == FAKE_SESSION
 
 
 def test_implement_loads_the_rules_of_the_mounted_repos(client, monkeypatch, tmp_path):

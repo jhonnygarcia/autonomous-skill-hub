@@ -143,7 +143,7 @@ Gatea la Tarea 3. Sin el id no hay continuación posible.
 - Produces: columna `runs.session_id` (nullable) poblada al leer el stream.
   La Tarea 3 la consume.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 `tests/fake_claude.py` ya emite stream-json; hacer que emita un evento con
 `"session_id":"<uuid fijo>"` (ya lo hace el CLI real desde el primer evento —
@@ -154,7 +154,7 @@ termina normal. Un id ausente no puede romper una corrida buena.
 
 Expected: fallan por columna inexistente.
 
-- [ ] **Step 2: Migración de la columna**
+- [x] **Step 2: Migración de la columna**
 
 En `init_db()`, junto a los `ALTER TABLE` que ya existen para bases viejas:
 
@@ -165,7 +165,7 @@ En `init_db()`, junto a los `ALTER TABLE` que ya existen para bases viejas:
 
 (`resumed_from` se puebla en la Tarea 3; se crea aquí para no migrar dos veces.)
 
-- [ ] **Step 3: Extraer el id del stream**
+- [x] **Step 3: Extraer el id del stream**
 
 Un regex sobre los chunks que el runner ya lee. **El primer match gana**, al revés
 que `STAMP_RE`: el id es único y estable en toda la corrida, y buscar el último
@@ -180,12 +180,32 @@ la corrida muere a mitad, el id sigue sirviendo para continuarla.
 
 Expected: los dos tests pasan.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/backend/
 git commit -m "feat(runner): guarda el session_id de cada corrida"
 ```
+
+> **Hecha el 2026-08-13.** Tres tests. El tercero nació placebo —usaba `FAKE_BIG`,
+> que imprime el relleno *después* del id, así que pasaba sin probar nada— y se
+> reescribió con `FAKE_SESSION_LATE`, que empuja el id más allá del primer `read`.
+> Mutado a «mira solo el primer chunk», falla.
+>
+> El `carry` que cubre un id partido entre dos chunks **se queda sin test a
+> propósito**: un `read` de pipe puede volver corto, así que esa frontera no se
+> coloca de forma determinista desde un test. Dicho en el comentario del bucle y en
+> el docstring del test, para que nadie lo confunda con un olvido.
+>
+> `fake_claude.py` emite el `session_id` por defecto, así todos los tests ejercitan
+> la captura; `FAKE_NO_SESSION` cubre el caso contrario. Suite: 159 verdes.
+>
+> **Aviso para quien ejecute el resto del plan:** no toques archivos del repo con
+> `Get-Content`/`Set-Content` de PowerShell 5.1. Sin `-Encoding utf8` explícito, la
+> lectura interpreta UTF-8 como cp1252 y cada em dash vuelve como mojibake — incluido
+> el de `STAMP_RE`, que deja de casar. Pasó dos veces en esta sesión; se recuperó con
+> `git checkout --`. Usa la herramienta de edición, o `git stash` para probar
+> mutaciones.
 
 ---
 

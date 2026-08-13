@@ -169,6 +169,9 @@ def now() -> str:
 # backslashes, so the behavior doesn't change: the capture reaches end of line just
 # like before.
 STAMP_RE = re.compile(r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*([^"\\]+)')
+# The CLI's session, as it travels in the stream-json. Not a contract with the skills
+# like `STAMP_RE` — it's the CLI's own shape — but just as literal.
+SESSION_RE = re.compile(r'"session_id":"([0-9a-fA-F-]{36})"')
 LEGACY_STATES = {"validado": "ok", "sin-validar": "parcial", "no-escrito": "nada"}
 
 # Separator between the path and the reserve in a `parcial` stamp: "HUELLA: parcial —
@@ -417,6 +420,13 @@ def init_db() -> None:
             # the MCP only lives inside the agent's subprocess — and giving it some
             # would mean building a second authentication path to save a typo.
             "ALTER TABLE tickets ADD COLUMN title TEXT",
+            # The CLI session this run drove. It's what `--resume` takes to continue a
+            # phase instead of redoing it, and the only place it exists is the stream.
+            "ALTER TABLE runs ADD COLUMN session_id TEXT",
+            # And which session this one continued, when it did. Always with
+            # `--fork-session`, so each run keeps its own id and the chain stays
+            # walkable in both directions.
+            "ALTER TABLE runs ADD COLUMN resumed_from TEXT",
         ):
             try:
                 c.execute(alter)
@@ -924,8 +934,23 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                 # error. The incremental decoder avoids splitting a character across
                 # two chunks.
                 dec = codecs.getincrementaldecoder("utf-8")("replace")
+                # The FIRST match wins, the opposite of `STAMP_RE`: the id is unique and
+                # stable for the whole run, so waiting for the last one would mean
+                # waiting for the end — and a run that dies halfway is precisely one
+                # worth continuing. `carry` covers the id landing astride two chunks:
+                # untested on purpose, because a pipe read can return short and that
+                # boundary can't be placed deterministically from a test.
+                sid, carry = None, ""
                 while chunk := await proc.stdout.read(65536):
-                    log.write(dec.decode(chunk))
+                    text = dec.decode(chunk)
+                    log.write(text)
+                    if sid is None:
+                        m = SESSION_RE.search(carry + text)
+                        if m:
+                            sid = m.group(1)
+                            set_run(run_id, session_id=sid)
+                        else:
+                            carry = (carry + text)[-64:]
                     log.flush()
                 log.write(dec.decode(b"", True))
                 ok = (await proc.wait()) == 0
