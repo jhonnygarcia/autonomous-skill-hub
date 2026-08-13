@@ -1529,3 +1529,31 @@ def artifact(tid: int, ruta: str):
         cut -= 1
     text = (raw[:cut] if truncated else raw).decode("utf-8", "replace")
     return {"ruta": ruta, "texto": text, "bytes": size, "truncado": truncated}
+
+
+# --- Serving the built UI, so a release is one process instead of two ------------
+#
+# In development there are two servers and Vite proxies `/api/*` here, stripping the
+# prefix on the way (`vite.config.ts`). A release has no Vite: the browser's `/api/...`
+# arrives verbatim, and every route in this file is declared without that prefix. Rather
+# than duplicate the routing table, the prefix is stripped in the same place Vite strips
+# it — before routing. In development this middleware never fires, because the proxy
+# already removed it.
+DIST = BASE.parent / "frontend" / "dist"
+
+
+@app.middleware("http")
+async def strip_api_prefix(request, call_next):
+    path = request.scope["path"]
+    if path == "/api" or path.startswith("/api/"):
+        request.scope["path"] = path[4:] or "/"
+    return await call_next(request)
+
+
+# Mounted LAST and only if the build exists: Starlette matches routes in registration
+# order, so every API route above still wins, and a source checkout with no `dist/`
+# behaves exactly as before. `html=True` serves index.html for `/`.
+if DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=DIST, html=True), name="ui")

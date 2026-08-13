@@ -17,6 +17,18 @@ def test_create_and_list_ticket(client):
     assert client.get("/tickets").json()[0]["id"] == t["id"]
 
 
+def test_api_prefix_is_stripped(client):
+    """In a release there's no Vite to strip `/api`, so the app does it itself.
+
+    The built UI calls `/api/tickets`; every route here is declared without the prefix.
+    """
+    tid = client.post("/tickets", json={"ado_id": 4242, "project": "Demo"}).json()["id"]
+    assert client.get("/api/tickets").json()[0]["id"] == tid
+    assert client.get(f"/api/tickets/{tid}").json()["ticket"]["ado_id"] == 4242
+    # `/apifoo` is not `/api/foo`: the prefix only goes when it's a whole segment
+    assert client.get("/apitickets").status_code == 404
+
+
 def test_create_ticket_unknown_project(client):
     assert client.post("/tickets", json={"ado_id": 1, "project": "Nope"}).status_code == 400
 
