@@ -43,7 +43,11 @@ credential first** (see "Credentials").
 
 ## Installing in a project
 
-1. `/plugin marketplace add <hub-url-or-path>`
+Step by step, with the prerequisite checks and the usual failures:
+[INSTALL.md](../../INSTALL.md); day-to-day use and the full configuration reference:
+[USAGE.md](../../USAGE.md). The short version:
+
+1. `/plugin marketplace add jhonnygarcia/autonomous-skill-hub`
 2. `/plugin install ticket-agent@autonomous-skill-hub`
 3. In the project, define the organization in `.claude/settings.json`:
 

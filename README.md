@@ -64,12 +64,17 @@ the reasoning behind the mistake when you're *correcting*.
 
 ## Install the plugin in a project
 
-    /plugin marketplace add <url-or-path-to-this-repo>
+    /plugin marketplace add jhonnygarcia/autonomous-skill-hub
     /plugin install ticket-agent@autonomous-skill-hub
 
-Then two files in the target repo, and a restart. Full setup, the authentication
-modes (Azure CLI session or a token) and the requirements are in the
-[plugin's README](plugins/ticket-agent/README.md).
+Then two files in the target repo, and a restart.
+
+- **[INSTALL.md](INSTALL.md)** — prerequisites, the marketplace, the Azure credential
+  (`az login` or a PAT), and the per-project configuration.
+- **[USAGE.md](USAGE.md)** — each stage with examples, answering the open decisions,
+  the multi-repo route, and every configuration key.
+- **[RELEASE.md](RELEASE.md)** — the optional local app, packaged: download it, run
+  it, and (for me) how a release gets published.
 
 Updating an installed copy needs the marketplace suffix, and the plugin's `version`
 must have changed — it's the cache key:
@@ -92,6 +97,10 @@ Then open **http://localhost:5173** (not `127.0.0.1` — see CLAUDE.md).
 | Plugin | What it does | Status |
 |---|---|---|
 | [ticket-agent](plugins/ticket-agent/) | Azure DevOps ticket → analysis → OpenSpec plan → commits | All three stages, multi-repo |
+
+## License
+
+MIT — see [LICENSE](LICENSE). Install it, fork it, take the skills apart.
 
 ## Conventions for adding a plugin
 
