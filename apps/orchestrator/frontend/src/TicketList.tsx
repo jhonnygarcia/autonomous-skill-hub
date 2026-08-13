@@ -28,16 +28,46 @@ const DOT: Record<string, string> = {
  * ten tickets. `role="img"` also makes the subtree presentational, so the per-dot
  * `title`s stay for the mouse without being announced twice.
  */
+/**
+ * The journey is three stages however Phase 1 was run. On a multi-repo ticket that
+ * phase is four rows —`analyze` as the fallback plus the `brief`/`survey`/`consolidate`
+ * fan-out— but they're all the same stage: understand the ticket. A row that grew to
+ * six dots would answer "which sub-step", a question only the detail view asks, and it
+ * would carry a permanently grey `analyze` dot on every ticket that took the fan-out.
+ */
+const STAGES: { label: string; phases: string[] }[] = [
+  { label: "Análisis", phases: ["analyze", "brief", "survey", "consolidate"] },
+  { label: "Plan", phases: ["design"] },
+  { label: "Código", phases: ["implement"] },
+]
+/** The phases that actually produce the stage's deliverable. A stage only goes green
+ *  when one of these did: `brief` and `survey` being done doesn't mean there's an
+ *  analysis to plan from, and painting them green would say there is. */
+const TERMINAL = new Set(["analyze", "consolidate", "design", "implement"])
+
+function stageState(members: Phase[]): string {
+  if (members.some(f => f.estado === "corriendo")) return "corriendo"
+  const done = members.find(f => TERMINAL.has(f.fase)
+    && (f.estado === "ok" || f.estado === "parcial"))
+  if (done) return done.estado!
+  if (members.some(f => f.estado === "error")) return "error"
+  return "pendiente"
+}
+
 function Stepper({ fases }: { fases: Phase[] }) {
-  const shown = fases.filter(f => f.disponible)
-  const label = (f: Phase) => `${PHASE_LABEL[f.fase] ?? f.fase}: ${f.estado ?? "pendiente"}`
+  const stages = STAGES
+    .map(s => ({ ...s, members: fases.filter(f => f.disponible && s.phases.includes(f.fase)) }))
+    .filter(s => s.members.length)
+  // The hover carries the full truth the dot compresses: which sub-step got where.
+  const detail = (s: typeof stages[number]) =>
+    `${s.label}: ${s.members.map(f => `${PHASE_LABEL[f.fase] ?? f.fase} ${f.estado ?? "pendiente"}`).join(", ")}`
   return (
-    <span className="flex items-center" role="img" aria-label={shown.map(label).join(" · ")}>
-      {shown.map((f, i) => (
-        <span key={f.fase} className="flex items-center">
+    <span className="flex items-center" role="img" aria-label={stages.map(detail).join(" · ")}>
+      {stages.map((s, i) => (
+        <span key={s.label} className="flex items-center">
           {i > 0 && <span aria-hidden className="h-px w-3 bg-border" />}
-          <span title={label(f)}
-                className={`h-2 w-2 rounded-full ${DOT[f.estado ?? "pendiente"]}`} />
+          <span title={detail(s)}
+                className={`h-2 w-2 rounded-full ${DOT[stageState(s.members)]}`} />
         </span>
       ))}
     </span>

@@ -144,6 +144,29 @@ And the same, button by button, for `design` and `implement`. The ticket's
 progress isn't stored in any column: it's folded from the `runs` table on
 every read.
 
+**A ticket that mounts more than one repo has more buttons than that.** Phase 1
+splits, because `--add-dir` mounts a repo's files but not its rules, hooks or
+`.mcp.json` — so a single session writes every repo under the *primary* repo's
+conventions:
+
+```
+[UI] "brief"        →  reads the work item, writes docs/tickets/<id>-brief.md
+                       ending in a routing line you can edit:  SONDEAR: back, front
+[UI] "survey"       →  ONE `claude -p` per routed repo, each with cwd in that repo:
+                       the only session that loads its CLAUDE.md, hooks and MCP
+[UI] "consolidate"  →  merges them into docs/tickets/<id>-analysis.md, plus the
+                       contract table no single repo could write
+```
+
+**It's still three stages**, and that's what the list's stepper shows: understand,
+plan, implement. The fan-out is *how* the first one happens when the ticket spans
+repos — not a fourth stage. The detail timeline shows all six rows; the list
+collapses them, because "which sub-step" is a question only the detail view asks.
+
+`analyze` stays available for those tickets too: it's the fallback if the split
+gets stuck, and the baseline to compare the design against. Both routes write the
+same file, so Phase 2 never learns which one ran.
+
 ---
 
 ## 3. Which model runs each step
@@ -161,8 +184,13 @@ claude -p "<prompt>" --output-format stream-json --verbose
 
 Without `--model`, the CLI uses **the default model of the machine where the
 backend runs**: whatever is configured in `~/.claude/settings.json` or chosen
-via `/model` on that install. Changing the model for the three phases today
-means changing the CLI's configuration, not touching the orchestrator.
+via `/model` on that install.
+
+**But the orchestrator can pin one per phase**, from Settings in the UI
+(`Models.tsx` → `GET/PUT /modelos`). They live in the `phase_config` table and
+nowhere else; empty means "whatever the CLI resolves", which is the default.
+`model_for` reads them **at launch time**, not at startup, because on Windows the
+backend isn't hot-reloaded.
 
 And within each run:
 
@@ -181,32 +209,43 @@ words: **the whole ticket, end to end, runs on a single model.**
 ### What is pinned, and it isn't the model
 
 What changes from one phase to another isn't the model but the environment,
-and that lives in four tables next to `PHASES` in `app.py`:
+and that lives in five tables next to `PHASES` in `app.py`. There are **six
+launchable phases**, not three — the three below plus `brief`, `survey` and
+`consolidate`:
 
 | Table | What it decides | `analyze` | `design` | `implement` |
 |---|---|---|---|---|
 | `PHASE_COMMANDS` | what gets launched | `/ticket-agent:analyze` | `/ticket-agent:plan` | `/ticket-agent:implement` |
 | `PHASE_ALLOWED_TOOLS` | which extra tools | *(empty: read-only)* | `Bash(npx …openspec:*)` | `Bash` |
+| `PHASE_MCP` | whether it reaches Azure DevOps | yes | yes | yes |
 | `PHASE_DONE` | what state it leaves the ticket in | `analyzed` | `planned` | `implemented` |
 | `PHASE_NOUN` | what the deliverable is called in the prompt | "the analysis" | "the plan" | "the implementation" |
+
+The fan-out's three: `brief` behaves like `analyze` (MCP, read-only, leaves the
+ticket `briefed`); `survey` and `consolidate` carry **no MCP at all** — the brief
+travels inline in the survey's prompt, so the secondary repos need no `ADO_ORG`,
+no token and no `ticket-agent.json`, and going back to the work item from there
+would produce a second, divergent reading of the ticket.
+
+`PHASE_MCP` had to exist as its own table: `mcp__azure-devops` used to travel
+**fixed in argv for every phase**, so an empty `PHASE_ALLOWED_TOOLS` did not take
+it away.
 
 Plus `settings_for()`, which only in `implement` injects the hook that denies
 the push.
 
-### If a per-phase model is ever wanted
+### The per-phase model exists
 
-It would be a fifth table `PHASE_MODEL` and two lines in `execute_run`:
+This section used to say it didn't, and to sketch the `PHASE_MODEL` table it
+would take. It shipped: Settings in the UI writes `phase_config`, and
+`model_for(phase)` turns it into `--model` / `--effort` in argv. The model goes
+straight into argv, so it's validated against `MODEL_RE` — one starting with `-`
+would be another flag.
 
-```python
-PHASE_MODEL = {"analyze": "opus", "design": "opus", "implement": "sonnet"}
-...
-cmd += ["--model", PHASE_MODEL[phase]]
-```
-
-It doesn't exist today, on purpose: there's no measurement showing one phase
-needs something different from another, and the subscription bills the same
-either way. Add it once there's a run that proves a cheaper model is enough
-for `implement`, or that a better one changes `analyze`'s result.
+Empty is still the default and still means "whatever the CLI resolves in the
+target repo". The advice the old text ended on survives the correction: pin one
+only when a run has shown a cheaper model is enough for `implement`, or that a
+better one changes what `analyze` produces.
 
 ### One rule that is non-negotiable
 

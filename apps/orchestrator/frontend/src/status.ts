@@ -7,9 +7,15 @@ const COLOR: Record<string, string> = {
   planificado: "border-violet-500/60 bg-violet-500/10 text-violet-700 dark:text-violet-500",
   implementado: "border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-500",
   error: "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-500",
+  // The fan-out's two intermediate states. Amber, not green: they're steps toward the
+  // analysis, not the analysis — a ticket sitting on `sondeado` still has no analysis
+  // to plan from, and painting it in the "done" colour would say otherwise.
+  briefeado: "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-500",
+  sondeado: "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-500",
 }
 const LABEL: Record<string, string> = {
   queued: "registrado", running: "corriendo", analyzed: "analizado",
+  briefed: "briefeado", surveyed: "sondeado",
   planned: "planificado", implemented: "implementado", error: "error",
 }
 
