@@ -279,6 +279,17 @@ def split_reserve(state: str, rest: str) -> tuple[str, str | None]:
     return rest, None
 
 
+def stamp_in(text: str) -> tuple[str, str] | None:
+    """The stamp of ONE stretch of log. Split out from `read_stamp` because a fan-out
+    run holds several children in a single file, and each one's verdict has to be read
+    from its own stretch — the last stamp of the whole file is only the last child's."""
+    hits = STAMP_RE.findall(text[-4000:])
+    if not hits:
+        return None
+    state, rest = hits[-1]
+    return LEGACY_STATES.get(state, state), rest.strip()
+
+
 def read_stamp(log_path: Path) -> tuple[str, str] | None:
     """`(state, path-or-reason)` from the LAST match in the log, or None if there is none.
 
@@ -290,12 +301,7 @@ def read_stamp(log_path: Path) -> tuple[str, str] | None:
         return None
     # ponytail: reads the whole file just to keep the tail; with MB-sized logs this
     # would need a seek from the end. Today they weigh KB.
-    tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
-    hits = STAMP_RE.findall(tail)
-    if not hits:
-        return None
-    state, rest = hits[-1]
-    return LEGACY_STATES.get(state, state), rest.strip()
+    return stamp_in(log_path.read_text(encoding="utf-8", errors="replace"))
 
 
 def normalize_dirs(items: list) -> list[dict]:
@@ -414,6 +420,32 @@ def last_session(ticket_id: int, phase: str) -> str | None:
             "AND session_id IS NOT NULL ORDER BY id DESC LIMIT 1",
             (ticket_id, phase)).fetchone()
     return r["session_id"] if r else None
+
+
+BRIEF_REL = "docs/tickets/{ado_id}-brief.md"
+NO_BRIEF_REASON = (
+    "no existe el brief de la fase anterior; corre primero la fase «brief»")
+SURVEY_PROMPT = (
+    "{command} {ado_id}\n\n"
+    "You are rooted in the repo `{label}` ({path}), and this session is the only one "
+    "that sees ITS rules, hooks and configuration. Answer only for this repo.\n\n"
+    "Write the survey to `{out}` and nothing else: this repo is read-only for you.\n\n"
+    "--- Ticket brief (the work item is NOT reachable from here; this is all of it) ---\n"
+    "{brief}\n"
+    "--- end of brief ---")
+
+
+def ticket_labels(t) -> list[tuple[str, str]]:
+    """`(label, path)` for every repo the ticket mounts, primary first.
+
+    The label is what the routing line names, so an unlabelled repo falls back to its
+    folder name rather than becoming un-nameable: a repo nobody can write on a
+    `SONDEAR:` line is a repo that never gets surveyed.
+    """
+    out = [(t["repo_label"] or Path(t["repo_path"]).name, t["repo_path"])]
+    for e in normalize_dirs(json.loads(t["extra_dirs"] or "[]")):
+        out.append((e["label"] or Path(e["path"]).name, e["path"]))
+    return out
 
 
 def ticket_repos(t) -> list[str]:
@@ -537,6 +569,10 @@ def init_db() -> None:
             # `--fork-session`, so each run keeps its own id and the chain stays
             # walkable in both directions.
             "ALTER TABLE runs ADD COLUMN resumed_from TEXT",
+            # The primary repo's label. It lived only on the project until the fan-out
+            # needed to name every repo to the routing — an unlabelled primary can't be
+            # written on a `SONDEAR:` line. Copied on creation like the rest.
+            "ALTER TABLE tickets ADD COLUMN repo_label TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 c.execute(alter)
@@ -696,10 +732,10 @@ def create_ticket(body: TicketIn):
     ts = now()
     with db() as c:
         cur = c.execute(
-            "INSERT INTO tickets(ado_id, org, project, repo_path, extra_dirs, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO tickets(ado_id, org, project, repo_path, repo_label, extra_dirs, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (body.ado_id, proj["org"], proj["project"], proj["repo_path"],
-             proj["extra_dirs"], ts, ts),
+             proj["repo_label"], proj["extra_dirs"], ts, ts),
         )
     t = ticket_row(cur.lastrowid)
     return ticket_out(t, phases_for(t, [], with_footprint=False))
@@ -935,6 +971,94 @@ def active_run():
     return dict(r) if r else None
 
 
+async def spawn_cli(cmd, cwd, env, log, run_id: int | None) -> bool:
+    """Runs one CLI child, streaming into the already-open log. True if it exited 0.
+
+    `run_id` None means "don't record the session": a fan-out run drives several
+    sessions and there is no single one to continue, so `puede_continuar` stays false
+    for that phase on its own, with no special case anywhere else.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, cwd=cwd, env=env,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    assert proc.stdout is not None
+    # In chunks, not lines: asyncio's line reader blows up with "Separator is found,
+    # but chunk is longer than limit" at 64 KiB, and stream-json passes lines longer
+    # than that as soon as the agent writes a large file. It really happened: a good
+    # run from 3322 ended up marked as an error. The incremental decoder avoids
+    # splitting a character across two chunks.
+    dec = codecs.getincrementaldecoder("utf-8")("replace")
+    # The FIRST match wins, the opposite of `STAMP_RE`: the id is unique and stable for
+    # the whole run, so waiting for the last one would mean waiting for the end — and a
+    # run that dies halfway is precisely one worth continuing. `carry` covers the id
+    # landing astride two chunks: untested on purpose, because a pipe read can return
+    # short and that boundary can't be placed deterministically from a test.
+    sid, carry = None, ""
+    while chunk := await proc.stdout.read(65536):
+        text = dec.decode(chunk)
+        log.write(text)
+        if run_id is not None and sid is None:
+            m = SESSION_RE.search(carry + text)
+            if m:
+                sid = m.group(1)
+                set_run(run_id, session_id=sid)
+            else:
+                carry = (carry + text)[-64:]
+        log.flush()
+    log.write(dec.decode(b"", True))
+    return (await proc.wait()) == 0
+
+
+async def run_fan_out(children, env, log, log_path: Path, scratch: Path) -> bool:
+    """Runs one child per routed repo, in sequence, all into the same log.
+
+    Sequential on purpose: the global lock keeps meaning something, one log preserves
+    live progress in the UI, and one row in `runs` means no schema change. Running them
+    in parallel is a later optimization, and it's when `runs` would need a parent.
+
+    A child that fails does NOT abort the rest. What it must never do is disappear:
+    `consolidate` receives which repos were surveyed and which failed, because an
+    analysis that looks complete and isn't is this system's most expensive failure.
+    """
+    verdicts = []
+    for label, cwd, cmd in children:
+        log.write(f"\n\n===== survey: {label} ({cwd}) =====\n$ {' '.join(cmd)}\n\n")
+        log.flush()
+        start = log_path.stat().st_size
+        try:
+            exited_ok = await spawn_cli(cmd, cwd, env, log, None)
+        except Exception as exc:
+            log.write(f"\n[orchestrator] {label}: excepción: {exc}\n")
+            exited_ok = False
+        log.flush()
+        # Each child's verdict is read from ITS stretch of the log. The last stamp of
+        # the whole file is only the last child's — reading that would let one good
+        # survey vouch for every failed one before it.
+        with open(log_path, "rb") as fh:
+            fh.seek(start)
+            section = fh.read().decode("utf-8", errors="replace")
+        stamp = stamp_in(section) if exited_ok else None
+        verdicts.append((label, stamp[0] if stamp else "nada"))
+    good = [label for label, state in verdicts if state in ("ok", "parcial")]
+    failed = [label for label, state in verdicts if state not in ("ok", "parcial")]
+    log.write("\n\n[orchestrator] sondeados: " + (", ".join(good) or "ninguno"))
+    if failed:
+        log.write(" · fallaron: " + ", ".join(failed))
+    log.write("\n")
+    # The run's own stamp, written by the runner and not by any child: the phase's
+    # verdict is the set of them, and no single child can speak for it. It goes last so
+    # `read_stamp`, which anchors on the final match, finds this one and not a child's.
+    if not good:
+        log.write(f"HUELLA: nada — ningún repo pudo sondearse ({', '.join(failed)})\n")
+    elif failed:
+        log.write(f"HUELLA: parcial — {scratch.as_posix()} · "
+                  f"{len(good)}/{len(verdicts)} sondeados, falló {', '.join(failed)}\n")
+    else:
+        log.write(f"HUELLA: ok — {scratch.as_posix()}\n")
+    log.flush()
+    return bool(good)
+
+
 RUN_LOCK = asyncio.Lock()
 
 
@@ -1022,6 +1146,45 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
             prompt += repos_text(phase, extras, noun)
             prompt += adjustment_text(phase, noun, instructions)
+        # The fan-out replaces the single child with one per routed repo. It's built
+        # before argv because each child gets its own prompt, its own cwd and its own
+        # mounts — nothing of the single-child path survives except the flags.
+        children, scratch = None, None
+        if phase == "survey":
+            brief_path = Path(ticket["repo_path"]) / BRIEF_REL.format(ado_id=ticket["ado_id"])
+            if not brief_path.exists():
+                with open(log_path, "w", encoding="utf-8") as log:
+                    log.write(f"[orchestrator] {NO_BRIEF_REASON}: {brief_path}\n")
+                set_run(run_id, status="error", finished_at=now(),
+                        artifact_state="nada", artifact_path=NO_BRIEF_REASON)
+                set_ticket(ticket["id"])
+                return
+            brief = brief_path.read_text(encoding="utf-8", errors="replace")
+            labels = ticket_labels(ticket)
+            routed = repos_to_survey(brief, [label for label, _ in labels])
+            scratch = LOGS_DIR / str(run_id)
+            scratch.mkdir(parents=True, exist_ok=True)
+            children = []
+            for label, path in labels:
+                if label not in routed:
+                    continue
+                out = (scratch / f"survey-{label}.md").as_posix()
+                child_prompt = SURVEY_PROMPT.format(
+                    command=PHASE_COMMANDS[phase], ado_id=ticket["ado_id"],
+                    label=label, path=path, out=out, brief=brief)
+                child_prompt += adjustment_text(phase, noun, instructions)
+                children.append((label, path, claude_cmd() + [
+                    "-p", child_prompt,
+                    "--output-format", "stream-json", "--verbose",
+                    "--permission-mode", "acceptEdits",
+                    "--allowedTools", "Read", "Glob", "Grep", "Task", "Write", "Edit",
+                    *model_for(phase),
+                    # The scratch is the ONLY thing mounted: it's the child's outbox.
+                    # It holds no `.claude/`, so mounting it leaks no configuration —
+                    # and the sibling repos are deliberately absent, because the whole
+                    # point is a session that sees only its own repo's rules.
+                    "--add-dir", scratch.as_posix(),
+                ]))
         cmd = claude_cmd() + [
             "-p", prompt,
             "--output-format", "stream-json", "--verbose",
@@ -1060,47 +1223,16 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         ok = False
         try:
             with open(log_path, "w", encoding="utf-8") as log:
-                log.write(f"$ {' '.join(cmd)}\n\n")
                 # Never in silence: a continuation that quietly turns into a fresh run
                 # reads, from outside, like the agent ignored the adjustment.
                 if resume and not prev:
                     log.write(NO_SESSION_TO_RESUME)
-                log.flush()
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    cwd=ticket["repo_path"],
-                    env=env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-                assert proc.stdout is not None
-                # In chunks, not lines: asyncio's line reader blows up with "Separator
-                # is found, but chunk is longer than limit" at 64 KiB, and stream-json
-                # passes lines longer than that as soon as the agent writes a large
-                # file. It really happened: a good run from 3322 ended up marked as an
-                # error. The incremental decoder avoids splitting a character across
-                # two chunks.
-                dec = codecs.getincrementaldecoder("utf-8")("replace")
-                # The FIRST match wins, the opposite of `STAMP_RE`: the id is unique and
-                # stable for the whole run, so waiting for the last one would mean
-                # waiting for the end — and a run that dies halfway is precisely one
-                # worth continuing. `carry` covers the id landing astride two chunks:
-                # untested on purpose, because a pipe read can return short and that
-                # boundary can't be placed deterministically from a test.
-                sid, carry = None, ""
-                while chunk := await proc.stdout.read(65536):
-                    text = dec.decode(chunk)
-                    log.write(text)
-                    if sid is None:
-                        m = SESSION_RE.search(carry + text)
-                        if m:
-                            sid = m.group(1)
-                            set_run(run_id, session_id=sid)
-                        else:
-                            carry = (carry + text)[-64:]
+                if children is None:
+                    log.write(f"$ {' '.join(cmd)}\n\n")
                     log.flush()
-                log.write(dec.decode(b"", True))
-                ok = (await proc.wait()) == 0
+                    ok = await spawn_cli(cmd, ticket["repo_path"], env, log, run_id)
+                else:
+                    ok = await run_fan_out(children, env, log, log_path, scratch)
         except Exception as exc:  # the error stays in the log, never brings down the server
             with open(log_path, "a", encoding="utf-8") as log:
                 log.write(f"\n[orchestrator] excepción: {exc}\n")

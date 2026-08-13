@@ -651,6 +651,130 @@ def test_a_multi_repo_ticket_gets_the_fan_out_and_keeps_analyze(client):
     assert names == ["analyze", "brief", "survey", "consolidate", "design", "implement"]
 
 
+def _write_brief(tmp_path, ado_id, routing="SONDEAR: front, backend"):
+    d = tmp_path / "repo" / "docs" / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{ado_id}-brief.md").write_text(
+        f"# Brief {ado_id}\n\nCriterio: exportar a Excel.\n\n{routing}\n", encoding="utf-8")
+
+
+def test_survey_launches_one_child_per_routed_repo(client, monkeypatch, tmp_path):
+    """One session rooted in each repo is the whole point: it's the only way its
+    CLAUDE.md, its hooks and its `.mcp.json` are loaded at all."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 40)
+    cwds = []
+    import asyncio as aio
+    original = aio.create_subprocess_exec
+
+    async def spy(*args, **kwargs):
+        cwds.append(kwargs.get("cwd"))
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(aio, "create_subprocess_exec", spy)
+    tid = client.post("/tickets", json={"ado_id": 40, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    assert len(cwds) == 2
+    assert {Path(c).name for c in cwds} == {"repo", "backend-repo"}
+
+
+def test_survey_routing_narrows_the_children(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 41, routing="SONDEAR: backend")
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 41, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "survey: backend" in log and "survey: front" not in log
+    assert cap["argv"][argv_index(cap, "-p") + 1].count("rooted in the repo") == 1
+
+
+def argv_index(cap, flag):
+    return list(cap["argv"]).index(flag)
+
+
+def test_a_survey_child_mounts_only_the_scratch(client, monkeypatch, tmp_path):
+    """The sibling repos are deliberately absent: mounting them would put the primary
+    repo's rules back in front of the child, which is the very thing the fan-out
+    exists to avoid. The scratch holds no `.claude/`, so it leaks no configuration."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 42, routing="SONDEAR: backend")
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 42, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    argv = list(cap["argv"])
+    mounted = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+    assert len(mounted) == 1 and mounted[0].endswith(str(_last_run_id(client, tid)))
+    assert not any("repo" == Path(m).name for m in mounted)
+
+
+def _last_run_id(client, tid):
+    return client.get(f"/tickets/{tid}").json()["runs"][0]["id"]
+
+
+def test_a_survey_child_gets_the_brief_inline(client, monkeypatch, tmp_path):
+    """The children carry no MCP: the work item is unreachable from there, so whatever
+    the brief doesn't say does not exist for them."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 43, routing="SONDEAR: backend")
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 43, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    prompt = _prompt_from(cap)
+    assert "Criterio: exportar a Excel." in prompt
+    assert "mcp__azure-devops" not in list(cap["argv"])
+
+
+def test_survey_without_a_brief_does_not_start(client, monkeypatch, tmp_path):
+    """It doesn't generate the brief itself: they're two phases and this is the second.
+    Same rule Phase 2 already applies to the analysis."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 44, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    f = _phase(client, tid, "survey")
+    assert f["estado"] == "error" and "brief" in f["motivo"]
+
+
+def test_a_failed_child_does_not_hide_behind_a_good_one(client, monkeypatch, tmp_path):
+    """The most expensive failure in this system is an analysis that looks complete and
+    isn't. Each child's verdict is read from ITS stretch of the log — reading the last
+    stamp of the whole file would let one good survey vouch for a silent one.
+
+    The discriminating case is the FIRST child stamping and the second not: reading the
+    whole file would find the first one's stamp at the end of the second one's read and
+    count a silent child as a success. Two children where the failure comes first, or
+    where it exits non-zero, pass either way — the exit code carries them.
+    """
+    _use_fake_claude(monkeypatch)                       # no stamp by default
+    _write_brief(tmp_path, 45)
+    calls = {"n": 0}
+    import asyncio as aio
+    original = aio.create_subprocess_exec
+
+    async def only_the_first_stamps(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            kwargs = {**kwargs, "env": {**kwargs["env"], "FAKE_HUELLA": "ok — survey.md"}}
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(aio, "create_subprocess_exec", only_the_first_stamps)
+    tid = client.post("/tickets", json={"ado_id": 45, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    f = _phase(client, tid, "survey")
+    assert f["estado"] == "parcial"
+    assert "falló backend" in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_a_fan_out_phase_cannot_be_continued(client, monkeypatch, tmp_path):
+    """It drives several sessions and there's no single one to continue. Not recording
+    any leaves `puede_continuar` false on its own, with no special case in the UI."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 46)
+    tid = client.post("/tickets", json={"ado_id": 46, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    assert _phase(client, tid, "survey")["puede_continuar"] is False
+
+
 def _run_twice(client, monkeypatch, ado_id, phase="analyze"):
     """First run leaves a session; the second one asks to continue it."""
     tid = client.post("/tickets", json={"ado_id": ado_id, "project": "Demo"}).json()["id"]
