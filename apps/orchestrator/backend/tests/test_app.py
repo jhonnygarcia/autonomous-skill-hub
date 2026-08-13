@@ -550,6 +550,47 @@ def test_analyze_prompt_keeps_extra_repos_readable(client, monkeypatch):
     assert "writable" not in prompt
 
 
+def test_implement_loads_the_rules_of_the_mounted_repos(client, monkeypatch, tmp_path):
+    """`--add-dir` grants file access, not configuration discovery: it loads the added
+    repo's skills and agents, but NOT its CLAUDE.md or `.claude/rules/`. Without this
+    variable the agent writes the extra repo's code under the primary repo's
+    conventions — confidently, and with nothing downstream to catch it.
+
+    Only in `implement`, which is where obeying the other repo's rules while writing
+    in it is what matters."""
+    _use_fake_claude(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert "SAW-EXTRA-CLAUDE-MD" in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_analyze_does_not_load_the_rules_of_the_mounted_repos(client, monkeypatch):
+    """The other side of the branch, and it isn't symmetry for its own sake: in Phase 1
+    the surveys put the other repos' rules into the analysis in writing. Loading them
+    as configuration too would pay for the same thing twice, in every phase."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "SAW-EXTRA-CLAUDE-MD" not in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_implement_without_extras_does_not_set_the_variable(client, monkeypatch, tmp_path):
+    """A ticket with no mounted repos has nothing extra to load. Setting it anyway
+    would work, but the log would stop explaining why the variable is there — and a
+    variable nobody can justify is one nobody dares remove."""
+    _use_fake_claude(monkeypatch)
+    _git_init(tmp_path / "repo")
+    client.post("/projects", json={
+        "name": "Solo", "org": "DemoOrg", "project": "Demo",
+        "repos": [{"path": (tmp_path / "repo").as_posix(), "label": "front", "primary": True}],
+    })
+    tid = client.post("/tickets", json={"ado_id": 3321, "project": "Solo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert "SAW-EXTRA-CLAUDE-MD" not in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
 def test_adjustment_in_implement_does_not_ask_to_regenerate_the_file(client, monkeypatch, tmp_path):
     """In `implement` there's no "the file" to regenerate: the deliverable is the
     code, and the only file the phase rewrites is `tasks.md`, the progress log.

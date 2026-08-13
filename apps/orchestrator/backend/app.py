@@ -893,6 +893,17 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # without these variables, the only credential available is the local /login one.
         env = {k: v for k, v in os.environ.items()
                if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        # `--add-dir` grants file access, not configuration discovery: from a mounted
+        # repo it loads `.claude/skills/` and `.claude/agents/`, but NOT its CLAUDE.md
+        # nor `.claude/rules/`. Without this the agent writes the extra repo's code
+        # under the PRIMARY repo's conventions — and having the wrong rules is worse
+        # than having none, because it applies them with confidence.
+        # Only in `implement`: it's where obeying them while writing is what matters,
+        # and in Phase 1 the surveys already put them into the analysis in writing.
+        # Hooks and `.mcp.json` of a mounted repo are NOT recovered by this, or by
+        # anything else — only a session rooted in that repo has them.
+        if extras and phase == "implement":
+            env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
         ok = False
         try:
             with open(log_path, "w", encoding="utf-8") as log:

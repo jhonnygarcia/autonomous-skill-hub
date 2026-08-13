@@ -83,7 +83,7 @@ extras **nunca** llegan al agente que escribe su código.
 - Produces: el entorno del subproceso lleva `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`
   cuando —y solo cuando— la fase es `implement` y el ticket tiene extras.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 En `tests/test_app.py`, dos casos que verifican el entorno con el que se lanzó el
 subproceso (el mismo mecanismo con el que ya se comprueba que las variables de
@@ -95,7 +95,7 @@ Anthropic se eliminan):
 
 Expected: los tres fallan, el primero porque la clave no existe.
 
-- [ ] **Step 2: Implementar**
+- [x] **Step 2: Implementar**
 
 En `execute_run`, junto a la construcción de `env`:
 
@@ -110,19 +110,24 @@ if extras and phase == "implement":
 
 Expected: los tres tests pasan.
 
-- [ ] **Step 3: Documentar el límite que esto NO cubre**
+- [x] **Step 3: Documentar el límite que esto NO cubre**
 
 En `CLAUDE.md`, junto a lo de `--add-dir`: la variable carga `CLAUDE.md`,
 `.claude/CLAUDE.md`, `.claude/rules/*.md` y `CLAUDE.local.md` de los directorios
 montados. **Los hooks y el `.mcp.json` del repo extra siguen sin cargarse por
 ninguna vía**, y si uno de ellos importa hay que replicarlo en el principal a mano.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py CLAUDE.md
 git commit -m "feat(runner): las reglas de los repos montados llegan a implement"
 ```
+
+> **Hecha el 2026-08-13.** Tres tests, no dos: se añadió el caso de ticket **sin**
+> extras, que es el que impide que la implementación ponga la variable siempre.
+> `fake_claude.py` delata la variable con `SAW-EXTRA-CLAUDE-MD`, siguiendo el mismo
+> idioma que ya usa para las claves de Anthropic. Suite entera: 156 verdes.
 
 ---
 

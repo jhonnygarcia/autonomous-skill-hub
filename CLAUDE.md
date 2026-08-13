@@ -153,6 +153,20 @@ each direction. The `label` isn't decorative — the runner injects it into the 
 because `--add-dir` grants access but not attention: without naming the repos for it,
 the agent ignores them.
 
+**`--add-dir` grants file access, not configuration discovery.** From a mounted repo
+Claude Code loads `.claude/skills/` and `.claude/agents/` — and nothing else that
+matters: not its `CLAUDE.md`, not `.claude/rules/`, not its hooks, not its
+`.mcp.json` (of `settings.json` only `enabledPlugins` and `extraKnownMarketplaces`).
+So an agent working in a mounted repo has the **primary** repo's rules, which is
+worse than having none: it applies the wrong conventions with confidence, and
+nothing downstream catches it. `execute_run` sets
+`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` **only in `implement` and only when
+there are extras** — that's where obeying the other repo's rules while writing in it
+is what matters, and by then Phase 1 has already put them into the analysis in
+writing. **Hooks and `.mcp.json` of a mounted repo are recovered by nothing**; only a
+session rooted in that repo has them, which is the whole reason for the multi-repo
+design in `docs/superpowers/specs/2026-08-12-...`.
+
 **The ticket copies `org`, `project`, `repo_path`, and `extra_dirs` from the project
 when created** — the same way a line item locks in a price. That's why deleting a
 project doesn't break old tickets, and there's no FK between the two tables.

@@ -8,6 +8,8 @@ sys.stdout.reconfigure(encoding="utf-8")  # the real CLI emits UTF-8; on Windows
 print("FAKE-CLAUDE ARGS:", " ".join(sys.argv[1:]))
 if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
     print("FAKE-CLAUDE SAW-API-KEY")
+if os.environ.get("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"):
+    print("FAKE-CLAUDE SAW-EXTRA-CLAUDE-MD")
 print('{"type":"assistant","text":"analizando..."}')
 if os.environ.get("FAKE_BIG") == "1":
     # A single line above the 64 KiB limit of asyncio's line reader, with accented
