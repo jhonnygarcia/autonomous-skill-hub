@@ -148,7 +148,7 @@ def settings_for(phase: str) -> list[str]:
     return ["--settings", json.dumps(cfg)]
 
 
-def repos_text(phase: str, extras: list[dict], noun: str) -> str:
+def repos_text(phase: str, extras: list[dict], noun: str, primary: str = "") -> str:
     """The prompt block that introduces the ticket's extra repos to the agent.
 
     Mounting them with `--add-dir` isn't enough: in run 3322 the agent had
@@ -167,6 +167,18 @@ def repos_text(phase: str, extras: list[dict], noun: str) -> str:
         return ""
     listing = "; ".join(
         e["path"] + (f" — {e['label']}" if e["label"] else "") for e in extras)
+    # The primary repo's label was missing from the prompt until run 3320 on 2026-08-13:
+    # the agent knew the extras by name and had to invent one for the repo it was
+    # standing in. It wrote `SONDEAR: main, tms` when the label was `tenant`, and the
+    # routing widened to every repo — the safe direction held, but the optimization was
+    # lost to a name nobody had told it.
+    if phase == "brief" and primary:
+        return (
+            f"\n\nThe repos this ticket mounts, with the labels to use verbatim on the "
+            f"`SONDEAR:` line — you are standing in the first one: `{primary}` (this "
+            f"repo); {listing}. Use these labels exactly; anything else is unreadable "
+            "to the runner and makes it survey every repo."
+        )
     if phase == "implement":
         return (
             f"\n\nExtra repos mounted alongside the main one, and in this phase all of "
@@ -400,6 +412,31 @@ RESUME_STAMP_REMINDER = (
 NO_SESSION_TO_RESUME = (
     "[orchestrator] se pidió continuar, pero esta fase no tiene sesión previa "
     "registrada: corre en una sesión nueva.\n")
+
+
+CONSOLIDATE_PROMPT = (
+    "\n\nThe surveys are in `{dir}`, one file per surveyed repo. Read them all.\n"
+    "Surveyed: {surveyed}.\n"
+    "{missing}"
+    "The mounted repos are readable if you need to check something a survey asserts, "
+    "but the surveys are the interface: don't redo them.")
+NO_SURVEYS_REASON = (
+    "no hay surveys que consolidar; corre primero la fase «survey»")
+
+
+def last_survey_dir(ticket_id: int) -> str | None:
+    """Where the most recent survey fan-out left its files.
+
+    A run whose stamp came back `nada` left nothing worth reading, so it doesn't count:
+    otherwise a failed fan-out would hide the good one before it and consolidation
+    would run against an empty directory.
+    """
+    with db() as c:
+        r = c.execute(
+            "SELECT artifact_path FROM runs WHERE ticket_id=? AND phase='survey' "
+            "AND artifact_state IN ('ok','parcial') ORDER BY id DESC LIMIT 1",
+            (ticket_id,)).fetchone()
+    return r["artifact_path"] if r else None
 
 
 def last_session(ticket_id: int, phase: str) -> str | None:
@@ -1160,6 +1197,19 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # the POST deduced before waiting.
             set_run(run_id, branch=branch)
         noun = PHASE_NOUN[phase]
+        # Resolved before the prompt is built, because the prompt has to name it: the
+        # only phase whose whole job is reading the surveys was being launched with them
+        # neither mounted nor named (found on run 3320, 2026-08-13).
+        surveys = None
+        if phase == "consolidate":
+            surveys = last_survey_dir(ticket["id"])
+            if not surveys or not Path(surveys).is_dir():
+                with open(log_path, "w", encoding="utf-8") as log:
+                    log.write(f"[orchestrator] {NO_SURVEYS_REASON}\n")
+                set_run(run_id, status="error", finished_at=now(),
+                        artifact_state="nada", artifact_path=NO_SURVEYS_REASON)
+                set_ticket(ticket["id"])
+                return
         extras = normalize_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
         prev = last_session(ticket["id"], phase) if resume else None
         if prev:
@@ -1174,7 +1224,18 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             set_run(run_id, resumed_from=prev)
         else:
             prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
-            prompt += repos_text(phase, extras, noun)
+            prompt += repos_text(phase, extras, noun, ticket_labels(ticket)[0][0])
+            if surveys:
+                # The list of repos NOT surveyed is as much a part of the input as the
+                # surveys themselves: without it the consolidation can't write the line
+                # that keeps the analysis from looking complete when it isn't.
+                done = {p.stem.removeprefix("survey-") for p in Path(surveys).glob("survey-*.md")}
+                missing = [label for label, _ in ticket_labels(ticket) if label not in done]
+                prompt += CONSOLIDATE_PROMPT.format(
+                    dir=Path(surveys).as_posix(),
+                    surveyed=", ".join(sorted(done)) or "ninguno",
+                    missing=(f"Mounted but NOT surveyed: {', '.join(missing)} — say so in "
+                             "the analysis.\n") if missing else "")
             prompt += adjustment_text(phase, noun, instructions)
         # The fan-out replaces the single child with one per routed repo. It's built
         # before argv because each child gets its own prompt, its own cwd and its own
@@ -1235,6 +1296,8 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         ]
         for e in extras:
             cmd += ["--add-dir", e["path"]]
+        if surveys:
+            cmd += ["--add-dir", Path(surveys).as_posix()]
         # Guarantees the CLI uses the logged-in subscription, never API billing:
         # without these variables, the only credential available is the local /login one.
         env = {k: v for k, v in os.environ.items()

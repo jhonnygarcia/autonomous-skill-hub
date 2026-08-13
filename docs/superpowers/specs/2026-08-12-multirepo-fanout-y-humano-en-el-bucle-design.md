@@ -712,9 +712,78 @@ de `HTTPException`) en español; los **literales de contrato** no se traducen.
 | Tamaños de `CLAUDE.md` y del frontmatter de una skill | Medidos sobre este repo |
 | El MCP autentica con PAT vía `--authentication envvar` | Servidor levantado contra `cr360dev`, work item leído por stdio |
 
-**Sin verificar:** que un survey enraizado produzca mejor resultado que la sesión
-única con las reglas cargadas. Es la hipótesis central del diseño y solo se
-comprueba con un ticket real de dos repos.
+## 15b. La hipótesis central, medida — 2026-08-13
+
+**Ticket 3320 de ProvidenceSolutions**, dos repos: `tenant`
+(ProvidenceTMSTenant, principal) y `tms` (ProvidenceTMS). Las tres fases corridas
+de verdad desde la UI.
+
+| Fase | Resultado |
+|---|---|
+| `brief` | `ok` — 3,6 KB (presupuesto 4 KB), 2 `DECIDIR` |
+| `survey` | `ok` — `survey-tenant.md` 10,4 KB + `survey-tms.md` 14,7 KB |
+| `consolidate` | `ok` — análisis de 41,6 KB, tabla de 9 filas, 7 `DECIDIR` + 1 `BLOQUEA` |
+
+**La hipótesis se sostiene, y por un margen que no admite discusión.** La sesión
+enraizada en el repo **secundario** localizó la causa raíz con `file:line`:
+
+> `ap-invoice.component.ts:269-273` reescribe `readyToProcessAP` a `true` en cada
+> carga cuando `isAllCriteriaMet` es `true`, y **además lo persiste**. El síntoma
+> se explica íntegramente ahí, **incluso si el backend guarda el `false` bien**.
+
+El bug no está en el repo principal. Una sesión única enraizada en `tenant` lo
+habría buscado donde no estaba — y el survey de `tenant` confirmó, por separado y
+con `[verificado]`, que el backend persiste correctamente. Las dos mitades solo
+significan algo juntas.
+
+**La tabla de contrato cazó lo que ningún repo podía ver solo.** La fila que
+justifica el diseño entero:
+
+> ⚠️ **mismo concepto, dos nombres** — `tms` llama a la lectura
+> `GET /api/Load/{loadId}/ApInvoices → ApPayableInvoiceDto[]`; `tenant` la llama
+> `GET api/Load/{id}/RateVerification → InvoiceVerificationGroup[]`. Uno de los
+> dos está mal, y **afecta a qué archivo se toca**.
+
+Ese defecto es invisible desde cualquiera de los dos repos: cada survey es
+internamente coherente. Solo aparece al ponerlos en columnas contiguas.
+
+Además: la ambigüedad central del brief (¿`Ready To Pay` es almacenado o
+derivado?) quedó **resuelta sin decisión humana** —ambos campos existen y son
+distintos—, y una rama entera de trabajo se descartó («no hace falta campo
+nuevo»). El consolidador incluso añadió por su cuenta una sección
+`## Causa raíz (establecida al cruzar los dos surveys)`.
+
+### Los dos bugs que solo una corrida real encuentra
+
+Ambos del mismo tipo: **información que el diseño daba por transmitida y el
+runner nunca transmitía**. Ninguno rompió nada, y los dos fallaron por el lado
+bueno.
+
+1. **El prompt no nombraba el repo principal.** El agente conocía los extras por
+   su etiqueta y tuvo que inventar una para el repo en el que estaba: escribió
+   `SONDEAR: main, tms` cuando la etiqueta era `tenant`. El parser no reconoció
+   `main`, anuló la línea y **ensanchó a todos los repos** — se perdió la
+   optimización, nunca la corrección. La red de seguridad hizo exactamente lo que
+   §4.4 prometía.
+2. **`consolidate` no podía leer los surveys.** El directorio no se montaba ni se
+   nombraba: la única fase cuyo trabajo entero es leerlos se lanzaba a ciegas.
+   Habría cerrado `parcial` por no poder producir la tabla, que es la degradación
+   correcta, pero no habría consolidado nada.
+
+### Lo que se perdió, dicho
+
+El `docs/tickets/3320-analysis.md` de la corrida de una sola sesión **se
+sobrescribió**: ambas rutas escriben ese archivo a propósito, y ese es el
+mecanismo, no un accidente. No estaba versionado (`??` en git), así que la
+comparación lado a lado ya no es posible para 3320. Su valor era limitado —venía
+de una versión anterior del plugin—, pero para el próximo ticket de dos repos
+conviene copiar el análisis antes de correr el reparto.
+
+**Sigue sin medirse:** cuánto de la mejora viene de *enraizar la sesión* y cuánto
+de simplemente *dedicar una sesión entera a cada repo*. Separarlo pide correr el
+mismo ticket con `analyze` y las reglas cargadas por variable de entorno. No
+cambia la decisión —hooks y `.mcp.json` siguen sin recuperarse por ninguna otra
+vía— pero diría cuánto se paga por cuánto.
 
 Que siga sin verificar **no reabre la decisión**: la dirección está tomada, y el
 motivo no depende de esa medición. Hooks y `.mcp.json` de un repo montado no los

@@ -591,7 +591,21 @@ a human choice — `-p --resume --fork-session` was verified working headless, a
 
 ## Immediate pending items
 
-- [ ] **Execute the multi-repo plan** —
+- [x] ~~**Execute the multi-repo plan**~~ — **done 2026-08-13, all 16 tasks**, plugin
+  v0.9.0, 199 tests green. Task 16 ran against **3320** with two real Providence repos:
+  the survey rooted in the **secondary** repo located the root cause
+  (`ap-invoice.component.ts:269-273` re-derives and re-persists the flag on every
+  load) — which is **not** in the primary repo, where a single session would have
+  hunted. The contract table caught a "same concept, two names" between the two
+  surveys that is invisible from either alone. Full measurement in section **15b** of
+  the design. Two bugs only a real run found, both fixed with tests: the prompt never
+  named the primary repo (the agent invented `main`; the parser widened to every repo,
+  so the safety net held) and `consolidate` couldn't reach the surveys.
+- [ ] **The next two-repo ticket: copy the analysis before running the fan-out.**
+  Both Phase-1 routes write `docs/tickets/<id>-analysis.md` by design, so
+  `consolidate` overwrote 3320's single-session analysis and the side-by-side
+  comparison is gone for that ticket. It was untracked, so git doesn't have it either.
+- [ ] ~~Execute the multi-repo plan~~ (superseded, kept for the detail) —
   `docs/superpowers/plans/2026-08-12-multirepo-fanout-y-humano-en-el-bucle.md`,
   16 tasks. **The direction is decided**: a multi-repo ticket stops being handled
   from a single session, and Phase 1 splits into one session rooted per repo. The

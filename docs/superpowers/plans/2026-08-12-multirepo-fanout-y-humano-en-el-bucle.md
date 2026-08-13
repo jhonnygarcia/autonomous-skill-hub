@@ -23,7 +23,18 @@ las skills, React+TS para la UI.
 
 ## Estado de ejecución — 2026-08-13
 
-**Tareas 1 a 15 hechas.** Suite: 194 verdes, `npm run build` y `npm run lint` limpios,
+**Las 16 tareas hechas.** La 16 corrió contra el ticket **3320** de Providence con
+dos repos reales, y su resultado está en la sección **15b** del diseño: la hipótesis
+central se sostiene —el survey enraizado en el repo **secundario** localizó la causa
+raíz que no está en el principal— y la tabla de contrato cazó un «mismo concepto, dos
+nombres» invisible desde cualquiera de los dos repos por separado.
+
+Esa corrida destapó **dos bugs** que ninguna prueba con dobles había encontrado: el
+prompt no nombraba el repo principal (el agente se inventó `main`, el parser ensanchó
+a todos — la red de seguridad funcionó) y `consolidate` no podía leer los surveys.
+Los dos arreglados, con test cada uno.
+
+**Tareas 1 a 15.** Suite: 194 verdes, `npm run build` y `npm run lint` limpios,
 `claude plugin validate .` pasa, y una prueba de humo contra el backend levantado
 confirma la cadena entera. Falta la **Tarea 16**, que necesita un ticket real de dos
 repos.

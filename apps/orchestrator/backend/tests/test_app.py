@@ -626,9 +626,11 @@ def test_the_children_of_the_fan_out_carry_no_mcp(client, monkeypatch, tmp_path)
     # `PHASE_ALLOWED_TOOLS` is not enough on its own: the MCP tool travels fixed in the
     # argv, so an empty list there doesn't remove it. This test found exactly that.
     assert "survey" not in app.PHASE_MCP and "consolidate" not in app.PHASE_MCP
-    _use_fake_claude(monkeypatch)
-    cap = _spy_argv(monkeypatch)
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 30)
     tid = client.post("/tickets", json={"ado_id": 30, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    cap = _spy_argv(monkeypatch)
     client.post(f"/tickets/{tid}/run", json={"phase": "consolidate"})
     assert "mcp__azure-devops" not in list(cap["argv"])
 
@@ -682,6 +684,30 @@ def _write_brief(tmp_path, ado_id, routing="SONDEAR: front, backend"):
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{ado_id}-brief.md").write_text(
         f"# Brief {ado_id}\n\nCriterio: exportar a Excel.\n\n{routing}\n", encoding="utf-8")
+
+
+def test_the_brief_is_told_the_primary_repos_label(client, monkeypatch):
+    """Found on run 3320 (2026-08-13): the prompt named the extras and left the agent to
+    invent a name for the repo it was standing in. It wrote `SONDEAR: main, tms` when
+    the label was `tenant`. The routing widened to every repo — the safe direction held
+    — but the optimization was lost to a name nobody had told it."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 39, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "brief"})
+    prompt = _prompt_from(cap)
+    assert "`front`" in prompt and "backend" in prompt      # both labels, verbatim
+    assert "SONDEAR" in prompt                              # and what they're for
+
+
+def test_only_the_brief_gets_the_routing_labels(client, monkeypatch):
+    """The other phases don't write a routing line, and a prompt that explains one is a
+    prompt inviting a phase to produce something nobody reads."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 38, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "SONDEAR" not in _prompt_from(cap)
 
 
 def test_survey_launches_one_child_per_routed_repo(client, monkeypatch, tmp_path):
@@ -789,6 +815,46 @@ def test_a_failed_child_does_not_hide_behind_a_good_one(client, monkeypatch, tmp
     f = _phase(client, tid, "survey")
     assert f["estado"] == "parcial"
     assert "falló backend" in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_consolidate_can_reach_the_surveys(client, monkeypatch, tmp_path):
+    """Found on run 3320 (2026-08-13): `consolidate` was launched with the surveys
+    neither mounted nor named, so the only phase whose whole job is reading them
+    couldn't. The scratch has no `.claude/`, so mounting it leaks no configuration."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 47)
+    tid = client.post("/tickets", json={"ado_id": 47, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    cap = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run", json={"phase": "consolidate"})
+    argv = list(cap["argv"])
+    mounted = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+    surveys = _phase(client, tid, "survey")["huella"]["ruta"]
+    assert surveys in mounted                       # it can read them
+    assert surveys in _prompt_from(cap)             # and it knows where they are
+    assert "front, tenant" in _prompt_from(cap) or "front" in _prompt_from(cap)
+
+
+def test_consolidate_without_surveys_does_not_start(client, monkeypatch, tmp_path):
+    """Same rule the other phases already follow: it doesn't produce its own input."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 48, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "consolidate"})
+    f = _phase(client, tid, "consolidate")
+    assert f["estado"] == "error" and "survey" in f["motivo"]
+
+
+def test_consolidate_is_told_which_repos_were_not_surveyed(client, monkeypatch, tmp_path):
+    """The list of repos NOT surveyed is as much an input as the surveys: without it
+    the consolidation can't write the line that stops the analysis from looking
+    complete when it isn't — the most expensive failure in this system."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 49, routing="SONDEAR: backend")
+    tid = client.post("/tickets", json={"ado_id": 49, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    cap = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run", json={"phase": "consolidate"})
+    assert "NOT surveyed: front" in _prompt_from(cap)
 
 
 def test_a_fan_out_phase_cannot_be_continued(client, monkeypatch, tmp_path):
