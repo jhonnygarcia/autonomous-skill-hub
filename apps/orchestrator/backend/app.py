@@ -23,17 +23,46 @@ LOGS_DIR = Path(os.environ.get("ORCH_LOGS", BASE / "logs"))
 # went first on 2026-08-11 (it isn't a phase, it's part of `implement`), and `guards` and
 # `pr` follow it: they were in this list from the start and never gained a command, so the
 # UI painted two rows out of five that never did anything. They come back when they exist.
-PHASES = ["analyze", "design", "implement"]
+PHASES = ["analyze", "brief", "survey", "consolidate", "design", "implement"]
+
+# Phase 1 has two routes to the SAME deliverable: `analyze` in one session, or the
+# `brief`/`survey`/`consolidate` fan-out with a session rooted in each repo — which
+# exists because `--add-dir` mounts a repo's files but not its rules, hooks or MCP, so
+# a single session writes the extras' code under the primary repo's conventions. Both
+# end in `docs/tickets/<id>-analysis.md`, which is why Phase 2 never learns which ran.
+MULTI_REPO_PHASES = ["brief", "survey", "consolidate"]
+
+
+def phase_names_for(extras: list) -> list[str]:
+    """The phases a ticket offers, in order.
+
+    The filtering is deliberately asymmetric. A single-repo ticket does NOT get the
+    fan-out: with nothing to fan out it would be three sessions to reach the same
+    place, and there'd be no contract between repos to build.
+
+    A multi-repo ticket keeps `analyze` alongside the fan-out. It's the fallback when
+    the fan-out gets stuck, and it's the baseline the design has to be measured
+    against — the whole hypothesis is that a rooted survey beats it, and hiding the
+    thing you're comparing to makes the comparison impossible. Running both is
+    harmless: they write the same file and the last one wins.
+    """
+    return [p for p in PHASES if extras or p not in MULTI_REPO_PHASES]
 
 # Declaring a phase doesn't mean implementing it. Only these three can be launched; the
 # rest are in PHASES so the UI knows they exist, and they're rejected with 400.
 PHASE_COMMANDS = {
     "analyze": "/ticket-agent:analyze",
+    "brief": "/ticket-agent:brief",
+    "survey": "/ticket-agent:survey",
+    "consolidate": "/ticket-agent:consolidate",
     "design": "/ticket-agent:plan",
     "implement": "/ticket-agent:implement",
 }
-# What state a run that finishes well leaves the ticket in.
-PHASE_DONE = {"analyze": "analyzed", "design": "planned", "implement": "implemented"}
+# What state a run that finishes well leaves the ticket in. `brief` and `survey` are
+# steps toward the analysis, not deliverables of their own: only `consolidate` leaves
+# the ticket analyzed, so an interrupted fan-out doesn't look finished.
+PHASE_DONE = {"analyze": "analyzed", "brief": "briefed", "survey": "surveyed",
+              "consolidate": "analyzed", "design": "planned", "implement": "implemented"}
 # Bash is scoped per phase, not just per command: Phase 1 is read-only and doesn't carry
 # Bash; Phase 2 needs to invoke the npm package `@fission-ai/openspec` (the CLI is NOT
 # called `openspec`) for `init` and `validate`, and nothing else. The specifier has to
@@ -42,6 +71,15 @@ PHASE_DONE = {"analyze": "analyzed", "design": "planned", "implement": "implemen
 # that's exactly what happened when this list used to travel fixed for every phase.
 PHASE_ALLOWED_TOOLS = {
     "analyze": [],
+    # `brief` reads the work item, like `analyze`: MCP and nothing else.
+    "brief": [],
+    # `survey` and `consolidate` get NO MCP. The survey runs rooted in a secondary repo
+    # and receives the brief inline in its prompt, so it needs no ADO_ORG, no token and
+    # no `.claude/ticket-agent.json` in that repo — it's a pure code-comprehension
+    # session. `consolidate` works off the brief and the surveys for the same reason:
+    # going back to the work item would make it a second, divergent reading.
+    "survey": [],
+    "consolidate": [],
     "design": [
         "Bash(npx --yes @fission-ai/openspec@latest:*)",
         "Bash(npx @fission-ai/openspec:*)",
@@ -53,8 +91,21 @@ PHASE_ALLOWED_TOOLS = {
 }
 # Noun for the deliverable, so the prompt doesn't call it "the analysis" to the agent
 # when the phase is design (and vice versa).
-PHASE_NOUN = {"analyze": "the analysis", "design": "the plan",
-              "implement": "the implementation"}
+# Which phases reach Azure DevOps at all. `PHASE_ALLOWED_TOOLS` was never enough for
+# this: the MCP tool travels FIXED in the argv for every phase, so an empty list there
+# doesn't take it away.
+# The fan-out's children don't get it. The survey receives the brief inline in its
+# prompt, and `consolidate` works off the brief and the surveys — going back to the
+# work item would make it a second, divergent reading of the ticket, which is exactly
+# what the brief exists to prevent.
+# `design` and `implement` keep it even though their skills consume the previous
+# phase's file and not the work item. Dropping it there is a real cleanup, but it needs
+# a live run to confirm, and it isn't this change's job.
+PHASE_MCP = {"analyze", "brief", "design", "implement"}
+
+PHASE_NOUN = {"analyze": "the analysis", "brief": "the brief",
+              "survey": "the survey", "consolidate": "the analysis",
+              "design": "the plan", "implement": "the implementation"}
 # If someone adds a phase to one dict and not the others, today that's an uncaught
 # KeyError inside a background task that leaves the run at `success` and the ticket
 # unupdated.
@@ -173,6 +224,37 @@ STAMP_RE = re.compile(r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|n
 # The CLI's session, as it travels in the stream-json. Not a contract with the skills
 # like `STAMP_RE` — it's the CLI's own shape — but just as literal.
 SESSION_RE = re.compile(r'"session_id":"([0-9a-fA-F-]{36})"')
+
+# The routing line the `brief` phase writes, naming which repos deserve a survey.
+# Same treatment as `STAMP_RE` and for the same reason: the skill's own example
+# carries the literal, so the LAST match is the decision and the earlier ones are
+# prose. The keyword stays in Spanish because it's matched byte for byte.
+SURVEY_RE = re.compile(r"^SONDEAR:(.*)$", re.MULTILINE)
+
+
+def repos_to_survey(text: str, labels: list[str]) -> list[str]:
+    """Which of the mounted repos the brief asked to survey, in mounting order.
+
+    Every ambiguity widens to `labels`. Routing is an optimization — an irrelevant
+    repo answers `not-touched` and costs one session — while skipping a repo that
+    mattered costs the ticket, and nothing downstream detects it. So a parsing
+    failure is a cost problem, never a correctness one, and there is no path by
+    which this narrows the list on its own.
+
+    A single unknown label voids the whole line instead of dropping just that one:
+    a partially valid line looks like a decision and is usually a typo.
+    """
+    matches = SURVEY_RE.findall(text)
+    if not matches:
+        return list(labels)
+    wanted = [p.strip().lower() for p in matches[-1].split(",") if p.strip()]
+    known = {label.lower(): label for label in labels}
+    if not wanted or any(w not in known for w in wanted):
+        return list(labels)
+    chosen = {known[w] for w in wanted}
+    # Mounting order, not the order the agent typed: the log of a fan-out has to be
+    # comparable between runs of the same ticket.
+    return [label for label in labels if label in chosen]
 LEGACY_STATES = {"validado": "ok", "sin-validar": "parcial", "no-escrito": "nada"}
 
 # Separator between the path and the reserve in a `parcial` stamp: "HUELLA: parcial —
@@ -726,7 +808,8 @@ def read_title(t: sqlite3.Row, rel: str) -> str | None:
 def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) -> list[dict]:
     """A phase's progress IS its most recent run. `runs` arrives ordered by id DESC."""
     out = []
-    for name in PHASES:
+    extras = normalize_dirs(json.loads(t["extra_dirs"] or "[]"))
+    for name in phase_names_for(extras):
         if name not in PHASE_COMMANDS:
             out.append({"fase": name, "disponible": False})
             continue
@@ -946,7 +1029,8 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # In headless mode, acceptEdits does NOT auto-approve MCP tools: they get
             # denied on their own and the agent is left unable to read the work item.
             # The rest of the tools per phase come from PHASE_ALLOWED_TOOLS (see above).
-            "--allowedTools", "mcp__azure-devops", "Read", "Glob", "Grep", "Task", "Write", "Edit",
+            "--allowedTools", *(["mcp__azure-devops"] if phase in PHASE_MCP else []),
+            "Read", "Glob", "Grep", "Task", "Write", "Edit",
             *PHASE_ALLOWED_TOOLS[phase],
             *settings_for(phase),
             # Read at launch time, not at startup: changing the model in Settings has

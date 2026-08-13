@@ -130,6 +130,13 @@ import sys
 from pathlib import Path
 
 
+def _phase(client, tid, name):
+    """By name, never by index. The phase list grew when the multi-repo route landed
+    and every positional access broke at once — the tests always meant the name."""
+    return next(f for f in client.get(f"/tickets/{tid}").json()["fases"]
+                if f["fase"] == name)
+
+
 def _use_fake_claude(monkeypatch, fail=False, stamp=None, skill_leak=False, no_session=False):
     fake = Path(__file__).parent / "fake_claude.py"
     monkeypatch.setenv("ORCH_CLAUDE_CMD", json.dumps([sys.executable, str(fake)]))
@@ -190,7 +197,7 @@ def test_stamp_partial_run_counts_and_keeps_reserve(client, monkeypatch):
     assert run["status"] == "success" and run["artifact_state"] == "parcial"
     # the path stays clean, without the reserve hanging off the back
     assert run["artifact_path"] == "openspec/changes/3323-xpo"
-    fase = detail["fases"][1]
+    fase = _phase(client, tid, "design")
     assert fase["estado"] == "parcial"
     assert fase["motivo"] == "openspec validate no pasó"
 
@@ -205,7 +212,7 @@ def test_stamp_partial_without_reserve_still_works(client, monkeypatch):
     run = detail["runs"][0]
     assert run["status"] == "success" and run["artifact_state"] == "parcial"
     assert run["artifact_path"] == "openspec/changes/3323-xpo"
-    fase = detail["fases"][1]
+    fase = _phase(client, tid, "design")
     assert fase["estado"] == "parcial"
     assert "motivo" not in fase
 
@@ -440,7 +447,7 @@ def test_models_default_empty(client):
     resolves the model from the destination repo, which is how it worked before this
     existed."""
     m = client.get("/modelos").json()
-    assert set(m) == {"analyze", "design", "implement"}
+    assert set(m) == {"analyze", "brief", "survey", "consolidate", "design", "implement"}
     assert all(v == {"model": "", "effort": ""} for v in m.values())
 
 
@@ -587,6 +594,61 @@ def test_the_session_id_is_found_beyond_the_first_chunk(client, monkeypatch):
     tid = client.post("/tickets", json={"ado_id": 13, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
     assert client.get(f"/tickets/{tid}").json()["runs"][0]["session_id"] == FAKE_SESSION
+
+
+def _solo_project(client, tmp_path):
+    """A single-repo project: the one that keeps today's `analyze` route."""
+    client.post("/projects", json={
+        "name": "Solo", "org": "DemoOrg", "project": "Demo",
+        "repos": [{"path": (tmp_path / "repo").as_posix(), "label": "front", "primary": True}],
+    })
+
+
+def test_the_four_tables_agree_on_the_new_phases():
+    """A phase declared in one dict and missing from another is an uncaught KeyError
+    inside a background task, leaving the run at `success` and the ticket untouched."""
+    import app
+    for table in (app.PHASE_COMMANDS, app.PHASE_DONE, app.PHASE_ALLOWED_TOOLS, app.PHASE_NOUN):
+        for name in ("brief", "survey", "consolidate"):
+            assert name in table
+    # Only `consolidate` closes the analysis: an interrupted fan-out must not look
+    # finished just because the brief went well.
+    assert app.PHASE_DONE["brief"] != "analyzed"
+    assert app.PHASE_DONE["consolidate"] == "analyzed"
+
+
+def test_the_children_of_the_fan_out_carry_no_mcp(client, monkeypatch, tmp_path):
+    """The survey runs rooted in a secondary repo with the brief inline in its prompt.
+    Giving it MCP would mean that repo needs ADO_ORG, a token and its own
+    ticket-agent.json — a second configuration to keep in sync, to fetch a work item
+    it was already handed."""
+    import app
+    # `PHASE_ALLOWED_TOOLS` is not enough on its own: the MCP tool travels fixed in the
+    # argv, so an empty list there doesn't remove it. This test found exactly that.
+    assert "survey" not in app.PHASE_MCP and "consolidate" not in app.PHASE_MCP
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 30, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "consolidate"})
+    assert "mcp__azure-devops" not in list(cap["argv"])
+
+
+def test_a_single_repo_ticket_keeps_the_analyze_route(client, tmp_path):
+    """Nothing to fan out: offering `survey` there would be offering a fan-out with
+    one repo in it."""
+    _solo_project(client, tmp_path)
+    tid = client.post("/tickets", json={"ado_id": 31, "project": "Solo"}).json()["id"]
+    names = [f["fase"] for f in client.get(f"/tickets/{tid}").json()["fases"]]
+    assert names == ["analyze", "design", "implement"]
+
+
+def test_a_multi_repo_ticket_gets_the_fan_out_and_keeps_analyze(client):
+    """`analyze` stays: it's the fallback if the fan-out gets stuck, and it's the
+    baseline the whole design has to be measured against. Hiding what you're comparing
+    to makes the comparison impossible — and both routes write the same file."""
+    tid = client.post("/tickets", json={"ado_id": 32, "project": "Demo"}).json()["id"]
+    names = [f["fase"] for f in client.get(f"/tickets/{tid}").json()["fases"]]
+    assert names == ["analyze", "brief", "survey", "consolidate", "design", "implement"]
 
 
 def _run_twice(client, monkeypatch, ado_id, phase="analyze"):
@@ -880,15 +942,16 @@ def test_phases_without_runs(client):
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     phases = client.get(f"/tickets/{tid}").json()["fases"]
     # `test` isn't there: tests are written inside `implement`, not in a phase of their own.
-    assert [f["fase"] for f in phases] == ["analyze", "design", "implement"]
+    # `Demo` mounts an extra repo, so it walks the fan-out route AND keeps `analyze`.
+    assert [f["fase"] for f in phases] == [
+        "analyze", "brief", "survey", "consolidate", "design", "implement"]
     # Exact shape, not a subset: the UI reads these keys and a phase that silently
     # grows one is a phase the client renders half-blind.
-    assert phases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
-                        "corridas": 0, "fallidas": 0,
-                        "puede_continuar": False, "continuaciones": 0}
-    assert phases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
-                        "corridas": 0, "fallidas": 0,
-                        "puede_continuar": False, "continuaciones": 0}
+    for name in ("analyze", "implement"):
+        assert _phase(client, tid, name) == {
+            "fase": name, "disponible": True, "estado": "pendiente",
+            "corridas": 0, "fallidas": 0,
+            "puede_continuar": False, "continuaciones": 0}
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 
@@ -962,7 +1025,7 @@ def test_a_rerun_of_analysis_does_not_erase_that_a_plan_exists(client, monkeypat
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     client.post(f"/tickets/{tid}/run", json={})          # re-runs the analysis
     d = client.get(f"/tickets/{tid}").json()
-    assert [f["estado"] for f in d["fases"][:2]] == ["ok", "ok"]
+    assert [_phase(client, tid, n)["estado"] for n in ("analyze", "design")] == ["ok", "ok"]
     assert d["ticket"]["status"] == "planned"
     assert client.get("/tickets").json()[0]["status"] == "planned"
 
@@ -975,7 +1038,7 @@ def test_stamp_of_a_directory_counts_and_lists_its_files(client, monkeypatch, tm
     _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    h = client.get(f"/tickets/{tid}").json()["fases"][1]["huella"]
+    h = _phase(client, tid, "design")["huella"]
     assert h["existe"] and h["archivos"] == 3 and h["bytes"] == 9
     assert sorted(h["nombres"]) == ["design.md", "proposal.md", "tasks.md"]
 
@@ -992,7 +1055,7 @@ def test_stamp_of_a_directory_descends_into_subdirectories(client, monkeypatch, 
     _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
     tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    h = client.get(f"/tickets/{tid}").json()["fases"][1]["huella"]
+    h = _phase(client, tid, "design")["huella"]
     assert h["archivos"] == 3
     assert h["bytes"] == 2 + 3 + 5
     assert "specs/pagos/spec.md" in h["nombres"]
@@ -1012,7 +1075,7 @@ def test_phase_in_error_carries_the_stamp_reason(client, monkeypatch):
     _use_fake_claude(monkeypatch, stamp="nada — falta el análisis de la Fase 1")
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    f = client.get(f"/tickets/{tid}").json()["fases"][1]
+    f = _phase(client, tid, "design")
     assert f["estado"] == "error" and "falta el análisis" in f["motivo"]
     assert "huella" not in f
 
