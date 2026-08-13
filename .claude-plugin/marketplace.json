@@ -4,7 +4,7 @@
     "name": "Jhonny Garcia",
     "email": "jhonny.garcia.laime@gmail.com"
   },
-  "description": "Hub personal: experiencia codificada como plugins de Claude Code (skills, agents, comandos, hooks)",
+  "description": "Personal hub: experience encoded as Claude Code plugins (skills, agents, commands, hooks)",
   "plugins": [
     {
       "name": "ticket-agent",
