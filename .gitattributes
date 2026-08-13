@@ -1,0 +1,13 @@
+# Line endings for the files that break when they're wrong.
+#
+# This repo is worked on from Windows with core.autocrlf=true, which stores CRLF in
+# the blob. For most files that's harmless. For these two it isn't:
+#   - a .sh with CRLF fails on macOS/Linux with "bad interpreter"
+#   - a workflow's `run:` block executes on ubuntu, where \r becomes a command
+# Both ship to other people's machines, so both are pinned to LF.
+*.sh text eol=lf
+.github/workflows/*.yml text eol=lf
+
+# And the reverse: a .cmd is only ever run by cmd.exe.
+*.cmd text eol=crlf
+*.bat text eol=crlf
