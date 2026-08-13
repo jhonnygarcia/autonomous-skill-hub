@@ -80,6 +80,25 @@ target repo's `ADO_ORG` env var and filters domains; `project` comes from the ta
 repo's `.claude/ticket-agent.json`. Phase 1 is read-only: any `*_write` MCP tool is
 forbidden.
 
+**The plugin owns no Azure DevOps code**: `.mcp.json` runs `npx -y @azure-devops/mcp`,
+which is downloaded on every start, so `npx` is as required for Phase 1 as it is for
+Phase 2's OpenSpec. Its `-d` list (`core work-items search wiki repositories`) is what
+keeps the tool surface small; widening it widens what the agent can reach.
+
+**The credential is the machine's, not the repo's.** `--authentication ${ADO_AUTH:-azcli}`
+means the default is the `az login` session and no token exists in any file. Setting
+`ADO_AUTH=envvar` switches to a PAT in `ADO_MCP_AUTH_TOKEN` (`pat` and `interactive`
+also exist; `interactive` can't work headless, so never in the orchestrator). The
+default lives in the `${VAR:-default}` expansion, which is why unsetting `ADO_AUTH`
+keeps today's behavior — the token path is opt-in. The full table is in the plugin's
+README; when it changes, that table is what gets updated.
+
+**The missing-credential failure looks like a configuration failure.** The skill
+reports "MCP not connected", which reads as a wrong `ADO_ORG` and sends you to the
+wrong file. Same for an org/`organization` mismatch — nothing validates that the two
+agree. Check `az account show` and `az devops project list --org ...` before
+suspecting the JSON.
+
 **Phase 2 consumes the analysis, not the work item.** If the file doesn't exist, it
 stops and asks for Phase 1 to run first — the analysis is the interface between the
 two. It writes to `openspec/changes/<id>-<slug>/` in the target repo and validates with
@@ -92,6 +111,27 @@ paths (`<id> task N: <subject>`, one commit per task), and checks the box. **It 
 a branch with commits: no push, no PR** — the `git log` is the record of progress. Its
 preconditions are hard: no plan, several changes for the same id, or being outside the
 `ticket-agent/<id>` branch all stop it with `HUELLA: nada`.
+
+**A task carries `Test` and `Check` as two separate lines** — the test file the
+implementer writes first, and the command anyone can run afterwards — because the
+planner is the only one who can make the test a deliverable, and without that the test
+gets written after the code and is green on its first run. Phase 2b orders the subagent
+red first and wants both outputs back. **The green is re-run by the driving agent
+itself; the red can only ever be the subagent's word**, since the code exists by the
+time the driver looks. A task whose report shows no red still commits, and gets written
+down as `unverified` rather than silently counted as proven. `Check: manual — ...` is
+the declared escape hatch for what has no runnable test (config, renames, copy); an
+invented `--filter` that matches nothing exits 0, which is why faking one is worse than
+declaring it.
+
+**The per-task review is a second subagent with a clean context, and it can't stop the
+plan on taste.** The driving agent wrote the implementer's prompt, so it can't be the
+reviewer — that's self-review at one remove. Findings come graded: only `critical` and
+`important` reach the retry, `minor` never does, and a finding against something the
+plan explicitly ordered doesn't either — the plan is this phase's contract and there is
+no human mid-run to break the tie. All three of the non-blocking kinds land in a
+`## Review notes` section appended to `tasks.md`, because a summary in chat dies with
+the session and `tasks.md` is what the human opens.
 
 The analysis is written to the target repo (`docs/tickets/<id>-analysis.md`), never here.
 
@@ -116,6 +156,16 @@ the agent ignores them.
 **The ticket copies `org`, `project`, `repo_path`, and `extra_dirs` from the project
 when created** — the same way a line item locks in a price. That's why deleting a
 project doesn't break old tickets, and there's no FK between the two tables.
+
+**`org` and `project` are labels here, not configuration.** The runner never exports
+`ADO_ORG` and never puts the project name in the prompt: the subprocess inherits the
+backend's environment and Claude Code resolves both from the *target repo's*
+`.claude/settings.json` and `.claude/ticket-agent.json` once `cwd` lands there. The
+only things `app.py` reads them for are display and the "another project's ticket is
+running" message. So a project registered in the UI with a correct org still fails if
+the repo on disk lacks its two files — the UI shows nothing wrong, because the UI
+never had the authority. Registering a repo in the orchestrator is not configuring
+it.
 
 **The phase decides the command, the tools, and the final state.** Four tables next to
 `PHASES` in `app.py`: `PHASE_COMMANDS` (what's launched), `PHASE_ALLOWED_TOOLS` (which
@@ -192,9 +242,19 @@ Env var overrides (used by tests): `ORCH_DB`, `ORCH_LOGS`,
   (`claude -p`), not the Agent SDK. The runner strips `ANTHROPIC_API_KEY` and
   `ANTHROPIC_AUTH_TOKEN` from the subprocess environment, and a test guarantees it:
   don't reintroduce those variables or switch to a client that requires them.
+- **What a host machine must already have belongs in the plugin's README, and why it
+  breaks belongs here.** The two files split one subject: the README is the install
+  checklist a dev outside this repo follows (`npx`, the Azure credential and the
+  `ADO_AUTH` table, git, the two JSON files); this file explains the mechanism behind
+  each one. Changing `.mcp.json`, the auth modes, the `-d` domain list, or what the
+  runner passes to the subprocess means editing **both** — the README so the next dev
+  can install it, here so the next session doesn't re-derive it. A prerequisite
+  discovered by debugging and left undocumented gets discovered again the same way.
 - **Touching a skill requires bumping `version` in `plugin.json`.** That version is the
   cache key: `claude plugin update` brings nothing if it doesn't change, so a change
   committed here never reaches the installed plugin and the test comes out false.
+  The same applies to anything else the install copies — `.mcp.json` above all: an
+  auth mode nobody can pull is an auth mode that doesn't exist.
   There are **two** places, and the second one drifts silently: the analysis template
   in `ticket-comprehension/SKILL.md` stamps `by ticket-agent vX.Y.Z` so the written
   file proves which version produced it. It sat at `v0.5.2` while the plugin was at

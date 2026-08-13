@@ -83,7 +83,7 @@ is a task failure, not an acceptable variant.
 # Analysis of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Analyzed:** <date> by ticket-agent v0.7.2
+**Analyzed:** <date> by ticket-agent v0.8.0
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)

@@ -106,8 +106,33 @@ mirror with lines, and how it's checked:
 - [ ] Create `path/to/Destination.cs`
       Mirror: `path/to/Example.cs:1-140`
       Reuse: `path/to/what/already/exists.cs`
-      Check: [what has to pass for the task to be considered done]
+      Test: `path/to/DestinationTests.cs` — asserts [the behavior, in one line]
+      Check: `dotnet test --filter DestinationTests`
 ```
+
+**`Test` and `Check` are two lines because they answer two questions**: what the
+implementer writes first, and what anyone can run afterwards. Phase 2b makes the
+implementer write that test, watch it fail, and only then write the code — but it
+can only do that if the plan named the test as a deliverable of the task. A
+`Check` alone leaves the test implied, and an implied test gets written after the
+code, green on the first run, proving nothing.
+
+**The `Check` is a command, copy-pasteable, that fails today.** "Compiles" or "the
+invoice is created" isn't a check: nobody can run it. Neither is a filter you
+invented — `dotnet test --filter Nothing` matches no test and **exits 0**, which
+is a green check that verified nothing. If you name a filter, the `Test` line has
+to name the file that will make it match.
+
+**When there's genuinely no runnable test, declare it — don't fake one:**
+
+```markdown
+      Check: manual — [what to open, and what proves it right]
+```
+
+Config keys, renames, a migration nobody can exercise offline, copy changes. A
+declared manual check is honest and Phase 2b reports it as unverified; an invented
+command is a lie that closes the run in green. What you must not do is skip the
+line: a task with no `Check` at all can't be implemented.
 
 And its own top-level section for what **can't** be done:
 

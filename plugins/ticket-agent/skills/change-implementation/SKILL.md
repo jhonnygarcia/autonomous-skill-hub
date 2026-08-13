@@ -1,6 +1,6 @@
 ---
 name: change-implementation
-description: Executes an Azure DevOps ticket's change plan - reads openspec/changes/<id>-*/tasks.md, implements each task with a subagent, runs its check, commits per task on the ticket's branch, and checks off the boxes. Use when asked to implement, execute the plan, or write the code for a ticket that's already been planned.
+description: Executes an Azure DevOps ticket's change plan - reads openspec/changes/<id>-*/tasks.md, implements each task with a subagent test-first, reviews the diff with a second subagent, runs its check, commits per task on the ticket's branch, and checks off the boxes. Use when asked to implement, execute the plan, or write the code for a ticket that's already been planned.
 ---
 
 # Implementing a change plan
@@ -19,7 +19,8 @@ human decides when to push what you left.
 Read `.claude/ticket-agent.json` from the current project. If it doesn't exist,
 stop and guide the user to create it (template in the plugin's README). Read
 `autonomy` and, if present, `subagent_model`: an alias (`opus`, `sonnet`,
-`haiku`) or a full id to launch step 4's subagents with. If it's not present,
+`haiku`) or a full id to launch the loop's subagents with — the implementer and
+the reviewer both. If it's not present,
 subagents inherit this session's model, which is normal.
 
 ## 2. Preconditions
@@ -63,13 +64,21 @@ it), don't move them ahead or reorder them:
 
 1. **Subagent in a clean context** (the `Task` tool, with the configuration's
    `subagent_model` if there is one). Give it the task's literal text
-   (destination, mirror, check), the ticket's repo map with its label and path,
+   (destination, mirror, `Test`, `Check`), the ticket's repo map with its label and path,
    the active branch, and the commit rules from "Golden rules" below. Every
    mounted repo for the ticket — main or extra — is writable for this phase;
-   don't treat it as read-only. Ask it to implement the task and **run the
-   "Check" the task itself provides** — run it, don't just describe it — and
-   have it return: files touched, the check's actual result (the output, not a
-   summary), and any deviation from the plan.
+   don't treat it as read-only.
+
+   **Order it red first.** Write the test the task's `Test` line names, run the
+   `Check`, and keep that output: a test that passes before the code exists is
+   testing the wrong thing, and the subagent fixes it before going on. Then the
+   code, then the `Check` again. It returns: files touched, **the `Check`'s
+   output before and after** — the text it printed, not a summary — and any
+   deviation from the plan.
+
+   A `Check: manual — ...` has no red phase. The subagent does what the line
+   says and returns what it observed. Carry that forward: it's the one kind of
+   task that closes without machine evidence, and step 6 has to say so.
 
    Don't assume the subagent can write to the mounted repos: unlike reading and
    `Bash`, that isn't verified. If it reports it couldn't write (permission
@@ -80,14 +89,52 @@ it), don't move them ahead or reorder them:
    those specific paths) before accepting anything. Compare it against the
    destination and the mirror the task asked for.
 
-3. If the diff matches what was asked and the check passed: **commit those
-   specific paths** — never `git add -A` or `git add .` — with the message
-   `<id> task N: <subject>`, and check the box `- [x]` in `tasks.md`. One commit
-   per task.
+3. **Code-review it with a second subagent, not with yourself.** You wrote the
+   implementer's prompt; reviewing its output is reviewing your own instruction,
+   and it approves nearly everything. Dispatch a fresh `Task` with a clean
+   context and hand it only the task's literal text, the diff from step 2, and
+   the paths it covers — nothing about the rest of the run. Scoped to those
+   paths: the rest of the branch was reviewed when its own task was committed,
+   and re-reviewing it turns every task into a review of the whole plan.
 
-4. If something fails (the check doesn't pass, the diff doesn't match, the
-   subagent couldn't write), log it and retry that same task once more, giving
-   the new subagent the previous failure as context.
+   Ask it for two things: whether the diff does what the task asked **and
+   nothing else**, and a list of findings, each one graded
+
+   - `critical` — wrong, unsafe, or an error swallowed to make the check green
+   - `important` — right, but with a defect worth fixing before the commit
+   - `minor` — style, naming, taste
+
+   **Only `critical` and `important` block**; they send the task to the retry in
+   step 5 like any other failure. `minor` is never retried: collect them for step 6. A
+   review that can stop a plan on taste is worse than no review, because two
+   rounds of taste stop it for good.
+
+   **A finding against what the plan explicitly ordered doesn't block either.**
+   The plan is this phase's contract and there's no human mid-run to break the
+   tie: log it, don't retry it, let step 6 surface it. Reviewing the plan was
+   Phase 2's job.
+
+4. **Run the `Check` yourself** before committing — the same command, in the repo
+   it belongs to. The subagent's transcript is a claim; this is the evidence,
+   and it's the only real backing a checked box ever gets. Not green, not
+   committed, whatever the report said.
+
+   Green, plus a diff that matches the task, plus a review with nothing
+   `critical` or `important`: **commit those specific paths** — never
+   `git add -A` or `git add .` — with the message `<id> task N: <subject>`, and
+   check the box `- [x]` in `tasks.md`. One commit per task.
+
+   The asymmetry is deliberate: green you can re-run, red you cannot — the code
+   exists now. So the red evidence stays the subagent's word, and it's the
+   weakest link in the chain. If its report shows no red output, the task is
+   **unverified**: it still commits if everything else holds, and step 6 names
+   it. Retrying wouldn't recover the red — the test is already written.
+
+5. **The retry.** If something fails (the check doesn't pass, the diff doesn't
+   match, the review came back `critical` or `important`, the subagent couldn't
+   write), log it and retry that same task once more, giving the new subagent
+   the previous failure as context. Two failures on the same task and the loop
+   stops — section 5 below, which is a different thing from this step.
 
    **Exception: a hook denial isn't a task failure.** It's recognized because
    the denial message comes from the hook itself and mentions that this phase
@@ -96,7 +143,7 @@ it), don't move them ahead or reorder them:
    the subagent tried something out of this phase's scope, not that the
    implementation is wrong: log it in the report, **don't retry the denied
    command**, and **don't count that denial as one of the two failures** in
-   golden rule 5 — the task keeps its normal course (diff, check, commit) with
+   golden rule 4 — the task keeps its normal course (diff, check, commit) with
    whatever else the subagent did manage to do.
 
 ## 5. Stopping
@@ -112,6 +159,28 @@ Before closing, run the build (or the project's equivalent) for every repo the
 loop touched. Green is a necessary condition for `ok`: a plan with every box
 checked but a red build closes as `parcial`, not `ok`.
 
+**What the loop set aside goes in `tasks.md`, not only in chat.** Append a
+top-level `## Review notes` section to the same file, with one line per item and
+the task it came from:
+
+```markdown
+## Review notes
+
+- Task 3 · minor: `InvoiceMapper` duplicates the null guard from `OrderMapper:41`.
+- Task 5 · plan-mandated: review flagged the retry loop as unbounded; `design.md`
+  asks for it that way.
+- Task 6 · unverified: `Check: manual`, no automated evidence.
+- Task 7 · unverified: the subagent reported no red output for `InvoiceTests`.
+```
+
+That file is the change's record and the human already opens it; a summary in
+chat dies with the session. Nothing else gets added to `tasks.md` — don't rewrite
+a task because the review disagreed with it.
+
+An `unverified` line doesn't downgrade the stamp on its own — a `manual` check
+is a plan the human approved, not a failure. What it does is stop `ok` from
+meaning more than it earned, so the summary says how many there were.
+
 Under `autonomy: supervised`, besides the stamp, leave a summary in chat of what
 was implemented and what was left blocked or pending. Under `autonomous`, the
 same summary, flagging which decisions you made on your own. Any other value of
@@ -123,12 +192,16 @@ isn't recognized.
 1. **Commit specific paths.** Never `git add -A` or `git add .`.
 2. **One commit per task**, with its number and subject. The `git log` is the
    record of what happened.
-3. **A task's check is run, not declared.** A checked task whose check never ran
-   is a lying checkbox.
+3. **A task's check is run by you, not declared by anyone.** A checked task whose
+   check you didn't watch pass is a lying checkbox.
 4. **A task that fails twice stops the plan.** What's blocked is declared
    blocked.
 5. **What the hook denies is not retried.** If the denial shows up, it's logged
    and the plan continues.
+6. **The test comes before the code**, and its first run fails. A test that was
+   green the first time proved nothing.
+7. **Only `critical` and `important` block.** Taste doesn't stop a plan, and what
+   the plan ordered isn't a finding. Both get written down instead.
 
 ## Closing
 

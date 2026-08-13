@@ -7,7 +7,7 @@
         "@azure-devops/mcp",
         "${ADO_ORG}",
         "--authentication",
-        "azcli",
+        "${ADO_AUTH:-azcli}",
         "-d",
         "core",
         "work-items",
