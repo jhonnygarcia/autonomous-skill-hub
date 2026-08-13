@@ -1,9 +1,23 @@
 # ticket-agent
 
-Fully understands an Azure DevOps ticket — work item, relationships, attachments,
-comments, wiki, and host-project rules — and produces a structured analysis in
-`docs/tickets/<id>-analysis.md` (Phase 1, 100% read-only). A second phase turns
-that analysis into an executable change plan, written as an OpenSpec change.
+From an Azure DevOps work item to commits on a branch, in three stages you launch
+one at a time. Nothing chains itself: between every two there's a file on disk to
+read, correct and decide on.
+
+| Stage | Command | Produces |
+|---|---|---|
+| **1** understand | `/ticket-agent:analyze <id>` | `docs/tickets/<id>-analysis.md` — read-only |
+| **2** plan | `/ticket-agent:plan <id>` | an OpenSpec change in `openspec/changes/<id>-<slug>/` |
+| **3** implement | `/ticket-agent:implement <id>` | commits on `ticket-agent/<id>`, one per task |
+
+A ticket that spans **several repos** takes a different route through stage 1 —
+`brief` → `survey` → `consolidate`, one session rooted in each repo — because
+`--add-dir` mounts another repo's files but not its rules. See
+[When the ticket spans more than one repo](#when-the-ticket-spans-more-than-one-repo).
+It ends in the same `<id>-analysis.md`, so stages 2 and 3 don't change.
+
+**Stage 3 stops on a branch with commits: no push, no PR.** The `git log` is the
+record; you decide what goes out.
 
 ## Requirements
 

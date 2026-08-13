@@ -67,13 +67,23 @@ check who holds the ports, in PowerShell:
 
 **ticket-agent plugin.** The logic lives in markdown, not code: each command delegates
 to its skill, which defines the whole procedure. Changing the agent's behavior means
-editing the SKILL.md. There are three phases, and they're three separate runs:
+editing the SKILL.md. **Three stages, six commands, and every one of them is its own
+run** — a ticket that mounts several repos takes the second route through stage 1:
 
-| Command | Skill | Input | Output |
-|---|---|---|---|
-| `/ticket-agent:analyze <id>` | `ticket-comprehension` | the work item | `docs/tickets/<id>-analysis.md` |
-| `/ticket-agent:plan <id>` | `change-planning` | that analysis | an OpenSpec change |
-| `/ticket-agent:implement <id>` | `change-implementation` | that change | commits on `ticket-agent/<id>` |
+| Stage | Command | Skill | Input | Output |
+|---|---|---|---|---|
+| 1 · one repo | `/ticket-agent:analyze <id>` | `ticket-comprehension` | the work item | `docs/tickets/<id>-analysis.md` |
+| 1 · several | `/ticket-agent:brief <id>` | `ticket-brief` | the work item | `docs/tickets/<id>-brief.md` + `SONDEAR:` |
+| | `/ticket-agent:survey <id>` | `repo-survey` | that brief, inline | one survey per routed repo |
+| | `/ticket-agent:consolidate <id>` | `analysis-consolidation` | brief + surveys | the SAME `<id>-analysis.md` |
+| 2 | `/ticket-agent:plan <id>` | `change-planning` | that analysis | an OpenSpec change |
+| 3 | `/ticket-agent:implement <id>` | `change-implementation` | that change | commits on `ticket-agent/<id>` |
+
+**Both stage-1 routes end in the same file**, which is why stages 2 and 3 never learn
+which one ran, and why the list's stepper still shows three dots. `analyze` stays
+offered on multi-repo tickets: it's the fallback and the baseline. `PHASE_DONE` gives
+`brief` and `survey` their own states (`briefed`, `surveyed`) so an interrupted fan-out
+doesn't look finished — only `consolidate` leaves the ticket `analyzed`.
 
 Data arrives via the official Azure DevOps MCP (`.mcp.json`), which connects with the
 target repo's `ADO_ORG` env var and filters domains; `project` comes from the target
