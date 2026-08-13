@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
+from itertools import takewhile
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -306,6 +307,33 @@ def prepare_branch(repo: str, ado_id: int) -> str:
     return name
 
 
+RESUME_STAMP_REMINDER = (
+    "\n\nClose with the same HUELLA line as always, the last one of the message.")
+NO_SESSION_TO_RESUME = (
+    "[orchestrator] se pidió continuar, pero esta fase no tiene sesión previa "
+    "registrada: corre en una sesión nueva.\n")
+
+
+def last_session(ticket_id: int, phase: str) -> str | None:
+    """The CLI session of this phase's most recent run that had one.
+
+    Not "the last run": one can die before the id shows up in the stream, and that
+    shouldn't hide the session before it — a run that died halfway is precisely one
+    worth continuing.
+
+    No check that the directory matches: every run of a ticket shares its `repo_path`
+    (copied when the ticket is created, and no endpoint edits it afterwards), and a
+    session lives under the directory it ran in. If ticket editing ever appears, this
+    stops holding.
+    """
+    with db() as c:
+        r = c.execute(
+            "SELECT session_id FROM runs WHERE ticket_id=? AND phase=? "
+            "AND session_id IS NOT NULL ORDER BY id DESC LIMIT 1",
+            (ticket_id, phase)).fetchone()
+    return r["session_id"] if r else None
+
+
 def ticket_repos(t) -> list[str]:
     """The repos the ticket mounts: the primary one first, then the extras. That's the
     order they're checked and branched in, and it holds equally for a SQLite row and for
@@ -475,6 +503,12 @@ class TicketIn(BaseModel):
 class RunIn(BaseModel):
     instructions: str | None = None
     phase: str = "analyze"  # default, so callers that don't pass it don't break
+    # Continue the phase's previous CLI session instead of starting a fresh one. The
+    # human decides, because only they know whether the adjustment ADDS scope (where
+    # continuing saves the exploration) or CORRECTS what the agent understood (where a
+    # fresh session keeps the correction from competing with the reasoning behind the
+    # mistake). Defaults to False: the safe side.
+    resume: bool = False
 
 
 def ticket_row(tid: int) -> sqlite3.Row | None:
@@ -698,7 +732,16 @@ def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) ->
             continue
         rs = [r for r in runs if r["phase"] == name]
         e = {"fase": name, "disponible": True, "corridas": len(rs),
-             "fallidas": sum(1 for r in rs if r["status"] == "error")}
+             "fallidas": sum(1 for r in rs if r["status"] == "error"),
+             # What the UI enables the "continue" control with. Computed here and not
+             # in the client on purpose: it's the same condition `execute_run` uses to
+             # decide whether the resume applies or falls back to fresh, and two copies
+             # of it drift.
+             "puede_continuar": any(r["session_id"] for r in rs),
+             # The CURRENT chain, not the historical total: a fresh run breaks it. It's
+             # what says how much context has piled up in the session now in play, which
+             # is the risk the human is weighing — nothing here caps it.
+             "continuaciones": len(list(takewhile(lambda r: r["resumed_from"], rs)))}
         if not rs:
             e["estado"] = "pendiente"
             out.append(e)
@@ -844,7 +887,8 @@ def set_ticket(tid: int, **fields):
         c.execute(f"UPDATE tickets SET {cols} WHERE id=?", (*fields.values(), tid))
 
 
-async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase: str):
+async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase: str,
+                      resume: bool = False):
     async with RUN_LOCK:  # ponytail: global lock, could go per-repo if it ever hurts
         log_path = LOGS_DIR / f"{run_id}.log"
         set_run(run_id, status="running", log_path=str(log_path), started_at=now())
@@ -878,11 +922,23 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # The branch that gets saved is the one prepared under the lock, not one
             # the POST deduced before waiting.
             set_run(run_id, branch=branch)
-        prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
         noun = PHASE_NOUN[phase]
         extras = normalize_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
-        prompt += repos_text(phase, extras, noun)
-        prompt += adjustment_text(phase, noun, instructions)
+        prev = last_session(ticket["id"], phase) if resume else None
+        if prev:
+            # NOT the slash command. The session already ran the skill; sending it
+            # again restarts the procedure from step 1 — rereads the work item,
+            # reexplores, rewrites the deliverable — which is what continuing was
+            # meant to avoid, and it can duplicate the output. `repos_text` is
+            # dropped too: it's already in that context.
+            # The stamp reminder is not optional: the runner demands the stamp on
+            # every run, and without it a good continuation is marked as an error.
+            prompt = (instructions or "") + RESUME_STAMP_REMINDER
+            set_run(run_id, resumed_from=prev)
+        else:
+            prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
+            prompt += repos_text(phase, extras, noun)
+            prompt += adjustment_text(phase, noun, instructions)
         cmd = claude_cmd() + [
             "-p", prompt,
             "--output-format", "stream-json", "--verbose",
@@ -896,6 +952,9 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # Read at launch time, not at startup: changing the model in Settings has
             # to affect the next run without restarting the backend.
             *model_for(phase),
+            # Always forked: the original run's transcript stays intact and every row
+            # of `runs` keeps its own id, so the chain is walkable in both directions.
+            *(["--resume", prev, "--fork-session"] if prev else []),
         ]
         for e in extras:
             cmd += ["--add-dir", e["path"]]
@@ -918,6 +977,10 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         try:
             with open(log_path, "w", encoding="utf-8") as log:
                 log.write(f"$ {' '.join(cmd)}\n\n")
+                # Never in silence: a continuation that quietly turns into a fresh run
+                # reads, from outside, like the agent ignored the adjustment.
+                if resume and not prev:
+                    log.write(NO_SESSION_TO_RESUME)
                 log.flush()
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -1010,7 +1073,8 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         )
         run_id = cur.lastrowid
     set_ticket(tid)
-    background.add_task(execute_run, run_id, dict(t), body.instructions, body.phase)
+    background.add_task(execute_run, run_id, dict(t), body.instructions, body.phase,
+                        body.resume)
     with db() as c:
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
 

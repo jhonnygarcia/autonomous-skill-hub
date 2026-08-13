@@ -55,7 +55,7 @@ las skills, React+TS para la UI.
 |---|---|
 | `backend/app.py` | Variable de entorno, `session_id`, resume, parser de enrutado, tres fases nuevas, fan-out |
 | `backend/tests/test_app.py` | Se extiende con cada tarea de backend |
-| `backend/tests/test_enrutado.py` | **Nuevo.** Tabla de casos del parser |
+| `backend/tests/test_routing.py` | **Nuevo.** Tabla de casos del parser |
 | `plugins/ticket-agent/skills/ticket-brief/SKILL.md` | **Nueva.** Recolecta y enruta |
 | `plugins/ticket-agent/skills/repo-survey/SKILL.md` | **Nueva.** Qué exige el ticket de ESTE repo |
 | `plugins/ticket-agent/skills/analysis-consolidation/SKILL.md` | **Nueva.** Funde y produce el contrato |
@@ -222,7 +222,7 @@ Depende de la Tarea 2.
 - Produces: el endpoint de lanzar fase acepta `resume: bool`; `runs.resumed_from`
   queda poblada. La Tarea 15 (UI) lo consume.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 Cinco casos, todos sobre el argv y el prompt con los que se lanzó el subproceso:
 
@@ -232,21 +232,26 @@ Cinco casos, todos sobre el argv y el prompt con los que se lanzó el subproceso
 | `resume=true` con sesión previa | el prompt contiene el recordatorio de la estampa |
 | `resume=true` con sesión previa | argv conserva `--add-dir`, `--allowedTools` y `--settings` idénticos a una corrida fresca |
 | `resume=true` **sin** sesión previa | corre fresca, con comando slash, y el log lo dice |
-| `resume=true` con `repo_path` distinto al de la corrida previa | corre fresca, y el log lo dice |
+| ~~`resume=true` con `repo_path` distinto~~ | **descartado, ver abajo** |
 
-Expected: los cinco fallan.
+**La guarda del `repo_path` no se implementa: es código muerto.** No existe endpoint
+que edite un ticket, y su `repo_path` se copia al crearse — todas las corridas de un
+ticket comparten directorio por construcción. Queda dicho en el docstring de
+`last_session` para quien algún día añada edición de tickets.
 
-- [ ] **Step 2: Implementar la bifurcación**
+Expected: los cuatro fallan.
+
+- [x] **Step 2: Implementar la bifurcación**
 
 El detalle que rompe todo si se omite: **al continuar no se reenvía el comando
 slash.** Mandarlo hace que el agente reinicie el procedimiento desde el paso 1,
 relea el work item y reescriba el entregable — justo lo que se venía a evitar.
 
 ```python
-prev = ultima_sesion(ticket["id"], phase)   # id + repo_path de la corrida previa
-continuar = body.resume and prev and prev["repo_path"] == ticket["repo_path"]
+prev = last_session(ticket["id"], phase)   # id + repo_path de la corrida previa
+resuming = body.resume and prev and prev["repo_path"] == ticket["repo_path"]
 
-if continuar:
+if resuming:
     # Sin el comando: la sesión ya ejecutó la skill. Sin `repos_text`: ya está en
     # su contexto. El recordatorio de la estampa NO es opcional — el runner la
     # exige en toda corrida, y sin él una continuación buena se marca como error.
@@ -255,7 +260,7 @@ else:
     prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}" + repos_text(...) + adjustment_text(...)
 ```
 
-Y en argv, `["--resume", prev["session_id"], "--fork-session"]` cuando `continuar`.
+Y en argv, `["--resume", prev["session_id"], "--fork-session"]` cuando `resuming`.
 **`--fork-session` siempre**: la corrida original queda intacta y cada fila de `runs`
 mantiene su propio id.
 
@@ -265,7 +270,7 @@ acceso de escritura a los extras a mitad de conversación.
 
 Expected: los cinco tests pasan.
 
-- [ ] **Step 3: Sin tope de continuaciones, pero contadas — y expuestas**
+- [x] **Step 3: Sin tope de continuaciones, pero contadas — y expuestas**
 
 `GET /tickets/{id}` gana **dos campos por fase**, dentro de cada entrada de `fases`.
 Son el contrato que la Tarea 15 consume, así que se nombran aquí y no se improvisan
@@ -288,12 +293,28 @@ Test: una fase sin corridas previas reporta `puede_continuar: false`; tras una
 corrida con `session_id`, `true`; con el `repo_path` del ticket cambiado, vuelve a
 `false`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/orchestrator/backend/
 git commit -m "feat(runner): continuar la sesion anterior de una fase, opcional"
 ```
+
+> **Hecha el 2026-08-13.** Siete tests. Dos mutaciones comprobadas: reenviar el
+> comando slash rompe `test_resume_does_not_resend_the_slash_command`, y contar el
+> total de continuaciones en vez de la cadena actual rompe
+> `test_a_phase_reports_whether_it_can_be_continued`.
+>
+> `test_phases_without_runs` asegura la **forma exacta** del objeto de fase, así que
+> añadir dos claves lo rompió: actualizado a propósito, no relajado a subconjunto —
+> una fase que crece una clave en silencio es una fase que la UI pinta a medias.
+>
+> **Modo de fallo conocido, sin cubrir:** si la sesión ya no existe en disco
+> (`claude rm`, o `~/.claude` limpiado), `--resume` falla y la corrida cierra sin
+> estampa. El error del CLI queda en el log, que es donde se lee. Sondear el
+> almacenamiento de sesiones para adelantarse no compensa.
+>
+> Suite: 165 verdes.
 
 ---
 
@@ -302,16 +323,21 @@ git commit -m "feat(runner): continuar la sesion anterior de una fase, opcional"
 Función pura, sin tocar el runner. Independiente de las tareas 1-3.
 
 **Files:**
-- Create: `apps/orchestrator/backend/tests/test_enrutado.py`
+- Create: `apps/orchestrator/backend/tests/test_routing.py`
 - Modify: `apps/orchestrator/backend/app.py`
 
 **Interfaces:**
-- Produces: `repos_a_sondear(texto: str, etiquetas: list[str]) -> list[str]`.
+- Produces: `repos_to_survey(text: str, labels: list[str]) -> list[str]`.
   La Tarea 6 la consume.
+
+**Identificadores y comentarios en inglés**, como todo el código del repo. Solo las
+**claves JSON de la API** siguen en español, por coherencia con las que ya existen
+(`fases`, `disponible`, `estado`, `motivo`): son literales de contrato que la UI casa
+byte a byte, y mezclar los dos idiomas ahí sería peor que cualquiera de los dos.
 
 - [ ] **Step 1: Escribir la tabla de casos que falla**
 
-`tests/test_enrutado.py`. **Cada caso ambiguo devuelve la lista completa**, nunca
+`tests/test_routing.py`. **Cada caso ambiguo devuelve la lista completa**, nunca
 una parcial:
 
 ```python
@@ -319,16 +345,16 @@ una parcial:
 sondea de más. Un repo de más cuesta una sesión; uno de menos cuesta el ticket, y
 nada aguas abajo lo detecta."""
 
-TODAS = ["back", "front", "auth"]
+ALL_LABELS = ["back", "front", "auth"]
 
-CASOS = [
+CASES = [
     # (texto, esperado, por qué)
     ("SONDEAR: back, front",            ["back", "front"], "caso normal"),
     ("SONDEAR: BACK , Front",           ["back", "front"], "sin distinguir mayusculas ni espacios"),
     ("bla\nSONDEAR: back\nSONDEAR: back, front", ["back", "front"], "ultimo match gana, como HUELLA"),
-    ("no hay linea",                    TODAS,             "ausente -> todas"),
+    ("no hay linea",                    ALL_LABELS,        "ausente -> todas"),
     ("SONDEAR: back, frontend",         TODAS,             "etiqueta desconocida -> todas"),
-    ("SONDEAR:",                        TODAS,             "vacia -> todas"),
+    ("SONDEAR:",                        ALL_LABELS,        "vacia -> todas"),
     ("SONDEAR: back",                   ["back"],          "una sola: el runner cortocircuita"),
 ]
 ```
@@ -418,7 +444,7 @@ Depende de las tareas 4 y 5. Es el cambio de fondo del runner.
 - Modify: `apps/orchestrator/backend/tests/test_app.py`
 
 **Interfaces:**
-- Consumes: `repos_a_sondear` (Tarea 4), `PHASE_COMMANDS["survey"]` (Tarea 5).
+- Consumes: `repos_to_survey` (Tarea 4), `PHASE_COMMANDS["survey"]` (Tarea 5).
 - Produces: `logs/<run_id>/` con un survey por repo enrutado.
 
 - [ ] **Step 1: Escribir los tests que fallan**

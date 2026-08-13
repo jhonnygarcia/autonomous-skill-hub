@@ -589,6 +589,104 @@ def test_the_session_id_is_found_beyond_the_first_chunk(client, monkeypatch):
     assert client.get(f"/tickets/{tid}").json()["runs"][0]["session_id"] == FAKE_SESSION
 
 
+def _run_twice(client, monkeypatch, ado_id, phase="analyze"):
+    """First run leaves a session; the second one asks to continue it."""
+    tid = client.post("/tickets", json={"ado_id": ado_id, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": phase})
+    cap = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run",
+                json={"phase": phase, "instructions": "mira tambien el repo de auth",
+                      "resume": True})
+    return tid, cap
+
+
+def test_resume_passes_the_session_and_forks_it(client, monkeypatch):
+    """`--fork-session` isn't optional: without it the continuation reuses the id and
+    the original run's transcript stops being reachable. With it, every row of `runs`
+    keeps its own and the chain stays walkable."""
+    from fake_claude import FAKE_SESSION
+    _use_fake_claude(monkeypatch)
+    tid, cap = _run_twice(client, monkeypatch, 20)
+    argv = list(cap["argv"])
+    assert argv[argv.index("--resume") + 1] == FAKE_SESSION
+    assert "--fork-session" in argv
+    assert client.get(f"/tickets/{tid}").json()["runs"][0]["resumed_from"] == FAKE_SESSION
+
+
+def test_resume_does_not_resend_the_slash_command(client, monkeypatch):
+    """The detail that would break the whole feature in silence. The session already
+    ran the skill; resending the command restarts the procedure from step 1 — rereads
+    the work item, reexplores, rewrites the deliverable — which is precisely what
+    continuing was meant to avoid, and it can duplicate the output."""
+    _use_fake_claude(monkeypatch)
+    _, cap = _run_twice(client, monkeypatch, 21)
+    prompt = _prompt_from(cap)
+    assert "/ticket-agent:" not in prompt
+    assert "mira tambien el repo de auth" in prompt
+    # Already in its context; resending it just pays for the tokens again.
+    assert "Extra repos mounted" not in prompt
+
+
+def test_resume_still_demands_the_stamp(client, monkeypatch):
+    """The runner requires the stamp on EVERY run. Without this reminder a good
+    continuation closes with no stamp and gets marked as an error."""
+    _use_fake_claude(monkeypatch)
+    _, cap = _run_twice(client, monkeypatch, 22)
+    assert "HUELLA" in _prompt_from(cap)
+
+
+def test_resume_keeps_the_permission_flags(client, monkeypatch, tmp_path):
+    """They're per-invocation permissions, not context. Dropping them on the
+    continuation leaves the agent without write access to the extras and without its
+    push guard, mid-conversation."""
+    _use_fake_claude(monkeypatch)
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    _, cap = _run_twice(client, monkeypatch, 23, phase="implement")
+    argv = list(cap["argv"])
+    assert "--allowedTools" in argv and "Bash" in argv
+    assert "--settings" in argv
+    assert "--add-dir" in argv and any("backend-repo" in a for a in argv)
+
+
+def test_resume_without_a_previous_session_runs_fresh(client, monkeypatch):
+    """Never in silence: a continuation that quietly becomes a fresh run looks like
+    the agent ignored the adjustment."""
+    _use_fake_claude(monkeypatch, no_session=True)
+    tid = client.post("/tickets", json={"ado_id": 24, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    cap = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run", json={"instructions": "otra vuelta", "resume": True})
+    argv = list(cap["argv"])
+    assert "--resume" not in argv
+    assert "/ticket-agent:analyze" in _prompt_from(cap)
+    assert "sesión previa" in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_a_phase_reports_whether_it_can_be_continued(client, monkeypatch):
+    """What the UI disables the control with. Computed here, not in the client: it's
+    the same condition that decides whether the resume applies or falls back to
+    fresh, and two copies of it would drift."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 25, "project": "Demo"}).json()["id"]
+    analyze = lambda: next(f for f in client.get(f"/tickets/{tid}").json()["fases"]
+                           if f["fase"] == "analyze")
+    assert analyze()["puede_continuar"] is False and analyze()["continuaciones"] == 0
+
+    client.post(f"/tickets/{tid}/run", json={})
+    assert analyze()["puede_continuar"] is True and analyze()["continuaciones"] == 0
+
+    client.post(f"/tickets/{tid}/run", json={"instructions": "y esto", "resume": True})
+    assert analyze()["continuaciones"] == 1
+    client.post(f"/tickets/{tid}/run", json={"instructions": "y esto otro", "resume": True})
+    assert analyze()["continuaciones"] == 2
+
+    # A fresh run breaks the chain: the counter measures the CURRENT one, which is
+    # what says how much context has piled up in the session now in play.
+    client.post(f"/tickets/{tid}/run", json={})
+    assert analyze()["continuaciones"] == 0
+
+
 def test_implement_loads_the_rules_of_the_mounted_repos(client, monkeypatch, tmp_path):
     """`--add-dir` grants file access, not configuration discovery: it loads the added
     repo's skills and agents, but NOT its CLAUDE.md or `.claude/rules/`. Without this
@@ -783,10 +881,14 @@ def test_phases_without_runs(client):
     phases = client.get(f"/tickets/{tid}").json()["fases"]
     # `test` isn't there: tests are written inside `implement`, not in a phase of their own.
     assert [f["fase"] for f in phases] == ["analyze", "design", "implement"]
+    # Exact shape, not a subset: the UI reads these keys and a phase that silently
+    # grows one is a phase the client renders half-blind.
     assert phases[0] == {"fase": "analyze", "disponible": True, "estado": "pendiente",
-                        "corridas": 0, "fallidas": 0}
+                        "corridas": 0, "fallidas": 0,
+                        "puede_continuar": False, "continuaciones": 0}
     assert phases[2] == {"fase": "implement", "disponible": True, "estado": "pendiente",
-                        "corridas": 0, "fallidas": 0}
+                        "corridas": 0, "fallidas": 0,
+                        "puede_continuar": False, "continuaciones": 0}
     assert client.get("/tickets").json()[0]["status"] == "queued"
 
 
