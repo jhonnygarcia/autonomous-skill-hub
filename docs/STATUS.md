@@ -553,8 +553,62 @@ Nine placebos found before this session, and the tenth was in the fix for one.
   the pre-extraction file; a grep for dead props that still typecheck; hand-traced
   accessible names; hand-computed bar widths.
 
+## Eighth session — 2026-08-12: a second org, TDD in the plan, and the multi-repo design
+
+Three things happened, in this order.
+
+**A second Azure DevOps organization works, with a token.** `.mcp.json` now passes
+`--authentication ${ADO_AUTH:-azcli}`: unset, everything behaves as before; set to
+`envvar`, the MCP reads a PAT from `ADO_MCP_AUTH_TOKEN`. Verified end to end against
+`cr360dev` — server started with the flag, work item 44647 of "CallRevu Development
+Lifecycle Management" read over stdio. A legacy `<org>.visualstudio.com` account
+resolves as `dev.azure.com/<org>`, and a project name with spaces travels verbatim.
+The full mode table lives in the plugin's README; `CLAUDE.md` carries the mechanism.
+
+**Phase 2's `Check` became `Test` + `Check`, and 2b reviews with a second subagent.**
+The plan had ordered TDD in the planner's voice while the implementer never heard it
+— a task ordering "run a test that doesn't exist yet" fails twice and stops the plan.
+Now the plan names the test file as a deliverable of the task, and 2b orders the
+subagent red first. Three findings that shaped the rest: an invented `--filter`
+matches no test and **exits 0** (hence `Check: manual — ...` as a declared escape
+hatch); green can be re-run by the driver but red cannot, so a report with no red
+output commits as `unverified` rather than being counted as proven; and the per-task
+review moved out of the driving agent, which was reviewing its own instruction.
+Findings are graded, and only `critical`/`important` block — a review that can stop a
+plan on taste stops it for good. What doesn't block lands in `## Review notes` in
+`tasks.md`, because a summary in chat dies with the session.
+
+**The multi-repo design, written up in full.**
+`docs/superpowers/specs/2026-08-12-multirepo-fanout-y-humano-en-el-bucle-design.md`.
+It starts from a verified fact: `--add-dir` loads a repo's skills and agents but
+**not** its `CLAUDE.md`, hooks or `.mcp.json`. So a ticket across front and back is
+written today under the primary repo's rules, confidently and undetectably. The
+design splits Phase 1 into one session rooted per repo and consolidates, with the
+cross-repo contract as the deliverable no single repo could produce. It also turns
+the seams between phases into marked decision points, and makes session continuation
+a human choice — `-p --resume --fork-session` was verified working headless, and the
+`session_id` is already in today's logs.
+
 ## Immediate pending items
 
+- [ ] **Execute the multi-repo plan** —
+  `docs/superpowers/plans/2026-08-12-multirepo-fanout-y-humano-en-el-bucle.md`,
+  16 tasks. **The direction is decided**: a multi-repo ticket stops being handled
+  from a single session, and Phase 1 splits into one session rooted per repo. The
+  rationale doesn't rest on the unverified part — no configuration recovers a
+  mounted repo's hooks and `.mcp.json`, only a session rooted in it, and that's
+  verified. Tasks 1-6 are backend and testable with `fake_claude.py` before a single
+  skill exists; **Task 1 is worth doing on its own** whatever happens to the rest.
+  **Task 16 is the one that can't be skipped**: it measures the design's central
+  hypothesis against a real two-repo ticket, and if the split buys nothing that gets
+  written down too. **3320** is the candidate — its code lives in an `extra_dir`,
+  which also closes the oldest open assumption of Phase 2b.
+- [ ] **`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` in `implement`.** One line
+  in the runner's env, gated on `extras`. Independent of the fan-out and worth doing
+  either way: Phases 2 and 3 stay single-session in every version of the design, so
+  without it the extra repos' rules never reach the agent that writes their code.
+- [ ] **Rotate the `cr360dev` PAT.** It was pasted in a session transcript on
+  2026-08-12 to verify the token path. It worked; it should not survive.
 - [ ] **Read the 2658 lines that 3332 left on branch `ticket-agent/3332`.**
   Nobody has looked at them. The run came out `ok` because the build is
   green and the boxes are checked, but that measures that the mechanism
