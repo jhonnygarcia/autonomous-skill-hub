@@ -460,6 +460,14 @@ def last_session(ticket_id: int, phase: str) -> str | None:
 
 
 BRIEF_REL = "docs/tickets/{ado_id}-brief.md"
+REQUEST_FILE_REL = "docs/tickets/{ado_id}-request.md"
+# Both halves are load-bearing: run 3320 taught that what the prompt doesn't name,
+# the agent invents — so the file is named AND the work item is negated.
+REQUEST_PROMPT = (
+    "\n\nThere is no Azure DevOps work item for this request: it does not exist and "
+    "must not be searched for. The whole request is in `{path}`, written by the human "
+    "who asked for it. Read it; it is the source, and the analysis cites it like any "
+    "other document in the repo.")
 NO_BRIEF_REASON = (
     "no existe el brief de la fase anterior; corre primero la fase «brief»")
 SURVEY_PROMPT = (
@@ -1241,6 +1249,14 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                 set_ticket(ticket["id"])
                 return
         extras = normalize_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
+        if ticket.get("request") and phase in ("analyze", "brief"):
+            # Projected from the DB on every launch so an edited request never leaves
+            # a stale file behind. Only the two phases that read it: downstream phases
+            # consume the analysis, and the runner shouldn't acquire the habit of
+            # writing into the repo anywhere near the clean-tree guard's checks.
+            req = Path(ticket["repo_path"]) / REQUEST_FILE_REL.format(ado_id=ticket["ado_id"])
+            req.parent.mkdir(parents=True, exist_ok=True)
+            req.write_text(ticket["request"], encoding="utf-8")
         prev = last_session(ticket["id"], phase) if resume else None
         if prev:
             # NOT the slash command. The session already ran the skill; sending it
@@ -1255,6 +1271,9 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         else:
             prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
             prompt += repos_text(phase, extras, noun, ticket_labels(ticket)[0][0])
+            if ticket.get("request") and phase in ("analyze", "brief"):
+                prompt += REQUEST_PROMPT.format(
+                    path=REQUEST_FILE_REL.format(ado_id=ticket["ado_id"]))
             if surveys:
                 # The list of repos NOT surveyed is as much a part of the input as the
                 # surveys themselves: without it the consolidation can't write the line

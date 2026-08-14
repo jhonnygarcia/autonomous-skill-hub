@@ -2310,3 +2310,86 @@ def test_an_ado_ticket_still_reports_its_origin(client):
 ])
 def test_creation_demands_exactly_one_source(client, body):
     assert client.post("/tickets", json=body).status_code == 400
+
+
+# --- Solicitud sin ticket: el runner (spec §4.3) ---
+
+
+def test_a_request_run_projects_the_file_and_names_it(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    t = client.post("/tickets", json={"request": "Formulario de clientes",
+                                      "project": "Demo"}).json()
+    client.post(f"/tickets/{t['id']}/run", json={})
+    req = tmp_path / "repo" / "docs" / "tickets" / f"{t['ado_id']}-request.md"
+    assert req.read_text(encoding="utf-8") == "Formulario de clientes"
+    prompt = _prompt_from(cap)
+    # Run 3320 taught that what the prompt doesn't name, the agent invents: both the
+    # file's name AND the negation of the work item have to travel.
+    assert f"{t['ado_id']}-request.md" in prompt
+    assert "does not exist and must not be searched for" in prompt
+
+
+def test_an_ado_run_gets_no_request_block(client, monkeypatch, tmp_path):
+    """The twin. Without it the block could travel in EVERY prompt and nobody would
+    notice — and the negation would tell a real work item not to be read."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "must not be searched for" not in _prompt_from(cap)
+    assert not (tmp_path / "repo" / "docs" / "tickets" / "3311-request.md").exists()
+
+
+def test_the_request_file_is_rewritten_from_the_db(client, monkeypatch, tmp_path):
+    """The DB is the source of truth; the file is a projection. An edited request
+    must never leave a stale file behind."""
+    _use_fake_claude(monkeypatch)
+    t = client.post("/tickets", json={"request": "Texto original",
+                                      "project": "Demo"}).json()
+    client.post(f"/tickets/{t['id']}/run", json={})
+    req = tmp_path / "repo" / "docs" / "tickets" / f"{t['ado_id']}-request.md"
+    req.write_text("corrupto", encoding="utf-8")
+    client.post(f"/tickets/{t['id']}/run", json={})
+    assert req.read_text(encoding="utf-8") == "Texto original"
+
+
+def test_brief_also_projects_the_request(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch)
+    t = client.post("/tickets", json={"request": "Front y back",
+                                      "project": "Demo"}).json()
+    client.post(f"/tickets/{t['id']}/run", json={"phase": "brief"})
+    assert (tmp_path / "repo" / "docs" / "tickets" / f"{t['ado_id']}-request.md").exists()
+
+
+def test_design_does_not_write_the_request_file(client, monkeypatch, tmp_path):
+    """Downstream phases consume the analysis, not the request; and the runner must
+    not acquire the habit of writing into the repo near the clean-tree guard."""
+    _use_fake_claude(monkeypatch)
+    t = client.post("/tickets", json={"request": "Formulario",
+                                      "project": "Demo"}).json()
+    client.post(f"/tickets/{t['id']}/run", json={"phase": "design"})
+    assert not (tmp_path / "repo" / "docs" / "tickets" / f"{t['ado_id']}-request.md").exists()
+
+
+def test_a_request_run_keeps_the_mcp(client, monkeypatch):
+    """Spec §4.3(b): the MCP stays — a request may cite real work items ("like bug
+    #3271") and step 6 of the skill needs it. The prompt negation guards the main id."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    t = client.post("/tickets", json={"request": "como el bug 3271",
+                                      "project": "Demo"}).json()
+    client.post(f"/tickets/{t['id']}/run", json={})
+    assert "mcp__azure-devops" in cap["argv"]
+
+
+def test_implement_branches_on_the_request_key(client, monkeypatch, tmp_path):
+    """`BRANCH_FMT` and `prepare_branch` must take the string key as-is."""
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/R-1-x/tasks.md")
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    t = client.post("/tickets", json={"request": "Formulario",
+                                      "project": "Demo"}).json()
+    client.post(f"/tickets/{t['id']}/run", json={"phase": "implement"})
+    run = client.get(f"/tickets/{t['id']}").json()["runs"][0]
+    assert run["branch"] == f"ticket-agent/{t['ado_id']}"
