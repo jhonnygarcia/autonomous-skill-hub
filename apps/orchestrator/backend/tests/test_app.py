@@ -2393,3 +2393,85 @@ def test_implement_branches_on_the_request_key(client, monkeypatch, tmp_path):
     client.post(f"/tickets/{t['id']}/run", json={"phase": "implement"})
     run = client.get(f"/tickets/{t['id']}").json()["runs"][0]
     assert run["branch"] == f"ticket-agent/{t['ado_id']}"
+
+
+# --- Journal por ticket (spec §4.7) ---
+
+
+def test_the_journal_gets_a_line_per_closed_run(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/9-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 9, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    _use_fake_claude(monkeypatch,
+                     stamp="parcial — openspec/changes/9-x · falta decidir persistencia")
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    _use_fake_claude(monkeypatch)   # no stamp → the run closes as error/nada
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    text = (tmp_path / "repo" / "docs" / "tickets" / "9-journal.md").read_text(encoding="utf-8")
+    corridas = text.split("## Hallazgos")[0]
+    assert " · analyze · ok · docs/tickets/9-analysis.md" in corridas
+    assert " · design · parcial · openspec/changes/9-x" in corridas
+    assert "· reserva: falta decidir persistencia" in corridas
+    assert " · design · nada · " in corridas    # error runs are exactly what a
+    assert text.startswith("# Journal — 9")     # returning human wants to see
+
+
+def test_the_journal_lines_stay_out_of_the_findings(client, monkeypatch, tmp_path):
+    """The skills append findings at the END of the file; the runner has to insert
+    its line BEFORE `## Hallazgos`, or every new run buries itself among findings.
+    Mutation that must break this: replacing the insert with a plain append."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/9-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 9, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    j = tmp_path / "repo" / "docs" / "tickets" / "9-journal.md"
+    j.write_text(j.read_text(encoding="utf-8") + "- hallazgo previo\n", encoding="utf-8")
+    client.post(f"/tickets/{tid}/run", json={})
+    corridas, hallazgos = j.read_text(encoding="utf-8").split("## Hallazgos")
+    assert corridas.count(" · analyze · ") == 2
+    assert "- hallazgo previo" in hallazgos
+
+
+def test_the_orchestrated_prompt_claims_the_journal(client, monkeypatch):
+    """Two possible writers of a run line (skill standalone, runner orchestrated).
+    Without this phrase every orchestrated run would come out twice."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 9, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "don't write a run line yourself" in _prompt_from(cap)
+
+
+def _spy_all_argv(monkeypatch):
+    """Every spawn, in order — the fan-out launches several."""
+    import asyncio
+    calls = []
+    original = asyncio.create_subprocess_exec
+
+    async def spy(*args, **kwargs):
+        calls.append(args)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    return calls
+
+
+def test_the_survey_children_also_hear_the_claim(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    calls = _spy_all_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 41, "project": "Demo"}).json()["id"]
+    _write_brief(tmp_path, 41)
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    child_prompts = [c[c.index("-p") + 1] for c in calls]
+    assert child_prompts and all(
+        "don't write a run line yourself" in p for p in child_prompts)
+
+
+def test_the_journal_is_a_record_not_an_input(client, monkeypatch, tmp_path):
+    """Deleting it must change nothing about a later phase: the analysis and the
+    plan are the interfaces. If this ever fails, the journal became load-bearing."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/9-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 9, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    (tmp_path / "repo" / "docs" / "tickets" / "9-journal.md").unlink()
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    assert client.get(f"/tickets/{tid}").json()["runs"][0]["status"] == "success"

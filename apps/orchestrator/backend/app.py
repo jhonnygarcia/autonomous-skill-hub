@@ -470,6 +470,15 @@ REQUEST_PROMPT = (
     "other document in the repo.")
 NO_BRIEF_REASON = (
     "no existe el brief de la fase anterior; corre primero la fase «brief»")
+JOURNAL_REL = "docs/tickets/{ado_id}-journal.md"
+JOURNAL_HEADER = "# Journal — {ado_id}\n\n## Corridas\n\n## Hallazgos\n"
+# Prompt-facing. The skills know how to write their own run line — that is what makes
+# the journal exist in plugin-only sessions. Orchestrated, this phrase claims the run
+# line for the runner, whose line is richer (duration, branch, session); otherwise
+# every run would come out twice. Findings stay the skill's either way.
+JOURNAL_CLAIM = (
+    "\n\nThe runner keeps the `## Corridas` section of the journal for this run; "
+    "don't write a run line yourself. `## Hallazgos` is still yours.")
 SURVEY_PROMPT = (
     "{command} {ado_id}\n\n"
     "You are rooted in the repo `{label}` ({path}), and this session is the only one "
@@ -817,6 +826,37 @@ def seconds(start: str | None, end: str | None) -> int | None:
     if not start or not end:
         return None
     return int((datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds())
+
+
+def append_journal(ticket: dict, phase: str, state: str, detail: str,
+                   note: str | None = None, duration_s: int | None = None,
+                   branch: str | None = None, resumed_from: str | None = None) -> None:
+    """One line per closed run — error runs included, with their reason: it's exactly
+    what a returning human wants to see. Inserted at the end of `## Corridas`, i.e.
+    right before `## Hallazgos`, so that section keeps growing at the end of the file
+    where the skills append.
+
+    A record, never an input: no phase reads this file (a test guards that), and a
+    failure to write it must never take down the run bookkeeping around it.
+    """
+    p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
+    try:
+        text = p.read_text(encoding="utf-8") if p.exists() else \
+            JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
+        mins, secs = divmod(duration_s or 0, 60)
+        line = (f"{now()[:10]} · {phase} · {state} · {detail}"
+                + (f" · {mins}m{secs:02d}s" if duration_s is not None else "")
+                + (f" · rama {branch}" if branch else "")
+                + (f" · ← resume de {resumed_from}" if resumed_from else "")
+                + "\n"
+                + (f"   · reserva: {note}\n" if note else ""))
+        mark = "## Hallazgos"
+        i = text.find(mark)
+        text = text + line if i < 0 else text[:i] + line + text[i:]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    except OSError:
+        pass  # ponytail: a record that can't be written is a lost line, not a lost run
 
 
 def stamp_stat(repo: str, rel: str) -> dict:
@@ -1203,7 +1243,8 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                       resume: bool = False):
     async with RUN_LOCK:  # ponytail: global lock, could go per-repo if it ever hurts
         log_path = LOGS_DIR / f"{run_id}.log"
-        set_run(run_id, status="running", log_path=str(log_path), started_at=now())
+        started = now()
+        set_run(run_id, status="running", log_path=str(log_path), started_at=started)
         set_ticket(ticket["id"])
         # Repo preparation goes HERE, under the lock and right before launching the
         # subprocess, and not only in the POST. The POST's still exists —it's the one
@@ -1229,6 +1270,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     log.write(f"[orchestrator] {reason}\n")
                 set_run(run_id, status="error", finished_at=now(),
                         artifact_state="nada", artifact_path=reason)
+                append_journal(ticket, phase, "nada", reason)
                 set_ticket(ticket["id"])
                 return
             # The branch that gets saved is the one prepared under the lock, not one
@@ -1246,6 +1288,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     log.write(f"[orchestrator] {NO_SURVEYS_REASON}\n")
                 set_run(run_id, status="error", finished_at=now(),
                         artifact_state="nada", artifact_path=NO_SURVEYS_REASON)
+                append_journal(ticket, phase, "nada", NO_SURVEYS_REASON)
                 set_ticket(ticket["id"])
                 return
         extras = normalize_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
@@ -1266,7 +1309,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # dropped too: it's already in that context.
             # The stamp reminder is not optional: the runner demands the stamp on
             # every run, and without it a good continuation is marked as an error.
-            prompt = (instructions or "") + RESUME_STAMP_REMINDER
+            prompt = (instructions or "") + RESUME_STAMP_REMINDER + JOURNAL_CLAIM
             set_run(run_id, resumed_from=prev)
         else:
             prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
@@ -1286,6 +1329,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     missing=(f"Mounted but NOT surveyed: {', '.join(missing)} — say so in "
                              "the analysis.\n") if missing else "")
             prompt += adjustment_text(phase, noun, instructions)
+            prompt += JOURNAL_CLAIM
         # The fan-out replaces the single child with one per routed repo. It's built
         # before argv because each child gets its own prompt, its own cwd and its own
         # mounts — nothing of the single-child path survives except the flags.
@@ -1297,6 +1341,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     log.write(f"[orchestrator] {NO_BRIEF_REASON}: {brief_path}\n")
                 set_run(run_id, status="error", finished_at=now(),
                         artifact_state="nada", artifact_path=NO_BRIEF_REASON)
+                append_journal(ticket, phase, "nada", NO_BRIEF_REASON)
                 set_ticket(ticket["id"])
                 return
             brief = brief_path.read_text(encoding="utf-8", errors="replace")
@@ -1313,6 +1358,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     command=PHASE_COMMANDS[phase], ado_id=ticket["ado_id"],
                     label=label, path=path, out=out, brief=brief)
                 child_prompt += adjustment_text(phase, noun, instructions)
+                child_prompt += JOURNAL_CLAIM
                 children.append((label, path, claude_cmd() + [
                     "-p", child_prompt,
                     "--output-format", "stream-json", "--verbose",
@@ -1386,8 +1432,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         if state == "nada":
             ok = False
         path, note = split_reserve(state, rest)
-        set_run(run_id, status="success" if ok else "error", finished_at=now(),
+        fin = now()
+        set_run(run_id, status="success" if ok else "error", finished_at=fin,
                 artifact_state=state, artifact_path=path, artifact_note=note)
+        append_journal(ticket, phase, state, path, note,
+                       seconds(started, fin), branch, prev)
         # The title travels with the analysis, so it only gets read when that phase
         # closes with a footprint. `title` is only written when one is found: a re-run
         # that comes out worse must not erase the title the previous one left.
