@@ -1,8 +1,8 @@
 # Project status — Autonomous Skill Hub
 
 > Living document. Update it when closing each milestone or making a decision.
-> Last updated: 2026-08-11 (**UI redesign of forms and presentation**, second round
-> of "it isn't intuitive" — this one on the forms and the feedback)
+> Last updated: 2026-08-14 (**la solicitud sin ticket y el journal**, plugin
+> **v0.10.0**, 217 tests backend)
 
 ## Purpose
 
@@ -640,8 +640,84 @@ didn't mention `apps/orchestrator/` at all — half the repo. `CLAUDE.md`'s phas
 listed three commands. `how-it-works.md` was stale for a reason that predates this
 session: it described how a per-phase model *would* be built, days after it shipped.
 
+## Décima sesión — 2026-08-14: la solicitud sin ticket, y el journal
+
+Plan de 7 tareas ejecutado completo (6 de implementación + esta, la de
+documentación). Plugin **v0.10.0**, **217 tests backend** (eran 199 al cerrar la
+novena sesión: 18 nuevos, uno por cada comportamiento de la lista de verificación
+del diseño), build y lint sin cambios en la línea base (dos warnings, los mismos de
+siempre, en `badge.tsx` y `button.tsx`). Rama `feat/solicitud-sin-ticket`, sin mergear
+a `main` todavía.
+
+**Qué se construyó.** Dos formas de entrar a la etapa 1 sin que la 2 y la 3 se
+enteren — exactamente la misma garantía que ya sostenía las dos rutas de fase 1 entre
+sí. `POST /tickets` acepta `{ado_id, project}` o `{request, project}`, XOR estricto;
+una solicitud acuña su propia llave `R-<rowid>` del `lastrowid` de su fila, y esa
+llave reparte el espacio de nombres con el modo solo-plugin: el orquestador solo
+acuña números, un humano tecleando sin orquestador elige un slug — la colisión entre
+los dos es imposible sin coordinar nada (diseño §3.1). El runner proyecta la
+solicitud a `docs/tickets/<id>-request.md` en el repo primario, solo antes de
+`analyze` y `brief`, reescrita desde la BD en cada corrida; el MCP se queda encendido
+—se consideró quitarlo y se descartó, porque una solicitud puede citar un work item
+real— y quien niega el work item principal es el prompt (`REQUEST_PROMPT`), no una
+resta de herramientas. Dos skills (`ticket-comprehension`, `ticket-brief`) aprendieron
+la rama por llave `R-` — el disparador es la llave y la existencia del archivo, no un
+bloque que solo el runner inyecta, que es lo que hace que el modo solo-plugin
+funcione sin nada del orquestador (§4.4, §4.6). Y `analyze` en modo standalone acepta
+prosa directa: deriva su propio slug, escribe su propio archivo, sigue.
+
+**El journal es la pieza nueva que no estaba en el pedido original del humano y
+terminó siendo la mitad del cambio.** `docs/tickets/<id>-journal.md`, para tickets de
+Azure y solicitudes por igual: `## Corridas` la escribe el runner —cuatro sitios de
+escritura, tres retornos tempranos más el cierre principal, con inserción antes del
+encabezado `## Hallazgos` para que esa sección siga creciendo por el final— y
+`## Hallazgos` la alimentan las skills con lo que encuentran fuera del alcance de su
+propio entregable. `JOURNAL_CLAIM` le dice a la skill que el runner ya se hizo cargo
+de `## Corridas` en esta corrida, para no duplicar la línea; sin runner —sesión
+interactiva, plugin solo— la skill escribe la suya. Un test verifica que ninguna fase
+lo lee como insumo: registro, nunca autoridad.
+
+**Una desviación del diseño, decidida al planificar y no anotada en el spec original
+hasta hoy:** `repo-survey` no recibió la misma instrucción de journal que las otras
+cinco skills. Un hijo del fan-out monta solo su propio repo más un scratch dir —nunca
+el repo primario, por diseño, para no filtrarle configuración— así que no tiene cómo
+escribir en `docs/tickets/<id>-journal.md`, que vive en el repo primario. Sus
+hallazgos van al survey bajo `## Hallazgos fuera de alcance`, y es
+`analysis-consolidation` quien los traslada al journal cuando cierra. Corregido en el
+spec, §9, en esta misma sesión.
+
+**Nada de esto corrió contra un ticket real todavía.** Los 217 tests backend, el
+build y el validador del plugin son verificación mecánica —confirman que el mecanismo
+hace lo que dice que hace— pero ninguna solicitud vaga pasó por la ruta de fan-out
+para ver si el análisis vuelve con `DECIDIR` honestos o con alcance inventado, que es
+el riesgo que el propio diseño señala como el único que no cierra por construcción
+(§6). Tampoco se probó el modo solo-plugin de punta a punta en un repo real fuera de
+este hub — todo lo verificado hasta ahora es lectura de código y tests, no una sesión
+interactiva real tecleando `/ticket-agent:analyze R-algo` sin el orquestador de por
+medio.
+
+**Documentando salió una corrección al propio `CLAUDE.md`:** decía que un cambio de
+skill exige bumpear la versión «en dos lugares». Son tres — `plugin.json`, el sello de
+la plantilla de análisis en `ticket-comprehension/SKILL.md`, y el sello de la plantilla
+de recolección en `ticket-brief/SKILL.md` (`**Collected:** <date> by ticket-agent
+vX.Y.Z`), que faltaba en el texto y se descubrió recién al implementar la tarea 5 de
+este plan. Corregido.
+
 ## Immediate pending items
 
+- [ ] **A first real run of a vague request through the fan-out route.** Every check
+  so far is mechanical (217 backend tests, build, lint, the plugin validator) — none
+  of it exercises the two new rules in §4.4 of the request design (`DECIDIR` for
+  what a request doesn't say, proposed acceptance criteria, never invented ones).
+  The question the design itself names as unclosed (§6): does the analysis of a
+  vague, freely typed request come back with honest `DECIDIR`s, or with invented
+  scope that reads with the same confidence as one derived from a work item?
+- [ ] **An end-to-end test of the plugin-only mode in a real repo.** Everything
+  verified for the standalone path (`R-<slug>` keys, `analyze` deriving its own slug
+  from prose, the journal's run line written by the skill instead of the runner) was
+  verified by reading code and running tests, never by an interactive session
+  outside this hub typing `/ticket-agent:analyze R-algo` with no orchestrator
+  involved.
 - [x] ~~**Execute the multi-repo plan**~~ — **done 2026-08-13, all 16 tasks**, plugin
   v0.9.0, 199 tests green. Task 16 ran against **3320** with two real Providence repos:
   the survey rooted in the **secondary** repo located the root cause

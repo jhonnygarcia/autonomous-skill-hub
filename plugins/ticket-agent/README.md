@@ -89,6 +89,62 @@ and implicit acceptance criteria, ambiguities, context from related tickets,
 reviewed attachments, applicable project rules, affected code, risks, and missing
 information.
 
+### Starting from a request instead of a ticket
+
+Both `analyze` and `brief` also accept a request that never existed in Azure DevOps —
+a paragraph you typed instead of a work item id. Two ways to use it standalone, no
+orchestrator involved:
+
+    /ticket-agent:analyze R-form-clientes
+
+reads `docs/tickets/R-form-clientes-request.md`, which you write yourself first — if
+it's missing, the skill stops and tells you to create it. Or skip the file entirely:
+
+    /ticket-agent:analyze necesito un formulario nuevo que persista clientes...
+
+`analyze` accepts prose directly. If what you pass is neither a work item number nor
+an `R-<key>`, it derives a short slug from the text, writes it verbatim to
+`docs/tickets/R-<slug>-request.md` itself (picking a different slug rather than
+overwriting one that already exists), and continues from there. `brief` doesn't do
+this — the fan-out it starts is manual standalone anyway, so there's no orchestrator
+minting a key ahead of it — it always needs an existing `R-<key>`.
+
+The key's shape tells you who minted it: the orchestrator only ever mints numbers
+(`R-7`, from a row id), so a number always means the request was created from the
+UI. A slug (`R-form-clientes`) always means a human chose it by hand, standalone.
+The two can't collide with each other because one is numeric and the other isn't —
+nothing has to coordinate that.
+
+**With a request, the MCP is optional.** Nothing stops the skill from reading the
+work items the request cites by id ("like we did in 3271") or searching the wiki —
+both still happen. But if the MCP isn't connected, because the project isn't really
+backed by Azure DevOps, those citations and the wiki search land in the analysis
+under "Missing information" with that as the stated reason, and the analysis still
+finishes: the request file is the source, the MCP is supplementary.
+
+### The journal
+
+`docs/tickets/<id>-journal.md`, in the primary repo, for a ticket or a request
+alike — what ran, when, and what turned up along the way. Two sections, and each has
+one writer:
+
+    # Journal — R-7
+
+    ## Corridas
+    2026-08-14 · analyze · ok · docs/tickets/R-7-analysis.md · 6m12s
+
+    ## Hallazgos
+    - AR auto-marks BilledOn on opening the screen (UpdateArReadyToProcessCommand.cs:36-43)
+
+`## Corridas` is the run log — one line per closed phase. Orchestrated, the runner
+writes it (duration, branch, resumed-from session included); running the plugin
+standalone, with no runner to write it, the skill writes its own line at close.
+`## Hallazgos` is always the skill's: whatever it finds outside its own
+deliverable's scope goes there as a bullet, because that's the one place today that
+doesn't have a home for it otherwise. Neither section is read back by any phase as
+an input — it's a record for the human who returns to the ticket tomorrow, not a
+second source of truth competing with the analysis or the plan.
+
 ### When the ticket spans more than one repo
 
 `analyze` runs in **one** session rooted in the main repo. That session loads the

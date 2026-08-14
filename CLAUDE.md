@@ -230,6 +230,57 @@ design in `docs/superpowers/specs/2026-08-12-...`.
 when created** — the same way a line item locks in a price. That's why deleting a
 project doesn't break old tickets, and there's no FK between the two tables.
 
+**`POST /tickets` accepts one of two shapes, never both.** `{ado_id, project}` is a
+work item, as always; `{request, project}` is a free-text request that replaces it —
+a paragraph the human typed instead of an Azure DevOps id. `create_ticket` enforces
+the XOR: both fields or neither is `400`, and a `request` that's empty or pure
+whitespace is `400` too. A request's key is minted after the `INSERT`, from the row's
+own `lastrowid` — `UPDATE tickets SET ado_id = 'R-' || id` — instead of a second
+counter, because the row id is already unique and monotonic and a second counter is a
+second place to drift. The `R-` prefix isn't cosmetic: without it, local request 7 and
+work item #7 write the same `docs/tickets/<id>-analysis.md`, and the second silently
+overwrites the first — the same collision `consolidate` already caused once between
+the two Phase-1 routes (see `docs/STATUS.md`, ninth session). The prefix also splits
+the namespace between the two ways of minting a key: the orchestrator mints only
+numbers (`R-7`); a human running the plugin standalone, with no orchestrator to mint
+anything, picks a word instead (`R-form-clientes`, see the plugin's README) — numeric
+against slug, so the two modes can never collide without coordinating anything.
+There's no `source` column: `origen` in `ticket_out` (`"ado" | "local"`) is derived
+from `request IS NOT NULL`, because a stored copy of something derivable is a copy
+that can disagree with it. And `ado_id`'s type follows origin, not table: an Azure
+ticket carries an `int`, a request carries the `str` `"R-7"` — SQLite's column
+affinity stores both without conversion, so nothing else needed to change.
+
+**The request is projected to a file, and only for the two phases that read it.**
+The database stays the source of truth; before launching `analyze` or `brief`,
+`execute_run` writes `ticket["request"]` to `docs/tickets/<id>-request.md` in the
+primary repo, rewritten from the DB on every launch so editing the request in the UI
+and relaunching never leaves a stale file behind. Only those two phases: downstream
+phases consume the analysis, not the request, and `implement` is where the runner
+reasons about the clean-tree guard (`check_clean` in the POST, `prepare_repos` under
+the lock) — adding a runner-side write between those two checks is a habit not worth
+acquiring for a file that phase never reads anyway. The MCP is **not** removed for a
+request — the first draft of this design did, and it was wrong: a request can cite a
+real work item ("like we did in 3271"), and the skill's step 6 still has to read it.
+So `PHASE_MCP` is untouched, and the prompt does the negating instead —
+`REQUEST_PROMPT` names the file and states plainly that there is no work item for
+this request and it must not be searched for. Naming the file **and** denying the
+work item, both: run 3320 taught that what a prompt doesn't name, the agent invents.
+
+**The journal is a record, never an input.** `docs/tickets/<id>-journal.md`, in the
+primary repo, for Azure tickets and requests alike — the run history that survives a
+wiped database (it happened once, 2026-08-11) and the only trace a plugin-only
+session leaves. `append_journal` inserts one line per closed run under `## Corridas`,
+right before the `## Hallazgos` heading, so that section keeps growing at the file's
+end where the skills append their own out-of-scope findings; it runs at all four
+places a run closes (three early returns plus the main close), including error runs,
+with their reason. `JOURNAL_CLAIM`, appended to the fresh, resumed and fan-out-child
+prompts, tells the skill the runner already owns `## Corridas` for this run so it
+doesn't write a second, duplicate line — the skill still owns `## Hallazgos`. No
+phase reads the journal to decide anything: a test guards that deleting it changes
+nothing about a subsequent `design` run, because a file a phase reads as authority
+would be a second source of truth free to disagree with the first.
+
 **`org` and `project` are labels here, not configuration.** The runner never exports
 `ADO_ORG` and never puts the project name in the prompt: the subprocess inherits the
 backend's environment and Claude Code resolves both from the *target repo's*
@@ -328,10 +379,13 @@ Env var overrides (used by tests): `ORCH_DB`, `ORCH_LOGS`,
   committed here never reaches the installed plugin and the test comes out false.
   The same applies to anything else the install copies — `.mcp.json` above all: an
   auth mode nobody can pull is an auth mode that doesn't exist.
-  There are **two** places, and the second one drifts silently: the analysis template
+  There are **three** places, and the last two drift silently: the analysis template
   in `ticket-comprehension/SKILL.md` stamps `by ticket-agent vX.Y.Z` so the written
-  file proves which version produced it. It sat at `v0.5.2` while the plugin was at
-  `v0.7.1` — a stamp that lies is worse than no stamp. Bump both.
+  file proves which version produced it, and the collection template in
+  `ticket-brief/SKILL.md` stamps the same thing (`**Collected:** <date> by
+  ticket-agent vX.Y.Z`, found missing during the solicitud-sin-ticket work). The
+  analysis stamp already sat at `v0.5.2` while the plugin was at `v0.7.1` — a stamp
+  that lies is worse than no stamp. Bump all three.
 - **Never `uvicorn --reload` on Windows**: the reloader leaves orphaned children
   holding port 8000, and the backend keeps serving stale code without warning. When
   something behaves oddly, suspect the process before the code.

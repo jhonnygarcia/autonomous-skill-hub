@@ -471,7 +471,7 @@ construcción.
 | `apps/orchestrator/backend/tests/` | los de §8 |
 | `plugins/ticket-agent/skills/ticket-comprehension/SKILL.md` | rama de fuente + 2 reglas + journal (línea standalone y Hallazgos) + sello de versión |
 | `plugins/ticket-agent/skills/ticket-brief/SKILL.md` | la misma rama de fuente + journal |
-| `plugins/ticket-agent/skills/{change-planning,change-implementation,repo-survey,analysis-consolidation}/SKILL.md` | la instrucción del journal (línea standalone y Hallazgos) |
+| `plugins/ticket-agent/skills/{change-planning,change-implementation,repo-survey,analysis-consolidation}/SKILL.md` | la instrucción del journal (línea standalone y Hallazgos) — **`repo-survey` recibió una variante distinta, decidido al planificar**: un hijo del fan-out monta solo su propio repo más un scratch dir, así que no puede alcanzar el journal del repo primario; sus hallazgos fuera de alcance van al survey bajo `## Hallazgos fuera de alcance`, y `analysis-consolidation` es quien los traslada al journal |
 | `plugins/ticket-agent/commands/{analyze,brief}.md` | aceptar `R-<clave>`; `analyze` además acepta prosa (§4.6) |
 | `plugins/ticket-agent/.claude-plugin/plugin.json` | `v0.10.0` |
 | `apps/orchestrator/frontend/src/{TicketList,api}.ts(x)` | el textarea y el tipo |
