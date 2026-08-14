@@ -278,12 +278,23 @@ session leaves. `append_journal` inserts one line per closed run under `## Corri
 right before the `## Hallazgos` heading, so that section keeps growing at the file's
 end where the skills append their own out-of-scope findings; it runs at all four
 places a run closes (three early returns plus the main close), including error runs,
-with their reason. `JOURNAL_CLAIM`, appended to the fresh, resumed and fan-out-child
-prompts, tells the skill the runner already owns `## Corridas` for this run so it
-doesn't write a second, duplicate line — the skill still owns `## Hallazgos`. No
+with their reason. `JOURNAL_CLAIM`, appended to the fresh and resumed prompts, tells
+the skill the runner already owns `## Corridas` for this run so it doesn't write a
+second, duplicate line — the skill still owns `## Hallazgos`. **Fan-out survey
+children don't get it**: a child mounts only its own repo and the scratch dir, never
+the primary repo where the journal lives, so a claim about a file it can't reach
+would be an instruction it can't obey; `repo-survey/SKILL.md` already tells it to put
+out-of-scope findings under `## Hallazgos fuera de alcance` in its own survey
+document, and `analysis-consolidation` carries them into the journal afterwards. No
 phase reads the journal to decide anything: a test guards that deleting it changes
 nothing about a subsequent `design` run, because a file a phase reads as authority
 would be a second source of truth free to disagree with the first.
+
+The journal is written after every run, `implement` included, so it is left
+**untracked** in the primary repo like the analysis and the plan before it. That's
+safe only because `is_dirty`'s clean-tree guard ignores `??` entries on purpose: what
+blocks `implement` is tracked work in progress, not an untracked file the tooling
+itself just wrote.
 
 **`org` and `project` are labels here, not configuration.** The runner never exports
 `ADO_ORG` and never puts the project name in the prompt: the subprocess inherits the

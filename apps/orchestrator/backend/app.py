@@ -390,7 +390,7 @@ def check_clean(repos: list[str]) -> None:
 BRANCH_FMT = "ticket-agent/{ado_id}"
 
 
-def prepare_branch(repo: str, ado_id: int) -> str:
+def prepare_branch(repo: str, ado_id: int | str) -> str:
     """Creates the phase's branch, or switches to it if it already exists.
 
     The runner creates it, not the skill, for the same reason the stamp exists: a limit
@@ -510,7 +510,7 @@ def ticket_repos(t) -> list[str]:
         e["path"] for e in normalize_dirs(json.loads(t["extra_dirs"] or "[]"))]
 
 
-def prepare_repos(repos: list[str], ado_id: int) -> str | None:
+def prepare_repos(repos: list[str], ado_id: int | str) -> str | None:
     """Clean-tree guard on ALL of them and, only if all pass, the branch on all of them.
 
     The two steps go in this order and not interleaved repo by repo: if one were
@@ -794,6 +794,11 @@ def create_ticket(body: TicketIn):
     has_request = bool(body.request and body.request.strip())
     if has_ado == has_request:
         raise HTTPException(400, "Manda ado_id o request, y exactamente uno de los dos")
+    if has_request:
+        # Stored stripped, not just validated stripped: a caller that skips the UI
+        # (curl, the plugin) could otherwise leave leading/trailing whitespace that
+        # lands verbatim in the projected request file.
+        body.request = body.request.strip()
     ts = now()
     with db() as c:
         if has_ado:
@@ -841,7 +846,7 @@ def append_journal(ticket: dict, phase: str, state: str, detail: str,
     """
     p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
     try:
-        text = p.read_text(encoding="utf-8") if p.exists() else \
+        text = p.read_text(encoding="utf-8", errors="replace") if p.exists() else \
             JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
         mins, secs = divmod(duration_s or 0, 60)
         line = (f"{now()[:10]} · {phase} · {state} · {detail}"
@@ -1358,7 +1363,12 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     command=PHASE_COMMANDS[phase], ado_id=ticket["ado_id"],
                     label=label, path=path, out=out, brief=brief)
                 child_prompt += adjustment_text(phase, noun, instructions)
-                child_prompt += JOURNAL_CLAIM
+                # No JOURNAL_CLAIM here: a survey child mounts only its own repo and the
+                # scratch dir, never the primary repo where the journal lives, so a claim
+                # about `## Corridas` is an instruction it cannot obey. `repo-survey`
+                # already tells it where findings outside its repo belong (`## Hallazgos
+                # fuera de alcance`, in the survey document itself); consolidation is what
+                # carries them to the journal afterwards.
                 children.append((label, path, claude_cmd() + [
                     "-p", child_prompt,
                     "--output-format", "stream-json", "--verbose",

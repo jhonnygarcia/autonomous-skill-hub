@@ -2455,7 +2455,13 @@ def _spy_all_argv(monkeypatch):
     return calls
 
 
-def test_the_survey_children_also_hear_the_claim(client, monkeypatch, tmp_path):
+def test_the_survey_children_never_hear_the_journal_claim(client, monkeypatch, tmp_path):
+    """A survey child mounts only its own repo and the scratch dir, never the primary
+    repo where the journal lives — so JOURNAL_CLAIM, which tells a session to leave
+    `## Corridas` to the runner and keep `## Hallazgos` for itself, is an instruction
+    about a file the child cannot even reach. `repo-survey` already tells it where
+    out-of-scope findings belong (in the survey document), so the runner must stay
+    silent here rather than say something that competes with the skill."""
     _use_fake_claude(monkeypatch, stamp="ok — survey.md")
     calls = _spy_all_argv(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 41, "project": "Demo"}).json()["id"]
@@ -2463,7 +2469,7 @@ def test_the_survey_children_also_hear_the_claim(client, monkeypatch, tmp_path):
     client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
     child_prompts = [c[c.index("-p") + 1] for c in calls]
     assert child_prompts and all(
-        "don't write a run line yourself" in p for p in child_prompts)
+        "don't write a run line yourself" not in p for p in child_prompts)
 
 
 def test_the_journal_is_a_record_not_an_input(client, monkeypatch, tmp_path):
