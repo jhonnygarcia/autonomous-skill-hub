@@ -13,6 +13,17 @@ Produces a complete, faithful analysis of a work item. Two golden rules:
    `file:line`, a commit id, or the command that produced it. Without a verified
    source, don't write it down.
 
+For a local request (`R-` key), two more rules, siblings of the golden ones:
+
+3. **What the request doesn't say is not deduced in silence.** A work item went
+   through refinement; a paragraph typed at 11pm did not. Every gap becomes a
+   `- [ ] **DECIDIR**` with a proposal under "Decisiones para ti", or a
+   `- [ ] **BLOQUEA**` when no default is defensible.
+4. **Acceptance criteria are proposed, never invented.** A work item brings them; a
+   request has none. Draft them and mark them as a proposal (`DECIDIR`) — never
+   present them as given. A criterion presented as given reads with the same
+   confidence as one that came from a refined work item, and nobody verifies it.
+
 ## 1. Configuration
 
 Read `.claude/ticket-agent.json` from the current project. If it doesn't exist,
@@ -20,6 +31,18 @@ stop and guide the user to create it (template in the plugin's README) — do no
 continue without it. Use `project` for all MCP queries. Also read `autonomy`.
 
 ## 2. Collection (all read-only)
+
+**Local request (`R-` key) — the source cut.** If the id starts with `R-`, there is
+no work item: the whole request is `docs/tickets/<id>-request.md`, written by the
+human who asked for it. If that file doesn't exist, stop and guide the user to
+create it (same pattern as the missing `.claude/ticket-agent.json` in step 1).
+Skip steps 1–4 below — there is no work item, no comments, no relations, no
+attachments to read. Steps 5, 6 and 7 still apply in full: search the wiki with the
+request's key terms, read every reference the request cites (a repo document by
+path, a work item by id — "like bug #3271" is a citation), and absorb the host
+project's rules. If the MCP is not connected, cited work items and the wiki go
+under "Missing information" with that cause and the analysis **continues**: the
+request file is the source; the MCP is supplementary here, not a precondition.
 
 Tools from the azure-devops MCP. **Never use any `*_write` tool.**
 
@@ -83,7 +106,7 @@ is a task failure, not an acceptable variant.
 # Analysis of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Analyzed:** <date> by ticket-agent v0.9.1
+**Analyzed:** <date> by ticket-agent v0.10.0
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)
@@ -179,6 +202,13 @@ whether their adjustment **adds** scope (where continuing saves the exploration)
 or **corrects** what you understood (where a fresh session keeps their correction
 from competing with the reasoning behind the mistake). Point at where you
 hesitated, too: that's usually what they'll want to correct.
+
+**Journal.** Findings that fall outside this deliverable's scope go as bullets at
+the end of `docs/tickets/<id>-journal.md`, under `## Hallazgos` (create the file
+with `# Journal — <id>`, `## Corridas`, `## Hallazgos` if it doesn't exist). Close
+by appending one line to `## Corridas` — `<date> · analyze · <ok|parcial|nada> ·
+<path>` — **unless the prompt says the runner keeps the `## Corridas` section**, in
+which case the run line is the runner's and only `## Hallazgos` is yours.
 
 **Mandatory closing rule.** The last line of your summary —with nothing after
 it— has to be exactly this stamp, followed by the analysis path relative to the
