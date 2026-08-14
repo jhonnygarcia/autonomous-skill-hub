@@ -79,8 +79,8 @@ export default function App() {
     return fn().then(refresh).catch(e => setError(String(e)))
   }
 
-  const addTicket = (adoId: number) =>
-    project && act(() => api.create(adoId, project.name))
+  const addTicket = (body: { ado_id?: number; request?: string }) =>
+    project && act(() => api.create(body, project.name))
 
   const open = (id: number) => { setDetail(null); setView({ kind: "ticket", id }) }
   const back = () => { setDetail(null); setView({ kind: "project" }) }

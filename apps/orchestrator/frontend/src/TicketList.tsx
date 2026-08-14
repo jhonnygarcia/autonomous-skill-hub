@@ -77,30 +77,68 @@ function Stepper({ fases }: { fases: Phase[] }) {
 export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
   tickets: Ticket[]
   activeRun: ActiveRun | null
-  onAdd: (adoId: number) => void
+  onAdd: (body: { ado_id?: number; request?: string }) => void
   onOpen: (id: number) => void
   onRun: (id: number) => void
 }) {
   const [adoId, setAdoId] = useState("")
-  const add = () => { onAdd(Number(adoId)); setAdoId("") }
+  const [request, setRequest] = useState("")
+  const [mode, setMode] = useState<"ado" | "request">("ado")
+  const add = () => { onAdd({ ado_id: Number(adoId) }); setAdoId("") }
+  const addRequest = () => { onAdd({ request: request.trim() }); setRequest("") }
 
   return (
     <div className="space-y-3">
       <div className="rounded-md border border-border p-3">
-        <label htmlFor="ado-id" className="text-xs font-medium">ID del work item</label>
-        <div className="mt-1 flex gap-2">
-          <Input id="ado-id" className="w-40" placeholder="3332" value={adoId}
-                 onChange={e => setAdoId(e.target.value.replace(/\D/g, ""))}
-                 onKeyDown={e => e.key === "Enter" && adoId && add()} />
-          <Button onClick={add} disabled={!adoId}>+ Añadir</Button>
+        <div className="flex gap-1" role="tablist" aria-label="Origen del ticket">
+          {([["ado", "Ticket de Azure"], ["request", "Solicitud directa"]] as const)
+            .map(([k, label]) => (
+              <Button key={k} size="sm" role="tab" aria-selected={mode === k}
+                      variant={mode === k ? "secondary" : "ghost"}
+                      onClick={() => setMode(k)}>
+                {label}
+              </Button>
+            ))}
         </div>
-        {/* The number is not validated against Azure DevOps on purpose: the backend has
-            no ADO credentials. Saying where it comes from costs a line and does the
-            same job. */}
-        <p className="mt-2 text-xs text-muted-foreground">
-          El número del final de la URL en Azure DevOps:{" "}
-          <span className="font-mono">…/_workitems/edit/<strong>3332</strong></span>
-        </p>
+        {mode === "ado" ? (
+          <>
+            <label htmlFor="ado-id" className="mt-3 block text-xs font-medium">
+              ID del work item
+            </label>
+            <div className="mt-1 flex gap-2">
+              <Input id="ado-id" className="w-40" placeholder="3332" value={adoId}
+                     onChange={e => setAdoId(e.target.value.replace(/\D/g, ""))}
+                     onKeyDown={e => e.key === "Enter" && adoId && add()} />
+              <Button onClick={add} disabled={!adoId}>+ Añadir</Button>
+            </div>
+            {/* The number is not validated against Azure DevOps on purpose: the backend has
+                no ADO credentials. Saying where it comes from costs a line and does the
+                same job. */}
+            <p className="mt-2 text-xs text-muted-foreground">
+              El número del final de la URL en Azure DevOps:{" "}
+              <span className="font-mono">…/_workitems/edit/<strong>3332</strong></span>
+            </p>
+          </>
+        ) : (
+          <>
+            <label htmlFor="request-text" className="mt-3 block text-xs font-medium">
+              Qué necesitas
+            </label>
+            {/* Native textarea, mirroring the Input component's classes: the answer
+                arrives while the decision is being made — the placeholder IS the
+                cheapest quality lever this feature has (spec §4.5). */}
+            <textarea id="request-text" rows={4} value={request}
+                      onChange={e => setRequest(e.target.value)}
+                      placeholder={"Qué necesitas, dónde vive hoy (pantalla, módulo, repo), por qué, y cómo sabrás que quedó bien."}
+                      className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                La primera línea será el título en la lista.
+              </p>
+              <Button onClick={addRequest} disabled={!request.trim()}>+ Añadir</Button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="divide-y rounded-md border">

@@ -1,5 +1,11 @@
 export type Ticket = {
-  id: number; ado_id: number; org: string; project: string
+  id: number
+  // number for Azure work items, the string key ("R-7") for local requests — the
+  // backend returns each as stored, and every use here is display.
+  ado_id: number | string
+  origen: "ado" | "local"
+  request: string | null
+  org: string; project: string
   status: string; created_at: string; updated_at: string
   /** Read from the analysis when `analyze` closes well. `null` before that: we don't
    *  know what the ticket is about yet, and saying so is honest. */
@@ -46,7 +52,7 @@ export type TicketDetail = { ticket: Ticket; fases: Phase[]; runs: Run[]; log_ta
 // The runner runs one at a time across ALL projects: this is what lets us explain
 // why something can't be launched, instead of failing with a silent 409.
 export type ActiveRun = {
-  id: number; ticket_id: number; started_at: string | null; ado_id: number; project: string
+  id: number; ticket_id: number; started_at: string | null; ado_id: number | string; project: string
 }
 // A project has ONE list of repos and you mark which one is primary (the cwd of
 // the run). `label` isn't decorative: it travels into the agent's prompt and is
@@ -92,10 +98,10 @@ export const api = {
   artifact: (id: number, ruta: string) =>
     fetch(`/api/tickets/${id}/artefacto?ruta=${encodeURIComponent(ruta)}`)
       .then(r => json<Artifact>(r)),
-  create: (ado_id: number, project: string) =>
+  create: (body: { ado_id?: number; request?: string }, project: string) =>
     fetch("/api/tickets", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ado_id, project }),
+      body: JSON.stringify({ ...body, project }),
     }).then(r => json<Ticket>(r)),
   run: (id: number, instructions?: string, phase = "analyze", resume = false) =>
     fetch(`/api/tickets/${id}/run`, {
