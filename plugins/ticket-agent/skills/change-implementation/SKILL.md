@@ -204,6 +204,16 @@ choose between a fresh session and continuing this one — continuing preserves
 what you learned when they're **adding**, a fresh session keeps their correction
 from competing with your reasoning when they're **correcting**.
 
+**Journal.** Findings that fall outside this deliverable's scope go as bullets at
+the end of `docs/tickets/<id>-journal.md`, under `## Hallazgos` (create the file
+with `# Journal — <id>`, `## Corridas`, `## Hallazgos` if it doesn't exist). Close
+by appending one line to `## Corridas` — `<date> · implement · <ok|parcial|nada> ·
+<path>` — **unless the prompt says the runner keeps the `## Corridas` section**, in
+which case the run line is the runner's and only `## Hallazgos` is yours. In this
+phase, findings that belong to a reviewed task go to `## Review notes` in
+`tasks.md` as they do today; `## Hallazgos` in the journal is for what falls
+outside the change entirely.
+
 ## 7. Golden rules
 
 1. **Commit specific paths.** Never `git add -A` or `git add .`.

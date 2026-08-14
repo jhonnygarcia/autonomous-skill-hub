@@ -216,6 +216,13 @@ choose between a fresh session and continuing this one — continuing saves the
 exploration when they're **adding**, a fresh session keeps their correction from
 competing with your reasoning when they're **correcting**.
 
+**Journal.** Findings that fall outside this deliverable's scope go as bullets at
+the end of `docs/tickets/<id>-journal.md`, under `## Hallazgos` (create the file
+with `# Journal — <id>`, `## Corridas`, `## Hallazgos` if it doesn't exist). Close
+by appending one line to `## Corridas` — `<date> · plan · <ok|parcial|nada> ·
+<path>` — **unless the prompt says the runner keeps the `## Corridas` section**, in
+which case the run line is the runner's and only `## Hallazgos` is yours.
+
 **Mandatory closing rule.** The last line of the summary —with nothing after
 it— has to be exactly one of these three stamps, followed by the change path
 relative to the main repo (or by the reason, in the `nada` case) — **always with

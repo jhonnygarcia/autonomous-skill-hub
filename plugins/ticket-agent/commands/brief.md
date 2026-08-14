@@ -14,4 +14,5 @@ Don't analyze code. Each routed repo gets its own session, rooted in it, which
 is the only one that sees that repo's rules — doing it from here would put the
 primary repo's conventions in front of every repo.
 
-If "$ARGUMENTS" is empty or not a work item number, ask for the ID and stop.
+If "$ARGUMENTS" is empty, or is neither a work item number nor an `R-` key
+(`R-7`, `R-form-clientes`), ask for the ID and stop.

@@ -29,6 +29,17 @@ continue without it. Use `project` for all MCP queries. Also read `autonomy`.
 
 ## 2. Collection (all read-only)
 
+**Local request (`R-` key) — the source cut.** If the id starts with `R-`, there is
+no work item: the whole request is `docs/tickets/<id>-request.md`, written by the
+human who asked for it. If that file doesn't exist, stop and guide the user to
+create it. Skip the work-item steps below — there is no work item, no comments, no
+relations, no attachments to read; the brief quotes the request's own words where
+the work item's description would go, and its acceptance criteria are proposals
+(`DECIDIR`), never given. Wiki search, cited references and the host project's
+rules still apply in full. If the MCP is not connected, cited work items and the
+wiki go under "Missing information" with that cause and the brief **continues**:
+the request file is the source; the MCP is supplementary here, not a precondition.
+
 Tools from the azure-devops MCP. **Never use any `*_write` tool.**
 
 1. **Work item**: `wit_work_item` action `get` with `expand: "All"`.
@@ -86,7 +97,7 @@ this structure. Presenting it in chat without writing the file is a task failure
 # Brief of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Collected:** <date> by ticket-agent v0.9.1
+**Collected:** <date> by ticket-agent v0.10.0
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)
@@ -144,6 +155,13 @@ Say in one line what it would cost to redo this: how many relations, attachments
 and wiki pages you read. The human needs it to choose between a fresh session
 and continuing this one — and only they know whether their adjustment adds scope
 or corrects your reading.
+
+**Journal.** Findings that fall outside this deliverable's scope go as bullets at
+the end of `docs/tickets/<id>-journal.md`, under `## Hallazgos` (create the file
+with `# Journal — <id>`, `## Corridas`, `## Hallazgos` if it doesn't exist). Close
+by appending one line to `## Corridas` — `<date> · brief · <ok|parcial|nada> ·
+<path>` — **unless the prompt says the runner keeps the `## Corridas` section**, in
+which case the run line is the runner's and only `## Hallazgos` is yours.
 
 Always finish with one of these three lines, and make it the **last** one:
 

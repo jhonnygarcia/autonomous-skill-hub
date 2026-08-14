@@ -114,6 +114,12 @@ of N observations.
 
 ## 5. Closing
 
+**Journal.** This session usually can't reach the primary repo's journal — a
+fan-out child mounts only its own repo and the scratch. Findings outside the
+survey's scope still matter: put them in the survey itself under a final
+`## Hallazgos fuera de alcance` section. The consolidation reads every survey and
+carries them to the journal.
+
 Always finish with one of these three lines, and make it the **last** one:
 
     HUELLA: ok — <the path you were given>

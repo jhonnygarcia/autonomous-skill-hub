@@ -118,6 +118,16 @@ duplications), and how many decisions you left open. Under `autonomous`, the sam
 summary, flagging what you decided on your own. Any other value is treated as
 `supervised`, with a warning.
 
+**Journal.** Findings that fall outside this deliverable's scope go as bullets at
+the end of `docs/tickets/<id>-journal.md`, under `## Hallazgos` (create the file
+with `# Journal — <id>`, `## Corridas`, `## Hallazgos` if it doesn't exist). Carry
+every `## Hallazgos fuera de alcance` entry from the surveys there too — the
+children can't reach the journal; this session is the one that closes that loop.
+Close by appending one line to `## Corridas` — `<date> · consolidate ·
+<ok|parcial|nada> · <path>` — **unless the prompt says the runner keeps the
+`## Corridas` section**, in which case the run line is the runner's and only
+`## Hallazgos` is yours.
+
 Always finish with one of these three lines, and make it the **last** one:
 
     HUELLA: ok — docs/tickets/<id>-analysis.md
