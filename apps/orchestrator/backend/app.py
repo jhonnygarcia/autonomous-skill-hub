@@ -610,6 +610,9 @@ def init_db() -> None:
             # needed to name every repo to the routing — an unlabelled primary can't be
             # written on a `SONDEAR:` line. Copied on creation like the rest.
             "ALTER TABLE tickets ADD COLUMN repo_label TEXT NOT NULL DEFAULT ''",
+            # The free-text request that replaces the work item when there is one.
+            # NULL for ADO tickets; its presence is what `origen` derives from.
+            "ALTER TABLE tickets ADD COLUMN request TEXT",
         ):
             try:
                 c.execute(alter)
@@ -651,7 +654,11 @@ class RutaIn(BaseModel):
 
 
 class TicketIn(BaseModel):
-    ado_id: int
+    # Exactly one of the two: an Azure work item id, or the free-text request that
+    # replaces it. `create_ticket` enforces the XOR — the Spanish detail belongs in
+    # the HTTPException the UI shows, not buried in a validator.
+    ado_id: int | None = None
+    request: str | None = None
     project: str
 
 
@@ -766,14 +773,34 @@ def create_ticket(body: TicketIn):
     proj = get_project(body.project)
     if not proj:
         raise HTTPException(400, f"El proyecto '{body.project}' no está dado de alta")
+    has_ado = body.ado_id is not None
+    has_request = bool(body.request and body.request.strip())
+    if has_ado == has_request:
+        raise HTTPException(400, "Manda ado_id o request, y exactamente uno de los dos")
     ts = now()
     with db() as c:
-        cur = c.execute(
-            "INSERT INTO tickets(ado_id, org, project, repo_path, repo_label, extra_dirs, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
-            (body.ado_id, proj["org"], proj["project"], proj["repo_path"],
-             proj["repo_label"], proj["extra_dirs"], ts, ts),
-        )
+        if has_ado:
+            cur = c.execute(
+                "INSERT INTO tickets(ado_id, org, project, repo_path, repo_label, extra_dirs, "
+                "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (body.ado_id, proj["org"], proj["project"], proj["repo_path"],
+                 proj["repo_label"], proj["extra_dirs"], ts, ts),
+            )
+        else:
+            # Provisional title so the list doesn't show a bare key until the first
+            # run; the analysis overwrites it later, same as for ADO tickets.
+            title = next(ln.strip() for ln in body.request.splitlines() if ln.strip())[:80]
+            cur = c.execute(
+                "INSERT INTO tickets(ado_id, org, project, repo_path, repo_label, extra_dirs, "
+                "created_at, updated_at, request, title) VALUES('',?,?,?,?,?,?,?,?,?)",
+                (proj["org"], proj["project"], proj["repo_path"], proj["repo_label"],
+                 proj["extra_dirs"], ts, ts, body.request, title),
+            )
+            # The key is minted from the row id: already unique, already monotonic —
+            # a second counter would be a second thing to drift. The `R-` prefix keeps
+            # local request 7 from colliding with work item #7 on disk and branches.
+            # SQLite's INTEGER affinity stores 'R-7' as text untouched.
+            c.execute("UPDATE tickets SET ado_id='R-'||id WHERE id=?", (cur.lastrowid,))
     t = ticket_row(cur.lastrowid)
     return ticket_out(t, phases_for(t, [], with_footprint=False))
 
@@ -979,7 +1006,10 @@ def ticket_out(t: sqlite3.Row, phases: list[dict]) -> dict:
     # `fases` travels here so every producer (POST /tickets, GET /tickets, and the
     # `.ticket` object inside GET /tickets/{tid}) agrees: the frontend's `Ticket` type
     # declares it required, and `json<T>()` never checks that at runtime.
-    return {**dict(t), "status": folded_status(phases), "fases": phases}
+    d = dict(t)
+    # Derived, never stored: a stored copy could disagree with `request`.
+    d["origen"] = "local" if d.get("request") else "ado"
+    return {**d, "status": folded_status(phases), "fases": phases}
 
 
 @app.get("/tickets")

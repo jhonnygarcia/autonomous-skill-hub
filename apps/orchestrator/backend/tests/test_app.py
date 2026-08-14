@@ -2276,3 +2276,37 @@ def test_progress_is_not_a_second_door_to_disk(client, tmp_path):
         c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,'implement','running')",
                   (tid,))
     assert _implement(client, tid).get("progreso") is None
+
+
+# --- Solicitud sin ticket: creación y llave (spec §3.1, §4.1, §4.2) ---
+
+
+def test_a_request_without_a_ticket_mints_a_prefixed_key(client):
+    r = client.post("/tickets", json={
+        "request": "Necesito un formulario que persista clientes\ncon validación",
+        "project": "Demo"})
+    assert r.status_code == 201
+    t = r.json()
+    # The prefix is load-bearing: without it, local request 7 and work item #7
+    # write the same analysis file in the same repo.
+    assert t["ado_id"] == f"R-{t['id']}"
+    assert t["origen"] == "local"
+    # Provisional title from the first non-empty line; the analysis overwrites it
+    # later exactly like it does for ADO tickets.
+    assert t["title"] == "Necesito un formulario que persista clientes"
+
+
+def test_an_ado_ticket_still_reports_its_origin(client):
+    t = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()
+    assert t["ado_id"] == 3311        # int, exactly as before — see plan deviation 1
+    assert t["origen"] == "ado"
+    assert t["title"] is None
+
+
+@pytest.mark.parametrize("body", [
+    {"project": "Demo"},                                   # neither
+    {"ado_id": 1, "request": "algo", "project": "Demo"},   # both
+    {"request": "   \n  ", "project": "Demo"},             # blank counts as absent
+])
+def test_creation_demands_exactly_one_source(client, body):
+    assert client.post("/tickets", json=body).status_code == 400
