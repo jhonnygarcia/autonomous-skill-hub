@@ -109,11 +109,10 @@ overwriting one that already exists), and continues from there. `brief` doesn't 
 this — the fan-out it starts is manual standalone anyway, so there's no orchestrator
 minting a key ahead of it — it always needs an existing `R-<key>`.
 
-The key's shape tells you who minted it: the orchestrator only ever mints numbers
-(`R-7`, from a row id), so a number always means the request was created from the
-UI. A slug (`R-form-clientes`) always means a human chose it by hand, standalone.
-The two can't collide with each other because one is numeric and the other isn't —
-nothing has to coordinate that.
+**Pick a word, not a number.** The orchestrator mints its own keys as plain numbers
+(`R-7`); typing a number yourself risks landing on one it later mints too. A short
+slug like `R-form-clientes` avoids that on its own — no coordination needed, see
+`CLAUDE.md` for why.
 
 **With a request, the MCP is optional.** Nothing stops the skill from reading the
 work items the request cites by id ("like we did in 3271") or searching the wiki —

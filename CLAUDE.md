@@ -72,12 +72,16 @@ run** — a ticket that mounts several repos takes the second route through stag
 
 | Stage | Command | Skill | Input | Output |
 |---|---|---|---|---|
-| 1 · one repo | `/ticket-agent:analyze <id>` | `ticket-comprehension` | the work item | `docs/tickets/<id>-analysis.md` |
-| 1 · several | `/ticket-agent:brief <id>` | `ticket-brief` | the work item | `docs/tickets/<id>-brief.md` + `SONDEAR:` |
+| 1 · one repo | `/ticket-agent:analyze <id>` | `ticket-comprehension` | the work item, or `R-<key>` | `docs/tickets/<id>-analysis.md` |
+| 1 · several | `/ticket-agent:brief <id>` | `ticket-brief` | the work item, or `R-<key>` | `docs/tickets/<id>-brief.md` + `SONDEAR:` |
 | | `/ticket-agent:survey <id>` | `repo-survey` | that brief, inline | one survey per routed repo |
 | | `/ticket-agent:consolidate <id>` | `analysis-consolidation` | brief + surveys | the SAME `<id>-analysis.md` |
 | 2 | `/ticket-agent:plan <id>` | `change-planning` | that analysis | an OpenSpec change |
 | 3 | `/ticket-agent:implement <id>` | `change-implementation` | that change | commits on `ticket-agent/<id>` |
+
+`R-<key>` is a request instead of a work item — `docs/tickets/<id>-request.md`, read
+in place of the MCP; `analyze` alone also takes raw prose and derives the key itself.
+Detailed below, alongside the ticket that copies a project's data.
 
 **Both stage-1 routes end in the same file**, which is why stages 2 and 3 never learn
 which one ran, and why the list's stepper still shows three dots. `analyze` stays
