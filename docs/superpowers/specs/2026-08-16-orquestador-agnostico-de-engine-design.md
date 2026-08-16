@@ -32,6 +32,103 @@ Los puntos 3 y 4 ya son agnósticos: `HUELLA` es texto plano y el archivo entre 
 es la interfaz que hace que la fase 2 no sepa quién escribió el análisis. Lo acoplado
 es cómo se lanza (1, 2) y de dónde se lee la huella y la sesión.
 
+## Codex, verificado a mano contra un binario real (2026-08-16)
+
+Instalado `codex-cli 0.147.0`. Lo de abajo no viene de la documentación: sale de
+correrlo. **Esta sección manda sobre la tabla general** para todo lo que sea Codex.
+
+### Los flags que necesita el runner
+
+| Lo que hace el runner hoy con Claude | En `codex exec` |
+|---|---|
+| `-p "<prompt>"` | prompt **posicional**, o `-` leyendo de stdin. **`-p` en Codex es `--profile`**, no el prompt |
+| `cwd=repo_path` | `-C, --cd <DIR>` |
+| `--add-dir <extra>` | `--add-dir <DIR>` (y son directorios *escribibles*, no solo legibles) |
+| `--model` | `-m, --model` |
+| `--effort` | `-c model_reasoning_effort=<v>` con `v` ∈ `none·minimal·low·medium·high·xhigh` (la lista salió de un error del propio binario) |
+| `--output-format stream-json` | `--json` (JSONL) |
+| `--permission-mode acceptEdits` | **`--approve-for-me`** — y ojo: en 0.118 esto era `--full-auto`, que en 0.147 **ya no existe** en `exec` |
+| `--allowedTools` | `-s, --sandbox read-only\|workspace-write\|danger-full-access` |
+| `--resume <id> --fork-session` | `codex exec resume <id>` / `--last` |
+| — | `-o, --output-last-message <FILE>`: el mensaje final en un archivo limpio. **No tiene equivalente en Claude y es mejor sitio para leer la huella que el log** |
+| — | `--ignore-user-config`: hace la corrida reproducible, pero también tira los MCP del `config.toml` |
+
+Sin `--approve-for-me`, `exec` corre **read-only** y rechaza toda escritura aunque se
+pase `--sandbox workspace-write`: la primera corrida de prueba leyó el archivo de
+entrada y no pudo escribir el de salida.
+
+### Tres cosas que cambian el diseño
+
+1. **`STAMP_RE` y `read_stamp` funcionan sobre el JSONL de Codex sin tocar una línea.**
+   Comprobado sobre un log real: `read_stamp(run.jsonl) → ('ok', 'salida.md')`. La
+   huella es de verdad agnóstica. Lo único que falla es `SESSION_RE`: Codex emite
+   `"thread_id"`, no `"session_id"` — un regex por engine y nada más.
+
+2. **La huella miente, y el runner se lo cree.** En la corrida donde la escritura fue
+   rechazada, Codex terminó con **exit 0** y `HUELLA: ok — salida.md` **sin haber
+   escrito el archivo**. El contrato existe precisamente para atrapar "terminó sin
+   hacer nada" y no lo atrapó, porque asume que el agente dice la verdad. Esto no es un
+   problema de Codex: es un agujero del contrato que Claude también puede atravesar.
+   **Arreglo: el runner verifica en disco la ruta que la huella declara.** Si la huella
+   dice `ok` y el archivo no existe, la corrida no es `ok`.
+
+3. **El binario en el PATH miente.** `where codex` daba 0.118.0 (instalado por nvm)
+   mientras el binario del app en `%LOCALAPPDATA%/Programs/OpenAI/Codex/bin` era
+   0.147.0, y el modelo por defecto del usuario (`gpt-5.6-sol`) **solo funciona en el
+   nuevo**: el viejo devuelve `400 … requires a newer version of Codex`. El registro de
+   engines necesita **ruta configurable por engine**, no un nombre de comando pelado
+   — igual que `ORCH_CLAUDE_CMD` ya hace para las pruebas.
+
+Nota aparte: Codex **también tiene hooks** (`[[hooks.SessionStart]]` en `config.toml`,
+con `--dangerously-bypass-hook-trust`). No cambia la decisión 18: son formatos
+distintos por CLI, que es justo el argumento para no apoyarse en ninguno.
+
+### La prueba real: `analyze` completo con Codex
+
+Corrida a mano el 2026-08-16 contra `ProvidenceTMSTenant`, sobre una solicitud `R-`
+(`R-notas-cliente`) porque es la entrada que no necesita Azure. El prompt fue un
+**prompt pack**: el `SKILL.md` de `ticket-comprehension` entero, inline, más el párrafo
+que niega el work item. 12.7 KB de prompt, `gpt-5.6-sol` con effort `high`.
+
+**Salió bien, y con más obediencia de la esperada.**
+
+- Primera corrida: **paró en la precondición correcta** — faltaba
+  `.claude/ticket-agent.json` — y cerró con
+  `HUELLA: nada — falta .claude/ticket-agent.json; el procedimiento prohíbe continuar`.
+  El contrato de parada funciona en un engine que nunca vio la skill instalada.
+- Segunda: escribió el análisis (14.6 KB) con **las 14 secciones de la plantilla, en
+  orden**, el sello `by ticket-agent v0.11.0`, `DECIDIR — PROPUESTO` en los criterios
+  deducidos y un `BLOQUEA` real (qué roles son "personal de oficina", sin default
+  defendible). Escribió además el journal con su línea en `## Corridas` y un
+  `## Hallazgos` con un problema de autorización que no le habíamos preguntado.
+- **No inventó rutas**: 31 de 32 citas resuelven a archivos reales (la restante es una
+  abreviatura de directorio, no un invento). Y **no invento el work item**, que es el
+  fallo que enseñó la corrida 3320.
+
+Costo de esa corrida: 6.95 M tokens de entrada (6.66 M cacheados) y 21 K de salida.
+No es gratis y hay que medirlo por fase antes de prometer nada.
+
+**El hallazgo que cambia el diseño: Codex lee fuera del repo raíz.** `-C` es un
+directorio de trabajo, **no un límite**. La corrida leyó por su cuenta el `CLAUDE.md`
+del directorio padre y archivos del repo vecino `../ProvidenceTMS/.../ClientApp`, y armó
+con eso la sección de frontend — etiquetándola honestamente como "repo vecino", eso sí.
+Claude Code no puede hacer eso: está confinado a `cwd` + `--add-dir`.
+
+Corta para los dos lados y hay que decidirlo, no heredarlo:
+
+- A favor: el análisis salió más rico, con el contrato entre repos sin fan-out.
+- En contra: **es exactamente el defecto que el diseño multi-repo existe para evitar** —
+  leer un repo vecino bajo las reglas del repo primario— pero ahora sin que nadie lo
+  haya montado, y sin techo: puede leer cualquier cosa del disco.
+
+Consecuencia para el registro: cada engine necesita declarar también su **límite de
+lectura**, no solo el de escritura. En Codex hay que buscarlo en la configuracion de
+sandbox; queda por verificar cuál es el flag exacto.
+
+Nota lateral: el repo ya tiene `AGENTS.md` junto al `CLAUDE.md`. Codex lee `AGENTS.md`
+de forma nativa, así que el archivo de reglas cross-engine ya existe y no hay que
+inventarlo.
+
 ## Lo verificado por CLI (2026-08-16)
 
 Modo no-interactivo, que es el único que importa aquí:
