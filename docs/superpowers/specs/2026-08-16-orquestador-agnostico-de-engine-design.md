@@ -1,6 +1,6 @@
 # Orquestador agnóstico de engine — diseño
 
-**Fecha:** 2026-08-16 · **Estado:** decidido el rumbo, construcción por etapas ·
+**Fecha:** 2026-08-16 · **Estado:** etapas 1 y 2 hechas; la 3 (registro `ENGINES`) desbloqueada ·
 **Decisión asociada:** 18 en `docs/STATUS.md`
 
 ## El problema
@@ -129,6 +129,33 @@ Nota lateral: el repo ya tiene `AGENTS.md` junto al `CLAUDE.md`. Codex lee `AGEN
 de forma nativa, así que el archivo de reglas cross-engine ya existe y no hay que
 inventarlo.
 
+### Y `plan`: paró en el `BLOQUEA`, que es el mejor resultado posible
+
+Segunda corrida encadenada, mismo engine, misma máquina: el prompt pack de
+`change-planning` contra el análisis que Codex acababa de escribir. **No escribió el
+plan**, y eso es exactamente lo correcto: leyó el `## Decisiones para ti`, encontró un
+`BLOQUEA` sin responder y cuatro `DECIDIR` sin marcar, y cerró con
+
+    HUELLA: nada — 5 decisiones sin resolver
+
+sin inicializar OpenSpec y sin proceder en silencio con ningún `DECIDIR` — el repo tiene
+`autonomy: supervised`. Dejó además su línea en el journal.
+
+**Esto es lo que valida el diseño entero.** La costura humana entre fases —`DECIDIR`
+propone y sigue, `BLOQUEA` para— no era un mecanismo, es una convención escrita en
+markdown, y la duda razonable era si un engine que nunca vio la skill la respetaría.
+La respeta. Y el journal acumuló las dos corridas en `## Corridas` conservando
+`## Hallazgos` al final, con dos engines de la misma familia pero ninguna instalación
+del plugin de por medio.
+
+Costo: 338 K tokens de entrada (297 K cacheados), 3.8 K de salida — un orden de
+magnitud menos que `analyze`, porque paró temprano.
+
+**Lo único que quedó sin probar** es `npx @fission-ai/openspec` bajo Codex, porque para
+llegar ahí hay que responder el `BLOQUEA` — que es una decisión de producto del cliente,
+no algo que se invente para probar un CLI. El mecanismo funcionando es justamente lo que
+impide terminar de probarlo.
+
 ## Lo verificado por CLI (2026-08-16)
 
 Modo no-interactivo, que es el único que importa aquí:
@@ -200,10 +227,14 @@ el plugin pasa a ser *una* de sus empaquetaduras.
 ## Etapas, y por qué en este orden
 
 1. ~~Quitar el hook~~ — hecho el 2026-08-16. Quitó acoplamiento y restó código.
-2. **Probar `codex exec` a mano** en la fase `plan` de dos o tres tickets, con el
-   `SKILL.md` pegado como prompt. `plan` no toca Azure (consume el análisis), así que
-   es la prueba más barata que existe.
-3. Recién entonces, el registro `ENGINES` con `claude` y `codex`.
+2. ~~**Probar `codex exec` a mano**~~ — hecho el 2026-08-16 con `analyze` y `plan`
+   encadenados sobre una solicitud `R-`. Salió bien: prompt pack obedecido, plantilla
+   completa, huella correcta en los dos sentidos (`nada` cuando debía parar), journal
+   acumulado. Detalle arriba.
+3. **Ahora sí, el registro `ENGINES` con `claude` y `codex`** — la etapa 2 dio el
+   permiso. Y con dos cosas que la prueba agregó al alcance: **ruta del binario por
+   engine** (el PATH mentía) y **límite de lectura por engine** (Codex lee fuera del
+   `-C`).
 4. Engines sin MCP en fase 1, **solo para tickets `R-`**: una solicitud no necesita
    Azure, su entrada es `docs/tickets/<id>-request.md` que el runner ya proyecta.
 5. Copilot al final o nunca.

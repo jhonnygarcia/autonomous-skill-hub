@@ -201,15 +201,26 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     "think harder" in the prompt), and **Copilot has no structured output**,
     so it can be orchestrated but will never have continuations.
 
-    **The code waits for a second CLI to exist on the machine.** Today only
-    `claude` is installed; building the registry with nothing to test it
-    against is building on assumptions, and an adapter branch nobody runs
-    rots. The cheap validation comes first: run `plan` by hand with
-    `codex exec` on two or three tickets — that phase doesn't touch Azure, so
-    it's the cheapest possible test. If the result doesn't convince, the
-    registry doesn't get built and only the decoupling stays, which pays for
-    itself anyway: it forces "what a run is" to be written down instead of
-    living implicitly inside a handful of flags.
+    **Validated the same day, by hand, before writing any adapter.** `codex
+    exec` 0.147.0 ran `analyze` and then `plan` on an `R-` request against
+    `ProvidenceTMSTenant`, each with its skill's `SKILL.md` inline as the
+    prompt — no plugin installed anywhere. `analyze` stopped correctly on a
+    missing `ticket-agent.json`, then wrote the full 14-section template with
+    31 of 32 citations resolving to real files. `plan` **refused to plan**:
+    it found the unanswered `BLOQUEA` and closed `HUELLA: nada — 5 decisiones
+    sin resolver`. The journal accumulated both runs.
+
+    That last one is the finding that matters: **the human-in-the-loop seam
+    is a markdown convention, and an engine that never saw the skill obeys
+    it.** So does the stamp — `read_stamp` parses Codex's JSONL with zero
+    changes. Only `SESSION_RE` is Claude-shaped (Codex emits `thread_id`).
+
+    Two things the test added to the scope: the **binary path must be
+    configurable per engine** (the PATH had a stale 0.118.0 while the app
+    shipped 0.147.0, and the user's default model only runs on the new one),
+    and **each engine must declare its read boundary, not just its write
+    one** — Codex's `-C` is a working root, not a limit, and it read the
+    neighbouring repo nobody had mounted.
 
 ## Phase 1 acceptance — closed on 2026-08-08
 
