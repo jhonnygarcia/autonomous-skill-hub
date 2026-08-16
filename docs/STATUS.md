@@ -189,6 +189,28 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     (`GIT_CONFIG_COUNT` + `url.<dead>.pushInsteadOf` in the subprocess env,
     verified working on 2026-08-16), not in a CLI's hook format.
 
+19. **The runner is headed toward being engine-agnostic** (2026-08-16, spec
+    `2026-08-16-orquestador-agnostico-de-engine-design.md`). The orchestrator
+    is a wrapper: it launches a prompt against a repo with a model and an
+    effort, and collects what got written to disk. None of that is Claude's.
+    The contract is already there — subprocess + `HUELLA` + files — so what
+    gets abstracted is only **how it's launched and where the stamp is read
+    from**. Two findings decide the shape: **`effort` is not universal**
+    (Gemini, Kimi and Copilot have no such knob, so the registry carries
+    `supports_effort` and the UI hides the field — it is not emulated with
+    "think harder" in the prompt), and **Copilot has no structured output**,
+    so it can be orchestrated but will never have continuations.
+
+    **The code waits for a second CLI to exist on the machine.** Today only
+    `claude` is installed; building the registry with nothing to test it
+    against is building on assumptions, and an adapter branch nobody runs
+    rots. The cheap validation comes first: run `plan` by hand with
+    `codex exec` on two or three tickets — that phase doesn't touch Azure, so
+    it's the cheapest possible test. If the result doesn't convince, the
+    registry doesn't get built and only the decoupling stays, which pays for
+    itself anyway: it forces "what a run is" to be written down instead of
+    living implicitly inside a handful of flags.
+
 ## Phase 1 acceptance — closed on 2026-08-08
 
 Run on ticket **3311** in the TMS repo, twice: with skill v0.1.0 and, after
