@@ -19,11 +19,11 @@ from each one.
 |---|---|---|
 | 0 — Hub foundation | Plugin marketplace + ticket-agent skeleton | ✅ Done |
 | 1 — Ticket comprehension | `ticket-comprehension` skill + `/ticket-agent:analyze` (read-only) | ✅ **Accepted** (3311 and 3322) — skill **v0.3.0** |
-| Orchestrator (cross-cutting) | Local app: SQLite queue + headless CLI runner + React UI | ✅ **Three phases launchable**, per-phase progress, stamps and timeline. Clean-tree guard, branch under the lock, and containment hook (2026-08-11) |
+| Orchestrator (cross-cutting) | Local app: SQLite queue + headless CLI runner + React UI | ✅ **Three phases launchable**, per-phase progress, stamps and timeline. Clean-tree guard and branch under the lock. The containment hook was removed on 2026-08-16 (decision 18) |
 | 2 — From analysis to a change plan | `change-planning` skill + `/ticket-agent:plan` → OpenSpec change | ✅ **Closed** (3323 and 3320, n=2) — plugin **v0.5.2**, with the negative-claim rule verified on a re-run |
-| 2b — From plan to code | Execute the plan: write code and commit on a branch | ✅ **Built and validated** (3332) — plugin **v0.6.1**, n=1. Stops on a branch, no push |
+| 2b — From plan to code | Execute the plan: write code and commit on a branch | ✅ **Built and validated** (3332) — plugin **v0.6.1**, n=1. Ends on a branch and opens no PR |
 | ~~3 — Tests~~ | Unit tests tied to acceptance criteria | ✅ **Absorbed by 2b** (2026-08-11) — it wasn't a phase, it was a step |
-| 4 — Guards | Read-only reviewer agents + deterministic hooks | 🔄 **Started**: the containment hook already runs in `implement`. The reviewer is still missing |
+| 4 — Guards | Read-only reviewer agents + deterministic guards | 🔄 **Rethought** (2026-08-16): the containment hook is gone (decision 18); what guards `implement` is the branch. The per-task reviewer exists inside 2b; a phase-level reviewer is still missing |
 | 5 — Per-project learning | Local memory that feeds the skills | 🔄 **Shrunk** (2026-08-08): the target repo's `CLAUDE.md` already does this |
 
 **The roadmap shrinks as it gets built, and it's not worth fighting that.** Three of
@@ -31,9 +31,10 @@ the four "future" phases turned out not to be phases at all. Phase 5 shrank once
 became clear the host project's `CLAUDE.md` already is the memory. Phase 3 disappeared
 entirely: 3332 wrote **12 test files inside `implement`**, because every task in the
 plan carries its own *"Check"* and the skill requires running it — asking for a
-separate phase would have meant asking for the tests twice. And phase 4 is already
-half-done without having been planned: the hook that denies the push was born as
-containment for 2b.
+separate phase would have meant asking for the tests twice. And phase 4 shrank the
+same way, twice over: the per-task reviewer that 2b already runs is half of it, and
+the containment it was supposed to add turned out to be the branch itself once the
+push hook was removed (decision 18).
 
 Practical consequence, applied on 2026-08-11: **`test` was removed from `PHASES`**. A
 declared phase that will never be launched isn't documentation, it's a broken promise
@@ -149,7 +150,8 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     plan's checks— and **containment is a deterministic hook**, not an
     instruction in the skill. The hook contains **accidents, not malice**:
     it's a latch, and if this phase ever runs unattended it needs to be
-    redone.
+    redone. **The hook half of this decision was reversed on 2026-08-16 — see
+    decision 18.** The clean-tree guard and the in-place work stand.
 16. **A negative claim carries its source just like a figure does**
     (2026-08-10, rule 5 of `change-planning`, plugin v0.5.2). The golden
     rules disciplined what the agent **finds**; nothing disciplined what it
@@ -158,6 +160,34 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     not by symbols, and **naming that search in the task**. Generalizable to
     future phases: every negative claim the agent makes is either verifiable
     or invalid.
+
+18. **No push guard, and the PR is the only thing the run won't do**
+    (2026-08-16). The `PreToolUse` hook on Bash (`hooks/deny_push.py`,
+    injected with `--settings`) is deleted, along with its test. Two reasons,
+    and the second is the load-bearing one:
+
+    - **Pushing was never the danger.** `ticket-agent/<id>` is the run's own
+      branch; sending it to the server touches nobody's work. What does put a
+      team on the hook is the **pull request** — so that, and only that, stays
+      out of the run. The hook conflated the two and denied push even when the
+      human explicitly asked for it in a resume, which made the adjustment
+      loop lie about what it could do.
+    - **A hook is a Claude Code mechanism.** The runner is headed toward
+      launching other engines per phase (Codex, Gemini, Kimi, Copilot — none
+      of them share this hook format; each contains differently, via sandbox,
+      `excludeTools`, `--deny-tool`, or permission config). Anything built on
+      `--settings` is a bet on one CLI, and the containment it bought was
+      already available for free: the branch. `prepare_branch` is the real
+      boundary and it is engine-agnostic.
+
+    What replaces it is a contract in the skill, not a mechanism: don't open a
+    PR, don't push on your own initiative, push if the human asks. **This is
+    weaker than a hook and that's accepted** — it's the price of the runner
+    not being Claude-shaped, and the same tradeoff already governs everything
+    else the skills promise. If `implement` ever runs unattended against a
+    repo where a stray push would hurt, the guard comes back **in git**
+    (`GIT_CONFIG_COUNT` + `url.<dead>.pushInsteadOf` in the subprocess env,
+    verified working on 2026-08-16), not in a CLI's hook format.
 
 ## Phase 1 acceptance — closed on 2026-08-08
 

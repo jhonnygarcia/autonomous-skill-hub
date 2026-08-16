@@ -6,7 +6,6 @@ import re
 import shutil
 import sqlite3
 import subprocess
-import sys
 from datetime import datetime, timezone
 from itertools import takewhile
 from pathlib import Path
@@ -86,7 +85,9 @@ PHASE_ALLOWED_TOOLS = {
     ],
     # No specifier, on purpose: it's verified on a real run that `Bash(x:*)` enables
     # the tool and does not scope it. Pretending otherwise would be worse than not
-    # setting it at all. Containment goes through `--settings` (see `settings_for`).
+    # setting it at all. There is no push guard either: pushing `ticket-agent/<id>` is
+    # allowed (it's the agent's own branch) and opening the PR is the human's call —
+    # the skill says so, and a hook would be a Claude-only mechanism (see STATUS.md).
     "implement": ["Bash"],
 }
 # Noun for the deliverable, so the prompt doesn't call it "the analysis" to the agent
@@ -130,24 +131,6 @@ def phase_configs() -> dict[str, dict]:
             for f in PHASE_COMMANDS}
 
 
-HOOK_DENY_PUSH = Path(__file__).resolve().parent / "hooks" / "deny_push.py"
-
-
-def settings_for(phase: str) -> list[str]:
-    """`--settings` accepts an inline JSON, so the hook travels without a config file
-    and without writing anything into the client's repo.
-
-    It's branched per phase just like the tools: setting it everywhere would look the
-    same today —the other phases don't have Bash— but it would go back to mixing "what
-    this phase needs" with "what every phase drags along".
-    """
-    if phase != "implement":
-        return []
-    cfg = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
-        {"type": "command", "command": f'"{sys.executable}" "{HOOK_DENY_PUSH}"'}]}]}}
-    return ["--settings", json.dumps(cfg)]
-
-
 def repos_text(phase: str, extras: list[dict], noun: str, primary: str = "") -> str:
     """The prompt block that introduces the ticket's extra repos to the agent.
 
@@ -155,7 +138,7 @@ def repos_text(phase: str, extras: list[dict], noun: str, primary: str = "") -> 
     ProvidenceTMSTenant accessible, mentioned it 15 times and never opened it once. They
     have to be named to it, and the label is what tells it when to look there.
 
-    It's branched per phase just like the tools and `settings_for`, for a reason that
+    It's branched per phase just like the tools, for a reason that
     isn't cosmetic: design decision 4 says that in `implement` **every mounted repo of
     the ticket is writable**, and the `change-implementation` skill instructs the agent
     that, if the plan's map and the prompt disagree, it should follow the prompt. A
@@ -1391,7 +1374,6 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             "--allowedTools", *(["mcp__azure-devops"] if phase in PHASE_MCP else []),
             "Read", "Glob", "Grep", "Task", "Write", "Edit",
             *PHASE_ALLOWED_TOOLS[phase],
-            *settings_for(phase),
             # Read at launch time, not at startup: changing the model in Settings has
             # to affect the next run without restarting the backend.
             *model_for(phase),

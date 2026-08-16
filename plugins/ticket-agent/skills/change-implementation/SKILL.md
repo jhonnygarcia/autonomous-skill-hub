@@ -10,9 +10,15 @@ ticket's branch, and leaves verifiable evidence of what was done and what
 wasn't. It's the first phase that writes production code into a client's repo —
 act with that caution.
 
-The run **stops on a branch with commits, no push**: don't do `git push`, don't
-create a PR, and don't touch the remote. That's out of scope for this phase; the
-human decides when to push what you left.
+The run **ends on a branch with commits, and opens no pull request**: don't run
+`gh pr create`, `az repos pr create`, or any equivalent, and don't ask anyone to
+review. Opening a PR puts a team on the hook to look at this, and that call
+belongs to the human, who makes it after reading what you left.
+
+**Don't `git push` on your own initiative either** — the human reads the `git log`
+locally. But it is no longer forbidden: `ticket-agent/<id>` is this phase's own
+branch, so if the human asks you to push it, push it. Nothing else about the
+remote is yours to change: no new remotes, no `set-url`, no other branch.
 
 ## 1. Configuration
 
@@ -144,15 +150,13 @@ it), don't move them ahead or reorder them:
    the previous failure as context. Two failures on the same task and the loop
    stops — section 5 below, which is a different thing from this step.
 
-   **Exception: a hook denial isn't a task failure.** It's recognized because
-   the denial message comes from the hook itself and mentions that this phase
-   stops on a branch without touching the remote (`git push`,
-   `git remote add`/`set-url`, `gh pr create`, `az repos pr create`). It means
-   the subagent tried something out of this phase's scope, not that the
-   implementation is wrong: log it in the report, **don't retry the denied
-   command**, and **don't count that denial as one of the two failures** in
-   golden rule 4 — the task keeps its normal course (diff, check, commit) with
-   whatever else the subagent did manage to do.
+   **Exception: a permission denial isn't a task failure.** If the subagent is
+   denied a command by the environment (a hook in the client's repo, a tool
+   allowlist), it tried something outside this phase's scope — that says nothing
+   about whether the implementation is right. Log it in the report, **don't
+   retry the denied command**, and **don't count that denial as one of the two
+   failures** in golden rule 4: the task keeps its normal course (diff, check,
+   commit) with whatever else the subagent did manage to do.
 
 ## 5. Stopping
 

@@ -16,8 +16,8 @@ A ticket that spans **several repos** takes a different route through stage 1 �
 [When the ticket spans more than one repo](#when-the-ticket-spans-more-than-one-repo).
 It ends in the same `<id>-analysis.md`, so stages 2 and 3 don't change.
 
-**Stage 3 stops on a branch with commits: no push, no PR.** The `git log` is the
-record; you decide what goes out.
+**Stage 3 ends on a branch with commits and opens no PR.** The `git log` is the
+record; you decide what goes out. It doesn't push unless you ask it to.
 
 ## Requirements
 
@@ -221,7 +221,10 @@ graded `minor`, and anything the plan explicitly ordered, never block — they'r
 appended to `tasks.md` under `## Review notes`. A task that fails twice stops the
 run with `HUELLA: parcial` and the remaining boxes unchecked.
 
-**It stops on a branch with commits: no push, no PR.** You decide when to push.
+**It ends on a branch with commits and opens no PR.** Opening one puts a team on
+the hook to review, and that's your call, made after reading the `git log`. It
+doesn't push on its own either — but pushing `ticket-agent/<id>` is no longer
+forbidden: ask it to and it will, since the branch is the run's own.
 
 ## Model and effort
 
@@ -271,8 +274,8 @@ machine with no Azure CLI, or for unattended runs.
 | `interactive` | — | opens a browser; **doesn't work headless** |
 
 `envvar` is the one to use: one variable, plain PAT. The PAT needs at least Work
-Items (read), Code (read), and Wiki (read) — plus Code (write) if Phase 2b is going
-to push, which it doesn't.
+Items (read), Code (read), and Wiki (read) — plus Code (write) only if you're going
+to ask Phase 2b to push its branch, which it never does on its own.
 
 **Where the two variables go is not the same place.** `ADO_AUTH` is safe to commit;
 the token is not:

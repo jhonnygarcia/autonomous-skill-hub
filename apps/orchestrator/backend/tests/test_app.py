@@ -419,17 +419,14 @@ def _spy_argv(monkeypatch):
     return captured
 
 
-def test_implement_carries_bare_bash_and_settings(client, monkeypatch, tmp_path):
-    """The hook isn't valid because it's mentioned, it's valid because of its shape:
-    the `--settings` JSON is parsed and asserted on its structure.
+def test_implement_carries_bare_bash_and_no_hook(client, monkeypatch, tmp_path):
+    """`implement` gets Bash without a specifier and without a `--settings` hook.
 
-    Looking for the substring `deny_push.py` in the argument let four mutations
-    through that neuter the hook completely, verified one by one: `PreToolUse`→
-    `PostToolUse` (it would run AFTER the push, with the `exit 2` already having
-    nothing left to stop), a different `matcher` (it wouldn't fire on Bash), a
-    different `type` (Claude doesn't execute it), and a script path that doesn't
-    exist on disk."""
-    import app
+    The push guard that used to travel here (`hooks/deny_push.py`) was a Claude-only
+    mechanism, and pushing the agent's own branch is allowed anyway — what the human
+    keeps for themselves is the PR, and that's the skill's contract, not the runner's.
+    A `--settings` reappearing would tie the runner back to one CLI's hook format."""
+    import app  # noqa: F401
     _use_fake_claude(monkeypatch)
     cap = _spy_argv(monkeypatch)
     for d in ("repo", "backend-repo"):
@@ -438,20 +435,7 @@ def test_implement_carries_bare_bash_and_settings(client, monkeypatch, tmp_path)
     client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
     argv = cap["argv"]
     assert "Bash" in argv                      # bare, not a specifier
-    assert "--settings" in argv
-
-    cfg = json.loads(argv[argv.index("--settings") + 1])
-    # BEFORE the push, or it isn't a containment: it's a chronicle.
-    assert list(cfg["hooks"]) == ["PreToolUse"]
-    [entry] = cfg["hooks"]["PreToolUse"]
-    assert entry["matcher"] == "Bash"          # the only tool that could push anything
-    [hook] = entry["hooks"]
-    assert hook["type"] == "command"
-    # The command is `"<python>" "<script>"`: the last quoted string is the hook, and
-    # it has to be a file that really exists — a `--settings` pointing at a script
-    # that doesn't exist is a hook that never runs.
-    hook_path = Path(hook["command"].split('"')[-2])
-    assert hook_path.name == "deny_push.py" and hook_path.is_file()
+    assert "--settings" not in argv
 
 
 def test_models_default_empty(client):
@@ -927,15 +911,14 @@ def test_resume_still_demands_the_stamp(client, monkeypatch):
 
 def test_resume_keeps_the_permission_flags(client, monkeypatch, tmp_path):
     """They're per-invocation permissions, not context. Dropping them on the
-    continuation leaves the agent without write access to the extras and without its
-    push guard, mid-conversation."""
+    continuation leaves the agent without write access to the extras,
+    mid-conversation."""
     _use_fake_claude(monkeypatch)
     for d in ("repo", "backend-repo"):
         _git_init(tmp_path / d)
     _, cap = _run_twice(client, monkeypatch, 23, phase="implement")
     argv = list(cap["argv"])
     assert "--allowedTools" in argv and "Bash" in argv
-    assert "--settings" in argv
     assert "--add-dir" in argv and any("backend-repo" in a for a in argv)
 
 

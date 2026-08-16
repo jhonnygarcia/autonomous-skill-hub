@@ -170,10 +170,12 @@ code: its deliverable is the plan.
 
 **Phase 2b executes the plan, task by task.** It reads the change's `tasks.md`, delegates
 each task to a subagent, runs the "Check" that the task itself declares, commits its
-paths (`<id> task N: <subject>`, one commit per task), and checks the box. **It stops on
-a branch with commits: no push, no PR** — the `git log` is the record of progress. Its
-preconditions are hard: no plan, several changes for the same id, or being outside the
-`ticket-agent/<id>` branch all stop it with `HUELLA: nada`.
+paths (`<id> task N: <subject>`, one commit per task), and checks the box. **It ends on
+a branch with commits and opens no PR** — the `git log` is the record of progress, and
+whether that branch becomes a pull request is the human's decision, taken outside the
+run. It doesn't push on its own either, but nothing stops it if you ask — the branch
+is the agent's own. Its preconditions are hard: no plan, several changes for the same
+id, or being outside the `ticket-agent/<id>` branch all stop it with `HUELLA: nada`.
 
 **A task carries `Test` and `Check` as two separate lines** — the test file the
 implementer writes first, and the command anyone can run afterwards — because the
@@ -318,17 +320,24 @@ The runner passes `--allowedTools` with the MCP: in headless mode, `--permission
 acceptEdits` does **not** auto-approve MCP tools, and without that flag the agent can't
 read the work item.
 
-**What sandboxes `implement` is the runner, not the skill** — a boundary that depends on
-the agent obeying a markdown file isn't a boundary. `prepare_branch` creates or checks
-out `ticket-agent/<id>` before launching (and saves the name in `runs.branch`), and
-`settings_for` injects via `--settings` (inline JSON, without writing anything to the
-client repo) a `PreToolUse` hook on Bash: `hooks/deny_push.py`, which denies `git push`,
-`git remote add|set-url`, `gh pr create`, and `az repos pr create`. It's a latch against
-accidents, not armor: it fails open on events it doesn't recognize, and its regex
-anchors the verb to the start of the command specifically so it doesn't deny a
-`git commit -m "... git push ..."`. `implement` carries `Bash` **with no specifier** on
-purpose: it's verified that `Bash(x:*)` enables the tool and doesn't scope it, so
-pretending otherwise would be worse.
+**What isolates `implement` is the branch, not a hook.** `prepare_branch` creates or
+checks out `ticket-agent/<id>` before launching and saves the name in `runs.branch`:
+everything the run writes lands there, and `main` is never the run's checkout. That is
+the whole containment, and it's the runner's — a boundary that depends on the agent
+obeying a markdown file isn't a boundary.
+
+**There is no push guard, on purpose (2026-08-16).** Until this date the runner injected
+a `PreToolUse` hook on Bash via `--settings` (`hooks/deny_push.py`) that denied `git
+push` and the two PR commands. It was removed for two reasons, and the second is the one
+that mattered: a hook is a **Claude Code-only mechanism** — Codex, Gemini, Kimi and
+Copilot each contain differently — so anything built on it can't survive the runner
+becoming engine-agnostic; and pushing `ticket-agent/<id>` was never dangerous, it is the
+agent's **own** branch, while the hook denied it even when the human explicitly asked
+for it in a resume. What stays out of the run is the **pull request**: opening one asks
+a team to look, and that call is the human's. The skill states this, and no runner-side
+mechanism enforces it — see the roadmap decision in `docs/STATUS.md`. `implement`
+carries `Bash` **with no specifier** on purpose: it's verified that `Bash(x:*)` enables
+the tool and doesn't scope it, so pretending otherwise would be worse.
 
 **The exit code isn't enough to know whether a deliverable was produced**: `claude -p`
 exits 0 even if the agent stopped without doing anything. That's why the three skills
@@ -415,8 +424,8 @@ Env var overrides (used by tests): `ORCH_DB`, `ORCH_LOGS`,
 - **Code, comments, and process docs in English; Spanish only in UI text.**
   Planning documents (`docs/superpowers/plans/`, `docs/superpowers/specs/`) are
   exempt from this rule and can stay in Spanish. Three categories decide it:
-  **prompt-facing** strings (`PHASE_NOUN`, `repos_text`, `adjustment_text`,
-  `DENY_REASON`) are read by the agent, so they're English and track the skills.
+  **prompt-facing** strings (`PHASE_NOUN`, `repos_text`, `adjustment_text`)
+  are read by the agent, so they're English and track the skills.
   **UI-facing** strings (`HTTPException` details, `NO_STAMP_REASON` and the other
   `motivo` text) are read by you in the browser, so they stay Spanish.
   **Contract literals** (the `HUELLA` stamp and its values, the `/modelos` and
