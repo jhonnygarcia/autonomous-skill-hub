@@ -3539,3 +3539,91 @@ def test_config_creation_only_journaled_once(client, monkeypatch, tmp_path):
         encoding="utf-8")
     assert journal.count("creó .claude/ticket-agent.json") == 1
 
+
+# --- Feature B: the Azure PAT, optional, from the project's configuration -------
+
+
+def _new_project_with_token(client, tmp_path, name="ConToken", token="secreto-123"):
+    (tmp_path / f"{name}-repo").mkdir()
+    return client.post("/projects", json={
+        "name": name, "org": "O", "project": "P", "ado_pat": token,
+        "repos": [{"path": (tmp_path / f"{name}-repo").as_posix(), "primary": True}],
+    })
+
+
+def test_project_token_is_write_only_and_reported_as_boolean(client, tmp_path):
+    r = _new_project_with_token(client, tmp_path)
+    assert r.status_code == 201
+    body = r.json()
+    assert "ado_pat" not in body
+    assert body["ado_pat_configured"] is True
+
+    listed = next(p for p in client.get("/projects").json() if p["name"] == "ConToken")
+    assert "ado_pat" not in listed and listed["ado_pat_configured"] is True
+
+    demo = next(p for p in client.get("/projects").json() if p["name"] == "Demo")
+    assert demo["ado_pat_configured"] is False
+
+
+def test_token_reaches_subprocess_only_when_configured(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch)
+    _new_project_with_token(client, tmp_path)
+    tid = client.post("/tickets", json={"ado_id": 60, "project": "ConToken"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_AUTH=envvar" in log
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" in log
+    assert "secreto-123" not in log  # the value itself, never — only the marker
+
+    tid2 = client.post("/tickets", json={"ado_id": 61, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid2}/run", json={})
+    log2 = client.get(f"/tickets/{tid2}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_AUTH=" not in log2
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" not in log2
+
+
+def test_clearing_the_token_works(client, tmp_path):
+    _new_project_with_token(client, tmp_path)
+    r = client.put("/projects/ConToken", json={
+        "name": "ConToken", "org": "O", "project": "P", "ado_pat": "",
+        "repos": [{"path": (tmp_path / "ConToken-repo").as_posix(), "primary": True}],
+    })
+    assert r.status_code == 200 and r.json()["ado_pat_configured"] is False
+
+
+def test_omitting_the_token_on_update_leaves_it_untouched(client, tmp_path):
+    """The field is never sent back by the API, so a form editing other fields must
+    not have to resend the secret to keep it — omitting it means "unchanged"."""
+    _new_project_with_token(client, tmp_path)
+    r = client.put("/projects/ConToken", json={
+        "name": "ConToken", "org": "OtraOrg", "project": "P",
+        "repos": [{"path": (tmp_path / "ConToken-repo").as_posix(), "primary": True}],
+    })
+    assert r.status_code == 200 and r.json()["ado_pat_configured"] is True
+
+
+def test_ticket_predating_a_token_still_runs(client, monkeypatch, tmp_path):
+    """A ticket copies the project's configuration at creation time, like `org` and
+    `project` already do — a token added afterward doesn't retroactively apply."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/62-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 62, "project": "Demo"}).json()["id"]
+    client.put("/projects/Demo", json={
+        "name": "Demo", "org": "DemoOrg", "project": "Demo", "ado_pat": "tarde",
+        "repos": _repos(client),
+    })
+    r = client.post(f"/tickets/{tid}/run", json={})
+    assert r.status_code == 202
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["runs"][0]["status"] == "success"
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" not in detail["log_tail"]
+
+
+def test_ticket_response_never_includes_the_token(client, tmp_path):
+    _new_project_with_token(client, tmp_path)
+    created = client.post("/tickets", json={"ado_id": 63, "project": "ConToken"})
+    assert "ado_pat" not in created.json()
+    tid = created.json()["id"]
+    detail = client.get(f"/tickets/{tid}").json()
+    assert "ado_pat" not in detail["ticket"]
+    listed = next(t for t in client.get("/tickets").json() if t["id"] == tid)
+    assert "ado_pat" not in listed

@@ -69,7 +69,16 @@ export type ActiveRun = {
 // the run). `label` isn't decorative: it travels into the agent's prompt and is
 // what tells it when to look in that repo — without it, it's mounted but ignored.
 export type Repo = { path: string; label: string; primary: boolean }
-export type Project = { name: string; org: string; project: string; repos: Repo[] }
+// `ado_pat_configured` only ever arrives from the server (never the token itself);
+// `ado_pat` only ever travels TO the server, and is tri-state there: omitted leaves
+// the stored token untouched, "" clears it, anything else replaces it. A saved
+// project response never carries `ado_pat` — see `ProjectForm`'s save, which strips
+// it back out before it could ever be echoed into the form's own state.
+export type Project = {
+  name: string; org: string; project: string; repos: Repo[]
+  ado_pat_configured?: boolean
+  ado_pat?: string
+}
 // Which CLI runs each phase, and with what model and effort. Empty model/effort =
 // whatever the target repo defaults to, which is what the orchestrator always did
 // before this was configurable; `engine` has no empty value, it defaults to claude.

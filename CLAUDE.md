@@ -232,9 +232,31 @@ writing. **Hooks and `.mcp.json` of a mounted repo are recovered by nothing**; o
 session rooted in that repo has them, which is the whole reason for the multi-repo
 design in `docs/superpowers/specs/2026-08-12-...`.
 
-**The ticket copies `org`, `project`, `repo_path`, and `extra_dirs` from the project
-when created** — the same way a line item locks in a price. That's why deleting a
-project doesn't break old tickets, and there's no FK between the two tables.
+**The ticket copies `org`, `project`, `repo_path`, `extra_dirs`, and `ado_pat` from
+the project when created** — the same way a line item locks in a price. That's why
+deleting a project doesn't break old tickets, and there's no FK between the two
+tables.
+
+**`ado_pat` is an optional Azure DevOps PAT, write-only in the API.** The plugin
+already supports a token (`ADO_AUTH=envvar` reads `ADO_MCP_AUTH_TOKEN` instead of the
+`az login` session — see the README's `ADO_AUTH` table); this is the UI's way to set
+one. `ProjectIn.ado_pat` is tri-state: omitted leaves the stored value untouched
+(`GET /projects` never returns it, so the form has nothing to resend), `""` clears
+it, anything else replaces it. `project_out` reports only `ado_pat_configured`, a
+boolean — never the value. `ticket_out` has to pop `ado_pat` explicitly, because it
+builds its response with `dict(t)` over every column: an allowlist would have been
+one more place to remember to update; a pop next to the one place the ticket becomes
+an API response can't be forgotten as easily. When a ticket carries a token,
+`execute_run` sets `ADO_AUTH=envvar` and `ADO_MCP_AUTH_TOKEN` in the subprocess
+environment; when it doesn't, it sets neither, and `${ADO_AUTH:-azcli}` in the
+plugin's `.mcp.json` keeps governing exactly as before. **This is a secret at rest in
+plaintext in `orchestrator.db`.** Write-only in the API means it doesn't leak
+*through the API* — it says nothing about the file on disk. Whoever can read
+`orchestrator.db` can read every configured token; there is no encryption at rest.
+The token must never reach a log, the journal, `run.json`, or an error message: `cmd`
+(what gets logged and put in `run.json` via `run_meta`) is the argv list, never the
+env dict, and `run_meta`'s ticket fields are an explicit allowlist that was never
+grown to include it.
 
 **`POST /tickets` accepts one of two shapes, never both.** `{ado_id, project}` is a
 work item, as always; `{request, project}` is a free-text request that replaces it —

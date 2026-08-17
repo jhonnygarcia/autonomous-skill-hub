@@ -536,7 +536,9 @@ def project_out(row: sqlite3.Row) -> dict:
     is the run's `cwd`, the rest travel as `--add-dir`."""
     repos = [{"path": row["repo_path"], "label": row["repo_label"], "primary": True}]
     repos += [{**d, "primary": False} for d in normalize_dirs(json.loads(row["extra_dirs"]))]
-    return {"name": row["name"], "org": row["org"], "project": row["project"], "repos": repos}
+    return {"name": row["name"], "org": row["org"], "project": row["project"], "repos": repos,
+            # Never the value, only whether one is set — the token is write-only.
+            "ado_pat_configured": bool(row["ado_pat"])}
 
 
 def get_project(name: str) -> sqlite3.Row | None:
@@ -804,6 +806,8 @@ def init_db() -> None:
               repo_label TEXT NOT NULL DEFAULT '',
               extra_dirs TEXT NOT NULL DEFAULT '[]'
             );
+            -- ado_pat is added via ALTER below (both here and on `tickets`), same
+            -- convention as every other column that arrived after the first commit.
             CREATE TABLE IF NOT EXISTS tickets(
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               ado_id INTEGER NOT NULL,
@@ -901,6 +905,16 @@ def init_db() -> None:
             # never ran), never backfilled to 0 or 1. The UI treats NULL as
             # not-restorable, since those runs predate the check.
             "ALTER TABLE runs ADD COLUMN restorable INTEGER",
+            # The Azure PAT, optional, plaintext at rest (see CLAUDE.md: this is a
+            # secret in a SQLite file, and write-only in the API is the only
+            # protection the app itself offers). Empty means "use `az login`", which
+            # is what `${ADO_AUTH:-azcli}` in the plugin's `.mcp.json` already
+            # defaults to — so a project with no token changes nothing at all.
+            "ALTER TABLE projects ADD COLUMN ado_pat TEXT NOT NULL DEFAULT ''",
+            # Copied onto the ticket at creation, same pattern as `org`/`project`:
+            # a ticket locks in the project's configuration like a line item locks
+            # in a price, and the token is part of that configuration.
+            "ALTER TABLE tickets ADD COLUMN ado_pat TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 c.execute(alter)
@@ -935,6 +949,10 @@ class ProjectIn(BaseModel):
     org: str
     project: str
     repos: list[Repo] = []
+    # Write-only, and tri-state on purpose: omitted (None) leaves whatever is
+    # already stored untouched (the form is a full replace and never receives the
+    # real value back to resend it); "" clears it; anything else replaces it.
+    ado_pat: str | None = None
 
 
 class RutaIn(BaseModel):
@@ -1064,9 +1082,9 @@ def create_project(body: ProjectIn):
         if c.execute("SELECT 1 FROM projects WHERE name=?", (body.name,)).fetchone():
             raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
         c.execute(
-            "INSERT INTO projects(name, org, project, repo_path, repo_label, extra_dirs) "
-            "VALUES(?,?,?,?,?,?)",
-            (body.name, body.org, body.project, *cols),
+            "INSERT INTO projects(name, org, project, repo_path, repo_label, extra_dirs, "
+            "ado_pat) VALUES(?,?,?,?,?,?,?)",
+            (body.name, body.org, body.project, *cols, body.ado_pat or ""),
         )
     return project_out(get_project(body.name))
 
@@ -1074,18 +1092,22 @@ def create_project(body: ProjectIn):
 @app.put("/projects/{name}")
 def update_project(name: str, body: ProjectIn):
     # ponytail: full replace, no partial PATCH — the form sends everything.
-    if not get_project(name):
+    existing = get_project(name)
+    if not existing:
         raise HTTPException(404)
     # Renaming is safe: tickets copy the project's data when they're created, so none
     # of them point here. All that matters is keeping the name unique.
     if body.name != name and get_project(body.name):
         raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
     cols = repos_columns(body)
+    # `None` (the field wasn't sent) keeps the stored token — the API never returns
+    # it, so the form has nothing to resend. Anything else, including "", replaces it.
+    pat = existing["ado_pat"] if body.ado_pat is None else body.ado_pat
     with db() as c:
         c.execute(
             "UPDATE projects SET name=?, org=?, project=?, repo_path=?, repo_label=?, "
-            "extra_dirs=? WHERE name=?",
-            (body.name, body.org, body.project, *cols, name),
+            "extra_dirs=?, ado_pat=? WHERE name=?",
+            (body.name, body.org, body.project, *cols, pat, name),
         )
     return project_out(get_project(body.name))
 
@@ -1129,9 +1151,9 @@ def create_ticket(body: TicketIn):
         if has_ado:
             cur = c.execute(
                 "INSERT INTO tickets(ado_id, org, project, repo_path, repo_label, extra_dirs, "
-                "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                "ado_pat, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                 (body.ado_id, proj["org"], proj["project"], proj["repo_path"],
-                 proj["repo_label"], proj["extra_dirs"], ts, ts),
+                 proj["repo_label"], proj["extra_dirs"], proj["ado_pat"], ts, ts),
             )
         else:
             # Provisional title so the list doesn't show a bare key until the first
@@ -1139,9 +1161,9 @@ def create_ticket(body: TicketIn):
             title = next(ln.strip() for ln in body.request.splitlines() if ln.strip())[:80]
             cur = c.execute(
                 "INSERT INTO tickets(ado_id, org, project, repo_path, repo_label, extra_dirs, "
-                "created_at, updated_at, request, title) VALUES('',?,?,?,?,?,?,?,?,?)",
+                "ado_pat, created_at, updated_at, request, title) VALUES('',?,?,?,?,?,?,?,?,?,?)",
                 (proj["org"], proj["project"], proj["repo_path"], proj["repo_label"],
-                 proj["extra_dirs"], ts, ts, body.request, title),
+                 proj["extra_dirs"], proj["ado_pat"], ts, ts, body.request, title),
             )
             # The key is minted from the row id: already unique, already monotonic —
             # a second counter would be a second thing to drift. The `R-` prefix keeps
@@ -1578,6 +1600,10 @@ def ticket_out(t: sqlite3.Row, phases: list[dict]) -> dict:
     d = dict(t)
     # Derived, never stored: a stored copy could disagree with `request`.
     d["origen"] = "local" if d.get("request") else "ado"
+    # The token never leaves the backend, not even to the ticket's own owner: `dict(t)`
+    # above copies every column, `ado_pat` included, so it has to be popped explicitly
+    # rather than trusted to an allowlist elsewhere forgetting about it.
+    d.pop("ado_pat", None)
     return {**d, "status": folded_status(phases), "fases": phases}
 
 
@@ -2033,6 +2059,12 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # more specific setting and must win over a label typed in the UI.
         if "ADO_ORG" not in env:
             env["ADO_ORG"] = ticket["org"]
+        # The Azure PAT, when the project has one configured. Absent, nothing changes:
+        # `${ADO_AUTH:-azcli}` in the plugin's `.mcp.json` keeps defaulting to the
+        # `az login` session, exactly as before this feature existed.
+        if ticket.get("ado_pat"):
+            env["ADO_AUTH"] = "envvar"
+            env["ADO_MCP_AUTH_TOKEN"] = ticket["ado_pat"]
         # `--add-dir` grants file access, not configuration discovery: from a mounted
         # repo it loads `.claude/skills/` and `.claude/agents/`, but NOT its CLAUDE.md
         # nor `.claude/rules/`. Without this the agent writes the extra repo's code

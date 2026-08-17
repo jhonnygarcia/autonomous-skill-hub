@@ -67,8 +67,15 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
   const [actionError, setActionError] = useState("")
   const [confirmLeave, setConfirmLeave] = useState(false)
   const snapshot = useRef(JSON.stringify(initial ?? newProject()))
+  // The token never round-trips (the API is write-only for it), so it can't live in
+  // `form`/`snapshot` like every other field: there is nothing to snapshot it against.
+  // `tokenInput` is what replaces the stored token, if anything; `clearToken` is the
+  // explicit "remove it" action — two different intents that an empty string can't
+  // tell apart on its own (typing nothing must leave the token untouched, not erase it).
+  const [tokenInput, setTokenInput] = useState("")
+  const [clearToken, setClearToken] = useState(false)
 
-  const dirty = JSON.stringify(form) !== snapshot.current
+  const dirty = JSON.stringify(form) !== snapshot.current || !!tokenInput.trim() || clearToken
   const patch = (fn: (rs: Repo[]) => Repo[]) => setForm(f => ({ ...f, repos: fn(f.repos) }))
 
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
@@ -105,7 +112,15 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
     }
     setActionError("")
     // blank rows are dropped here; the backend rejects paths that don't exist
-    api.saveProject({ ...form, repos: form.repos.filter(r => r.path.trim()) }, original)
+    const payload: Project = { ...form, repos: form.repos.filter(r => r.path.trim()) }
+    // `ado_pat_configured` is server-reported and read-only here; sending it back
+    // would be harmless (the backend ignores unknown intent on that field) but it's
+    // not this form's to echo. `ado_pat` itself stays OMITTED unless the human acted:
+    // omitted is what tells the backend "leave the stored token untouched".
+    delete payload.ado_pat_configured
+    if (clearToken) payload.ado_pat = ""
+    else if (tokenInput.trim()) payload.ado_pat = tokenInput.trim()
+    api.saveProject(payload, original)
       .then(p => onSaved(p.name))
       .catch(err => setActionError(String(err)))
   }
@@ -161,6 +176,28 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
                  onChange={e => setForm({ ...form, project: e.target.value })} />
         </Field>
       </div>
+
+      <Field id="campo-ado-pat" label="Token de Azure DevOps (PAT)"
+             hint="opcional — sin él se usa la sesión de az login">
+        <Input id="campo-ado-pat" type="password" autoComplete="new-password"
+               placeholder={form.ado_pat_configured && !clearToken
+                 ? "•••••••• (configurado — deja vacío para no cambiarlo)"
+                 : "pégalo aquí para configurarlo"}
+               value={tokenInput} disabled={clearToken}
+               onChange={e => setTokenInput(e.target.value)} />
+        {form.ado_pat_configured && (
+          <label className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" checked={clearToken}
+                   onChange={e => { setClearToken(e.target.checked); setTokenInput("") }} />
+            Quitar el token configurado
+          </label>
+        )}
+        <p className="mt-1 text-xs text-muted-foreground">
+          Se guarda tal cual, en texto plano, en <code>orchestrator.db</code>: no hay
+          cifrado en reposo. Que la API nunca lo devuelva evita que se filtre por ahí,
+          pero no protege el archivo en disco.
+        </p>
+      </Field>
 
       <div>
         <p className="text-xs font-medium">Repos que verá el agente</p>

@@ -27,6 +27,13 @@ if os.environ.get("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"):
     print("FAKE-CLAUDE SAW-EXTRA-CLAUDE-MD")
 if os.environ.get("ADO_ORG"):
     print("FAKE-CLAUDE ADO_ORG=" + os.environ["ADO_ORG"])
+if os.environ.get("ADO_AUTH"):
+    print("FAKE-CLAUDE ADO_AUTH=" + os.environ["ADO_AUTH"])
+# The token itself is never printed, on purpose: a real CLI doesn't echo its env back
+# into the log either, and a test that wants the value can read it straight from the
+# env var it set, not from the log this fake writes.
+if os.environ.get("ADO_MCP_AUTH_TOKEN"):
+    print("FAKE-CLAUDE SAW-ADO-TOKEN")
 if _session_line:          # FAKE_SESSION_LATE: after the padding, in a later chunk
     print(_session_line)
 print('{"type":"assistant","text":"analizando..."}')
