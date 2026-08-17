@@ -2880,3 +2880,58 @@ def test_archive_run_survives_a_non_oserror_failure(client, monkeypatch, tmp_pat
     client.post(f"/tickets/{tid}/run", json={})
     run = client.get(f"/tickets/{tid}").json()["runs"][0]
     assert run["status"] == "success" and run["artifact_state"] == "ok"
+
+
+def test_launch_archives_what_the_phase_will_read_including_human_edits(client, monkeypatch, tmp_path):
+    """The seam between phases is the human ticking boxes in the .md. The salida of
+    `analyze` has the box open; the entrada of `design` has it ticked — restoring the
+    former would hand back the questions unanswered."""
+    _archive_on(client, tmp_path)
+    tickets = tmp_path / "repo" / "docs" / "tickets"
+    tickets.mkdir(parents=True)
+    analysis = tickets / "3323-analysis.md"
+    analysis.write_text("## Decisiones para ti\n- [ ] **DECIDIR** usar cola\n", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    first = Path(client.get(f"/tickets/{tid}").json()["runs"][0]["archive_path"])
+    # the human answers
+    analysis.write_text("## Decisiones para ti\n- [x] **DECIDIR** usar cola\n", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
+    (tmp_path / "repo" / "openspec" / "changes" / "3323-xpo").mkdir(parents=True)
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    second = Path(client.get(f"/tickets/{tid}").json()["runs"][0]["archive_path"])
+    assert "- [ ]" in (first / "salida" / "docs" / "tickets" / "3323-analysis.md").read_text(encoding="utf-8")
+    assert "- [x]" in (second / "entrada" / "docs" / "tickets" / "3323-analysis.md").read_text(encoding="utf-8")
+    # entrada also carries the journal as it was BEFORE this run's line
+    assert (second / "entrada" / "docs" / "tickets" / "3323-journal.md").exists()
+
+
+def test_run_with_no_stamp_still_has_entrada_and_run_json(client, monkeypatch, tmp_path):
+    _archive_on(client, tmp_path)
+    (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "repo" / "docs" / "tickets" / "1-request.md").write_text("pedido")
+    _use_fake_claude(monkeypatch, stamp="nada — no pude")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    folder = Path(run["archive_path"])
+    assert (folder / "entrada" / "docs" / "tickets" / "1-request.md").exists()
+    assert not (folder / "salida").exists()
+    assert json.loads((folder / "run.json").read_text(encoding="utf-8"))["artifact_state"] == "nada"
+
+
+def test_entrada_includes_the_change_tree_a_previous_run_declared(client, monkeypatch, tmp_path):
+    """`implement` ticks tasks.md inside the tree `design` declared: the entrada of an
+    implement run is the plan as it stood before this run touched it."""
+    _archive_on(client, tmp_path)
+    change = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    change.mkdir(parents=True)
+    (change / "tasks.md").write_text("- [ ] 1")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo/tasks.md")
+    client.post(f"/tickets/{tid}/run", json={"phase": "analyze"})   # any later phase will do
+    latest = Path(client.get(f"/tickets/{tid}").json()["runs"][0]["archive_path"])
+    assert (latest / "entrada" / "openspec" / "changes" / "3323-xpo" / "tasks.md").exists()

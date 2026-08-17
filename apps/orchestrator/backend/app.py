@@ -1053,7 +1053,8 @@ def seconds(start: str | None, end: str | None) -> int | None:
 
 def append_journal(ticket: dict, phase: str, state: str, detail: str,
                    note: str | None = None, duration_s: int | None = None,
-                   branch: str | None = None, resumed_from: str | None = None) -> None:
+                   branch: str | None = None, resumed_from: str | None = None,
+                   extra: list[str] | None = None) -> None:
     """One line per closed run — error runs included, with their reason: it's exactly
     what a returning human wants to see. Inserted at the end of `## Corridas`, i.e.
     right before `## Hallazgos`, so that section keeps growing at the end of the file
@@ -1072,7 +1073,8 @@ def append_journal(ticket: dict, phase: str, state: str, detail: str,
                 + (f" · rama {branch}" if branch else "")
                 + (f" · ← resume de {resumed_from}" if resumed_from else "")
                 + "\n"
-                + (f"   · reserva: {note}\n" if note else ""))
+                + (f"   · reserva: {note}\n" if note else "")
+                + "".join(f"   · {x}\n" for x in (extra or [])))
         mark = "## Hallazgos"
         i = text.find(mark)
         text = text + line if i < 0 else text[:i] + line + text[i:]
@@ -1200,6 +1202,23 @@ def archive_run(ticket: dict, run_id: int, phase: str, kind: str, rels: list[str
         # contract, not one scoped to filesystem failures.
         notes.append(f"archivo: no copiado — {exc}")
     return notes
+
+
+def entrada_rels(ticket: dict) -> list[str]:
+    """What a phase is about to read: every `docs/tickets/<llave>-*` file (analysis,
+    brief, request, journal — whichever exist) plus any tree a previous good run of
+    this ticket declared (the OpenSpec change `implement` writes into)."""
+    repo = Path(ticket["repo_path"])
+    key = ticket["ado_id"]
+    rels = [p.relative_to(repo).as_posix()
+            for p in sorted((repo / "docs" / "tickets").glob(f"{key}-*")) if p.is_file()]
+    with db() as c:
+        declared = [r["artifact_path"] for r in c.execute(
+            "SELECT DISTINCT artifact_path FROM runs WHERE ticket_id=? "
+            "AND artifact_state IN ('ok','parcial') AND artifact_path IS NOT NULL",
+            (ticket["id"],))]
+    rels += [d for d in declared if d not in rels and (repo / d).is_dir()]
+    return rels
 
 
 def stamp_stat(repo: str, rel: str) -> dict:
@@ -1736,6 +1755,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             req = Path(ticket["repo_path"]) / REQUEST_FILE_REL.format(ado_id=ticket["ado_id"])
             req.parent.mkdir(parents=True, exist_ok=True)
             req.write_text(ticket["request"], encoding="utf-8")
+        # The entrada is what the phase is about to read, human edits included (the
+        # ticked DECIDIR boxes live nowhere else). Taken AFTER the request projection
+        # so it matches the disk the agent sees. Notes wait for the journal line.
+        archive_notes = archive_run(ticket, run_id, phase, "entrada",
+                                    entrada_rels(ticket), started)
         prev = last_session(ticket["id"], phase, engine) if resume else None
         if prev:
             # NOT the slash command. The session already ran the skill; sending it
@@ -1877,7 +1901,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                 artifact_state=state, artifact_path=path, artifact_note=note,
                 artifact_exists=None if on_disk is None else int(on_disk))
         append_journal(ticket, phase, state, path, note,
-                       seconds(started, fin), branch, prev)
+                       seconds(started, fin), branch, prev, extra=archive_notes)
         # AFTER the journal line, so the journal copied into salida/ already carries
         # this run. Only what closed with a footprint has a salida; the request and the
         # journal ride along because they're the two files a returning human reads
