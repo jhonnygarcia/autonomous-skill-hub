@@ -372,15 +372,36 @@ the `survey` phase's no-brief return closes *after* it, so a run that hits it ke
 an `entrada/` and a `run.json` and never gets a `salida/`. Reviewed and kept as-is
 rather than made uniform.
 
-**`org` and `project` are labels here, not configuration.** The runner never exports
-`ADO_ORG` and never puts the project name in the prompt: the subprocess inherits the
-backend's environment and Claude Code resolves both from the *target repo's*
-`.claude/settings.json` and `.claude/ticket-agent.json` once `cwd` lands there. The
-only things `app.py` reads them for are display and the "another project's ticket is
-running" message. So a project registered in the UI with a correct org still fails if
-the repo on disk lacks its two files — the UI shows nothing wrong, because the UI
-never had the authority. Registering a repo in the orchestrator is not configuring
-it.
+**`org` and `project` used to be labels here, not configuration — reversed on
+2026-08-17.** Until then the runner never exported `ADO_ORG` and never wrote
+`.claude/ticket-agent.json`: the subprocess only inherited the backend's environment,
+and Claude Code resolved both from the *target repo's* own `.claude/settings.json`
+and `.claude/ticket-agent.json` once `cwd` landed there. That meant a project
+registered in the UI with a correct org still failed if the repo on disk lacked its
+two files, and it failed with "MCP not connected" — which reads like a wrong org and
+sends you to the wrong file, not to the missing one. STATUS.md #21's decision ("the
+UI is the product and the plugin is the engine: every friction of using the plugin
+bare is a feature the UI owes") makes that failure the orchestrator's to fix, since
+it already has both values as columns on the ticket.
+
+So now it does two things, both in `execute_run`, right before launching:
+- **Exports `ADO_ORG`** from `ticket["org"]` into the subprocess environment, but
+  **only when it isn't already there** — the repo's own `.claude/settings.json` is
+  the more specific setting and must win over a label typed in the UI, so this is a
+  fallback, not an override.
+- **Creates `.claude/ticket-agent.json`** in the primary repo when it's missing
+  (`ensure_ticket_agent_config`, for the phases in `PHASE_MCP` — the ones that
+  actually stop without it), writing only `organization` and `project`: the two keys
+  the orchestrator has an actual source for. It never overwrites an existing file,
+  whatever it contains — a human may have tuned it, or added `autonomy` or
+  `subagent_model`, keys the orchestrator has no value for and won't invent. When it
+  writes the file, it says so in the ticket's journal (`journal_note`), because a
+  file that appears by itself with nobody saying so is worse than no file.
+
+What `app.py` reads `org`/`project` for beyond this is still just display and the
+"another project's ticket is running" message — registering a repo in the
+orchestrator still isn't the same as configuring it, it's just less likely to be
+missing now.
 
 **The phase decides the command, the tools, and the final state.** Four tables next to
 `PHASES` in `app.py`: `PHASE_COMMANDS` (what's launched), `PHASE_ALLOWED_TOOLS` (which

@@ -683,6 +683,33 @@ REQUEST_PROMPT = (
     "other document in the repo.")
 NO_BRIEF_REASON = (
     "no existe el brief de la fase anterior; corre primero la fase «brief»")
+TICKET_AGENT_CONFIG_REL = ".claude/ticket-agent.json"
+
+
+def ensure_ticket_agent_config(ticket: dict) -> bool:
+    """Creates `.claude/ticket-agent.json` in the primary repo if it's missing.
+    Returns whether it wrote anything.
+
+    **Never overwrites.** A human may have tuned the file, or added keys the
+    orchestrator knows nothing about (`autonomy`, `subagent_model`) — an existing
+    file is left byte-for-byte alone, whatever it holds.
+
+    Writes only what the orchestrator actually has a source for: `organization`
+    and `project`, copied from the ticket the same way `org`/`project` already are.
+    No `autonomy`: the skills treat it (and its absence) as `supervised`, the safe
+    default, so inventing a value here would be filler with no source — see
+    `ticket-comprehension/SKILL.md` step 4. No `subagent_model` either: the
+    orchestrator has no value for it and the README's example is not a source.
+    """
+    path = Path(ticket["repo_path"]) / TICKET_AGENT_CONFIG_REL
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"organization": ticket["org"], "project": ticket["project"]},
+                  indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    return True
 JOURNAL_REL = "docs/tickets/{ado_id}-journal.md"
 JOURNAL_HEADER = "# Journal — {ado_id}\n\n## Corridas\n\n## Hallazgos\n"
 # Prompt-facing. The skills know how to write their own run line — that is what makes
@@ -1879,6 +1906,12 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             req = Path(ticket["repo_path"]) / REQUEST_FILE_REL.format(ado_id=ticket["ado_id"])
             req.parent.mkdir(parents=True, exist_ok=True)
             req.write_text(ticket["request"], encoding="utf-8")
+        if phase in PHASE_MCP and ensure_ticket_agent_config(ticket):
+            # A file that appears by itself with nobody saying so is worse than no
+            # file — recorded right away, not folded into the close-of-run line,
+            # since the run itself may still end in error.
+            journal_note(ticket, "el runner creó .claude/ticket-agent.json "
+                                 "(organization, project) porque no existía")
         # The entrada is what the phase is about to read, human edits included (the
         # ticked DECIDIR boxes live nowhere else). Taken AFTER the request projection
         # so it matches the disk the agent sees. Notes wait for the journal line.
@@ -1992,6 +2025,14 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # One list per engine: each provider reads its own, and leaving another's in
         # place would be leaving the door open for whichever engine gets added next.
         env = {k: v for k, v in os.environ.items() if k not in API_KEY_VARS}
+        # The orchestrator already knows the org (it's a column on the ticket, copied
+        # from the project) — exporting it is what lets a target repo that lacks its
+        # own `ADO_ORG` still connect, instead of failing with a message that reads
+        # like a wrong org and sends you to the wrong file. Only when it's NOT already
+        # in the inherited environment: the repo's own `.claude/settings.json` is the
+        # more specific setting and must win over a label typed in the UI.
+        if "ADO_ORG" not in env:
+            env["ADO_ORG"] = ticket["org"]
         # `--add-dir` grants file access, not configuration discovery: from a mounted
         # repo it loads `.claude/skills/` and `.claude/agents/`, but NOT its CLAUDE.md
         # nor `.claude/rules/`. Without this the agent writes the extra repo's code

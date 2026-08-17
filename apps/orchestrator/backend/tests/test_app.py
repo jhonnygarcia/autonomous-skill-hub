@@ -3401,8 +3401,12 @@ def test_tree_cap_stops_walking_as_soon_as_it_is_crossed(client, monkeypatch, tm
     # A full walk stats every one of the 60 files at least once (120+ calls between
     # `is_file()` and the explicit `.stat().st_size`), plus whatever else in this
     # request happens to touch `docs/`. Short-circuiting at the 4th file keeps the
-    # total well under half the tree instead of covering all of it.
-    assert calls["n"] < 30
+    # total well under half the tree instead of covering all of it. The margin above
+    # 30 (raised from an exact 30) covers the extra couple of stats from
+    # `ensure_ticket_agent_config`'s own `journal_note`, which also touches
+    # `docs/tickets/1-journal.md` — real work from a real feature, not the walk this
+    # test pins.
+    assert calls["n"] < 40
 
 
 def test_restore_journal_note_is_not_labeled_as_a_reserve(client, monkeypatch, tmp_path):
@@ -3464,3 +3468,74 @@ def test_only_the_retryable_restore_409_carries_a_machine_readable_code(
     active_r = client.post(f"/tickets/{tid2}/restaurar", json={"run_id": run_id2})
     assert active_r.status_code == 409
     assert isinstance(active_r.json()["detail"], str)
+
+
+# --- Feature A: the runner supplies what the target repo is missing -------------
+
+
+def test_ado_org_reaches_the_subprocess(client, monkeypatch):
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 50, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_ORG=DemoOrg" in log
+
+
+def test_inherited_ado_org_is_not_overridden(client, monkeypatch):
+    """The repo's own `.claude/settings.json` (simulated here by the inherited
+    process environment) is the more specific setting and has to win over the label
+    typed in the UI."""
+    _use_fake_claude(monkeypatch)
+    monkeypatch.setenv("ADO_ORG", "YaConfigurado")
+    tid = client.post("/tickets", json={"ado_id": 51, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_ORG=YaConfigurado" in log
+    assert "FAKE-CLAUDE ADO_ORG=DemoOrg" not in log
+
+
+def test_ticket_agent_config_is_created_when_missing(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 52, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    cfg_path = tmp_path / "repo" / ".claude" / "ticket-agent.json"
+    assert json.loads(cfg_path.read_text(encoding="utf-8")) == {
+        "organization": "DemoOrg", "project": "Demo"}
+
+
+def test_existing_ticket_agent_config_is_left_untouched(client, monkeypatch, tmp_path):
+    """A human may have tuned it, or added keys the orchestrator has no source for
+    (`autonomy`, `subagent_model`, or something invented entirely) — the file is left
+    byte-for-byte alone, whatever it holds."""
+    _use_fake_claude(monkeypatch)
+    cfg_path = tmp_path / "repo" / ".claude" / "ticket-agent.json"
+    cfg_path.parent.mkdir(parents=True)
+    original = ('{"organization": "Otra", "project": "OtroProyecto", '
+                '"autonomy": "autonomous", "capricho": true}')
+    cfg_path.write_text(original, encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 53, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert cfg_path.read_text(encoding="utf-8") == original
+
+
+def test_journal_records_the_config_file_creation(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/54-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 54, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "54-journal.md").read_text(
+        encoding="utf-8")
+    assert "creó .claude/ticket-agent.json" in journal
+
+
+def test_config_creation_only_journaled_once(client, monkeypatch, tmp_path):
+    """The second run finds the file already there and says nothing new about it."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/55-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 55, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    _use_fake_claude(monkeypatch,
+                     stamp="parcial — openspec/changes/55-x · falta algo")
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "55-journal.md").read_text(
+        encoding="utf-8")
+    assert journal.count("creó .claude/ticket-agent.json") == 1
+

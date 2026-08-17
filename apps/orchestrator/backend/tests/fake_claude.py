@@ -25,6 +25,8 @@ if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
     print("FAKE-CLAUDE SAW-API-KEY")
 if os.environ.get("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"):
     print("FAKE-CLAUDE SAW-EXTRA-CLAUDE-MD")
+if os.environ.get("ADO_ORG"):
+    print("FAKE-CLAUDE ADO_ORG=" + os.environ["ADO_ORG"])
 if _session_line:          # FAKE_SESSION_LATE: after the padding, in a later chunk
     print(_session_line)
 print('{"type":"assistant","text":"analizando..."}')
