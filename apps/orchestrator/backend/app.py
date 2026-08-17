@@ -1980,6 +1980,56 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
 
 
+class RestoreIn(BaseModel):
+    run_id: int
+    overwrite: bool = False
+
+
+@app.post("/tickets/{tid}/restaurar")
+def restore_run(tid: int, body: RestoreIn):
+    """Copies the salida/ of one run back to where the phases read it. A human act,
+    never a phase's: the archive is a record, and this is the one door from it back
+    into the repo. Files may be overwritten on request; trees never — `implement`
+    ticks `tasks.md` inside the tree `design` declared, and putting the older tree back
+    would untick real progress."""
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    with db() as c:
+        r = c.execute("SELECT * FROM runs WHERE id=? AND ticket_id=?",
+                      (body.run_id, tid)).fetchone()
+        active = c.execute(
+            "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued','running')",
+            (tid,)).fetchone()
+    if not r or not r["archive_path"] or r["artifact_state"] not in ("ok", "parcial"):
+        raise HTTPException(404, "Esa corrida no dejó snapshot que restaurar")
+    if active:
+        raise HTTPException(409, "Este ticket tiene una corrida activa; restaura cuando termine")
+    rel = r["artifact_path"]
+    src = Path(r["archive_path"]) / "salida" / rel
+    if not src.exists():
+        raise HTTPException(404, f"El snapshot ya no está en disco: {src}")
+    repo = Path(t["repo_path"]).resolve()
+    dest = (repo / rel).resolve()
+    if not dest.is_relative_to(repo):
+        raise HTTPException(400, f"Ruta fuera del repo: {rel}")
+    if src.is_dir():
+        if dest.exists() and any(x.is_file() for x in dest.rglob("*")):
+            raise HTTPException(
+                409, f"Ya hay archivos en {rel}: un árbol nunca se sobreescribe. "
+                     "Si de verdad quieres volver atrás, bórralo a mano y vuelve a restaurar")
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+        n = sum(1 for x in src.rglob("*") if x.is_file())
+    else:
+        if dest.exists() and not body.overwrite:
+            raise HTTPException(409, f"Ya existe {rel}; repite con overwrite para reemplazarlo")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        n = 1
+    append_journal(dict(t), "restaurar", "ok", rel, note=f"desde run {r['id']}")
+    return {"restaurado": rel, "archivos": n}
+
+
 def declared_file(t: sqlite3.Row, ruta: str) -> Path:
     """Resolves `ruta` against the ticket's main repo and enforces the three rules that
     make a path servable: declared by a run OF THIS ticket (or under a declared

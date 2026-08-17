@@ -138,6 +138,7 @@ def test_ticket_inherits_extra_dirs_from_project(client):
 
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -2973,3 +2974,100 @@ def test_a_declared_tree_over_the_cap_is_skipped_not_copied(client, monkeypatch,
     # not "4 archivos": by close time `docs/` also holds `docs/tickets/1-journal.md`,
     # and the count is whatever the tree held when it was measured
     assert "· archivo: omitido — docs:" in journal
+
+
+def _archived_analysis(client, monkeypatch, tmp_path, key=3323):
+    """One good analyze run with the archive on; returns (tid, run_id, path on disk)."""
+    _archive_on(client, tmp_path)
+    p = tmp_path / "repo" / "docs" / "tickets" / f"{key}-analysis.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("versión uno", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp=f"ok — docs/tickets/{key}-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": key, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run_id = client.get(f"/tickets/{tid}").json()["runs"][0]["id"]
+    return tid, run_id, p
+
+
+def test_restore_puts_a_deleted_file_back_and_journals_it(client, monkeypatch, tmp_path):
+    tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
+    p.unlink()
+    assert _phase(client, tid, "analyze")["huella"]["existe"] is False
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 200
+    assert r.json() == {"restaurado": "docs/tickets/3323-analysis.md", "archivos": 1}
+    assert p.read_text(encoding="utf-8") == "versión uno"
+    assert _phase(client, tid, "analyze")["huella"]["existe"] is True
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "3323-journal.md").read_text(encoding="utf-8")
+    assert f"· restaurar · ok · docs/tickets/3323-analysis.md" in journal
+    assert f"desde run {run_id}" in journal
+
+
+def test_restore_refuses_to_overwrite_a_file_unless_asked(client, monkeypatch, tmp_path):
+    tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
+    p.write_text("versión dos", encoding="utf-8")   # e.g. consolidate rewrote it
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 409 and "overwrite" in r.json()["detail"]
+    assert p.read_text(encoding="utf-8") == "versión dos"
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id, "overwrite": True})
+    assert r.status_code == 200
+    assert p.read_text(encoding="utf-8") == "versión uno"
+
+
+def test_restore_never_overwrites_a_tree(client, monkeypatch, tmp_path):
+    """`implement` ticks tasks.md INSIDE the tree `design` declared. Putting the design
+    snapshot back over it would untick real progress — so a tree only comes back when
+    it's gone, `overwrite` or not."""
+    _archive_on(client, tmp_path)
+    change = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    change.mkdir(parents=True)
+    (change / "tasks.md").write_text("- [ ] 1")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    run_id = client.get(f"/tickets/{tid}").json()["runs"][0]["id"]
+    (change / "tasks.md").write_text("- [x] 1")
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id, "overwrite": True})
+    assert r.status_code == 409 and "árbol" in r.json()["detail"]
+    assert (change / "tasks.md").read_text() == "- [x] 1"
+    # gone → comes back whole
+    shutil.rmtree(change)
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 200 and r.json()["archivos"] == 1
+    assert (change / "tasks.md").read_text() == "- [ ] 1"
+
+
+def test_restore_refuses_while_a_run_is_active(client, monkeypatch, tmp_path):
+    import app as app_module
+    tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
+    p.unlink()
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?, 'design', 'running')", (tid,))
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 409 and "activa" in r.json()["detail"]
+    assert not p.exists()
+
+
+def test_restore_404_when_the_run_has_no_snapshot(client, monkeypatch, tmp_path):
+    (tmp_path / "repo" / "a.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")          # archive off
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run_id = client.get(f"/tickets/{tid}").json()["runs"][0]["id"]
+    assert client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id}).status_code == 404
+    assert client.post(f"/tickets/{tid}/restaurar", json={"run_id": 999}).status_code == 404
+
+
+def test_deleting_the_archive_changes_nothing_about_the_next_run(client, monkeypatch, tmp_path):
+    """A record, never an input: no phase reads from the archive."""
+    _archive_on(client, tmp_path)
+    (tmp_path / "repo" / "a.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    shutil.rmtree(tmp_path / "archivo")
+    (tmp_path / "archivo").mkdir()
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["runs"][0]["status"] == "success"
+    assert "/ticket-agent:plan 1" in detail["log_tail"]
