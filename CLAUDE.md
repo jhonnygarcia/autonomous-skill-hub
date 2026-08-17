@@ -403,6 +403,14 @@ a file**, so Phase 2 never learns who wrote the analysis. Five things carry the 
 - **The binary is `ORCH_<ENGINE>_CMD` before it's the PATH.** On the machine this was
   built, `codex` on the PATH was 0.118.0 while the installed app shipped 0.147.0, and the
   configured model only ran on the newer one. A bare command name is not an address.
+- **The sandbox's network is a per-phase flag, and it is not the same everywhere.**
+  Phase 2 validates with `npx @fission-ai/openspec`, which downloads on every start.
+  Codex's `workspace-write` defaults to **no network** where it really sandboxes (Linux,
+  macOS); on Windows it doesn't sandbox that way, so a run there reaches the registry
+  without asking — which is the trap, not the reassurance. `codex_argv` passes
+  `-c sandbox_workspace_write.network_access=true` for the phases in `PHASE_NETWORK`,
+  derived from which phases carry Bash rather than kept as a second list. The key is
+  verified, not guessed: `--strict-config` accepts it and rejects an invented one.
 - **`API_KEY_VARS` grows with the registry.** "Subscription, never an API key" is the
   project's rule, not Anthropic's: adding an engine without adding its key variable
   quietly reintroduces API billing through the back door.

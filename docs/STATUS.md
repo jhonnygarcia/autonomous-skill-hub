@@ -261,6 +261,17 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     it looks: `JOURNAL_CLAIM` travels inside the pack and is obeyed, and
     `split_reserve` parses a ` · ` written by Codex.
 
+    **Phase 2 runs whole under Codex, OpenSpec included** (2026-08-17). Inside a
+    real orchestrated run: `npx --yes @fission-ai/openspec@latest validate
+    --changes --no-interactive` → `1 passed, 0 failed`, exit 0, and a complete
+    change on disk. The catch it exposed is worth keeping: `npx` needs the
+    network, and Codex's `workspace-write` sandbox has none by default where it
+    really sandboxes (Linux, macOS) — Windows just doesn't, so the machine this
+    was built on would never have shown it. `codex_argv` now passes
+    `-c sandbox_workspace_write.network_access=true` for `PHASE_NETWORK`,
+    derived from which phases carry Bash. The key is verified with
+    `--strict-config`, which rejects an invented one.
+
     Also found by running it for real end to end: with the prompt on stdin the
     log held only the argv line, so it recorded that something was launched
     and not what was asked. The runner now writes the prompt into the log

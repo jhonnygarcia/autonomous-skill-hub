@@ -151,10 +151,16 @@ del plugin de por medio.
 Costo: 338 K tokens de entrada (297 K cacheados), 3.8 K de salida — un orden de
 magnitud menos que `analyze`, porque paró temprano.
 
-**Lo único que quedó sin probar** es `npx @fission-ai/openspec` bajo Codex, porque para
-llegar ahí hay que responder el `BLOQUEA` — que es una decisión de producto del cliente,
-no algo que se invente para probar un CLI. El mecanismo funcionando es justamente lo que
-impide terminar de probarlo.
+**`npx @fission-ai/openspec` bajo Codex: probado el 2026-08-17 y funciona** — pero por
+una razón que no hay que celebrar. `npm view` contactó el registry y `npx cowsay@1.6.0`
+descargó un paquete que no estaba en caché, o sea red abierta. Solo que eso es cierto
+**en Windows**, donde Codex no sandboxea de esa forma; donde sí lo hace (Linux, macOS)
+`workspace-write` viene **sin red** por defecto. Apoyarse en la plataforma más débil es
+publicar una fase que funciona en la máquina donde se construyó y muere en la del
+compañero. Por eso `codex_argv` pasa `-c sandbox_workspace_write.network_access=true`
+en las fases que corren comandos (`PHASE_NETWORK`, derivado de quién lleva Bash). La
+clave está verificada, no adivinada: `--strict-config` la acepta y rechaza una
+inventada.
 
 ### La etapa 3, verificada por el orquestador de verdad (2026-08-17)
 
@@ -184,6 +190,31 @@ Dos cosas se rompieron y solo aparecieron aquí, no en los tests:
    eco: un fake demasiado servicial es un test que no afirma nada.
 2. **`survey` armaba sus hijos con Claude fijo**, así que elegir otro engine ahí se
    habría guardado y luego ignorado. Ahora se rechaza con el motivo escrito.
+
+### La fase 2 entera bajo Codex, con OpenSpec de verdad (2026-08-17)
+
+La última duda abierta, cerrada. `design` lanzada por `POST /tickets/{id}/run` con
+`engine: codex` sobre el análisis `R-1` (ticket sintético del hub, así que responder sus
+decisiones no decide nada del cliente):
+
+    status : success
+    huella : ok -> openspec/changes/R-1-nota-interna-ficha-cliente
+
+Dentro de la corrida, el comando real y su salida real:
+
+    npx --yes @fission-ai/openspec@latest validate --changes --no-interactive
+    ✓ change/R-1-nota-interna-ficha-cliente
+    Totals: 1 passed, 0 failed (1 items)      exit 0
+
+Y el cambio completo en disco: `proposal.md`, `design.md`, `tasks.md` y
+`specs/company-profiles/spec.md`. Antes de eso, `openspec init` creó `config.yaml` —
+o sea npx descargó y ejecutó el paquete dentro del sandbox, no desde un caché tibio.
+Ninguna denegación del sandbox en todo el log (los `denied` que aparecen son
+`AccessDenied` del código C# del repo).
+
+**El primer intento paró**, y también eso es resultado: `HUELLA: nada — 5 decisiones sin
+resolver`. Con `autonomy: supervised` un `DECIDIR` sin marcar detiene la fase siguiente,
+igual que en Claude. La costura humana no depende del engine.
 
 ## Lo verificado por CLI (2026-08-16)
 

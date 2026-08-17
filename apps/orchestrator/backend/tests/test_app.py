@@ -2651,3 +2651,26 @@ def test_the_fan_out_phase_refuses_another_engine(client):
     # Every other phase takes it.
     assert client.put("/modelos", json={"survey": {"engine": "claude"},
                                         "design": {"engine": "codex"}}).status_code == 200
+
+
+def test_codex_gets_network_only_where_commands_run(client, monkeypatch):
+    """Phase 2 validates with `npx @fission-ai/openspec`, which downloads the package on
+    every start. Codex's `workspace-write` sandbox defaults to **no network** where it
+    really sandboxes (Linux, macOS) — on Windows it happens not to, which is exactly the
+    trap: the phase would work on the machine it was built on and die on a colleague's.
+
+    And only there: Phase 1 is read-only, carries no Bash, and has nothing to download.
+    """
+    _use_fake_codex(monkeypatch, stamp="ok — openspec/changes/3311-notas/proposal.md")
+    KEY = "sandbox_workspace_write.network_access=true"
+
+    client.put("/modelos", json={"design": {"engine": "codex"}})
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    assert KEY in list(cap["argv"])
+
+    client.put("/modelos", json={"analyze": {"engine": "codex"}})
+    cap2 = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run", json={"phase": "analyze"})
+    assert KEY not in list(cap2["argv"])

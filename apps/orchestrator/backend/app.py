@@ -191,6 +191,11 @@ DEFAULT_ENGINE = "claude"
 # Rather than let Settings offer an engine the fan-out would then ignore, `PUT /modelos`
 # rejects it: a configuration silently disregarded is worse than one refused.
 SINGLE_ENGINE_PHASES = {"survey": "claude"}
+# Which phases run shell commands, and therefore may need the network. Derived from the
+# tools table instead of being a second list: "carries Bash" and "runs commands" are the
+# same fact, and two lists drift. Today it's `design` (npx openspec) and `implement`.
+PHASE_NETWORK = {f for f, tools in PHASE_ALLOWED_TOOLS.items()
+                 if any(t == "Bash" or t.startswith("Bash(") for t in tools)}
 # Subscription, never an API key: with these gone the only credential a child has left
 # is the machine's `login` session. One entry per provider the runner can launch — the
 # rule is the project's, not Anthropic's, so it grows with `ENGINES`.
@@ -1391,6 +1396,16 @@ def codex_argv(prompt: str, phase: str, cwd: str, extras: list[dict],
         # Without this, `exec` runs read-only and rejects every write even when
         # `--sandbox workspace-write` is passed. This is the `acceptEdits` of Codex.
         "--approve-for-me",
+        # Network, for the phases that run commands. On Windows this changes nothing —
+        # a run there reached the npm registry and downloaded a package without it —
+        # but `workspace-write` defaults to **no network** where Codex really sandboxes
+        # (Linux, macOS), and Phase 2's whole validation is `npx @fission-ai/openspec`,
+        # which downloads on every start. Relying on the weaker platform would mean
+        # shipping a phase that works here and dies on a colleague's machine.
+        # The key is real, not guessed: `--strict-config` accepts it and rejects an
+        # invented one (checked 2026-08-17).
+        *(["-c", "sandbox_workspace_write.network_access=true"]
+          if phase in PHASE_NETWORK else []),
         "--json",
         *model_for(phase, "codex"),
         *[a for e in extras for a in ("--add-dir", e["path"])],
