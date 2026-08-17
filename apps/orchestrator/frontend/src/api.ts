@@ -25,6 +25,11 @@ export type Run = {
   // The snapshot folder this run left, when the archive was on. `null` is the normal
   // case for every run before the archive existed and for runs with it switched off.
   archive_path: string | null
+  // Whether `salida/` actually holds the declared deliverable — NOT the same thing as
+  // `archive_path` being set (a fan-out survey's HUELLA is a scratch path outside every
+  // repo, so it gets an `archive_path` with nothing restorable inside it). `null` means
+  // "nobody checked": every run before this column existed, treated as not-restorable.
+  restorable: number | null
 }
 export type Footprint = {
   ruta: string; existe: boolean; archivos: number; bytes: number; nombres: string[]
@@ -76,10 +81,34 @@ export type PhaseModels = Record<string, PhaseConfig>
 // disagree with the one that validates.
 export type Engine = { id: string; label: string; efforts: string[] }
 
+/** Thrown by `json()` below. `code` only travels on the one refusal the caller may
+ *  legitimately retry (`/restaurar`'s "file already exists"); every other error is
+ *  Spanish prose meant for display, not for branching on. */
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.code = code
+  }
+}
+
 const json = async <T,>(r: Response): Promise<T> => {
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? r.statusText)
+  if (!r.ok) {
+    const detail = (await r.json().catch(() => null))?.detail
+    // `detail` is normally a plain Spanish sentence (CLAUDE.md: reworded at will, never
+    // matched on). The ONE exception is `/restaurar`'s retryable 409, shaped as
+    // `{code, msg}` — a machine-readable marker instead of sniffing a word out of the
+    // prose, which broke the day a ticket's own path happened to contain that word.
+    const isTagged = detail !== null && typeof detail === "object"
+    throw new ApiError(isTagged ? detail.msg : (detail ?? r.statusText),
+                        isTagged ? detail.code : undefined)
+  }
   return r.status === 204 ? (undefined as T) : r.json()
 }
+
+// Contract literal — matches `RESTORE_EXISTS_CODE` in `app.py`. The only `/restaurar`
+// 409 the UI may retry with `overwrite: true`.
+export const RESTORE_EXISTS_CODE = "existe_archivo"
 
 export const api = {
   projects: () => fetch("/api/projects").then(r => json<Project[]>(r)),

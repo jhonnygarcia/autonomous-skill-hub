@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { ActiveRun, TicketDetail as Detail } from "@/api"
+import { ApiError, RESTORE_EXISTS_CODE, type ActiveRun, type TicketDetail as Detail } from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/ConfirmDialog"
@@ -26,17 +26,32 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmRestore, setConfirmRestore] = useState<number | null>(null)   // run id
   const [restoreError, setRestoreError] = useState("")
+  // Which run ids have an in-flight restore: without this, a fast double-click sends
+  // a second request for the file the first one just put back, and that one 409s and
+  // pops a dialog nobody asked for.
+  const [restoring, setRestoring] = useState<Set<number>>(new Set())
   const t = detail.ticket
   const { label, color } = ticketStatus(t, activeRun)
   const reason = blockReason(t, activeRun)
 
-  const restore = (runId: number, overwrite = false) =>
-    onRestore(runId, overwrite).then(() => setRestoreError("")).catch((e: Error) => {
-      // The backend's 409 for a FILE says how to proceed; a tree's 409 doesn't, and
-      // the dialog must not offer what the backend will refuse anyway.
-      if (String(e.message).includes("overwrite")) setConfirmRestore(runId)
+  const restore = (runId: number, overwrite = false) => {
+    setRestoring(prev => new Set(prev).add(runId))
+    return onRestore(runId, overwrite).then(() => setRestoreError("")).catch((e: ApiError) => {
+      // The backend tags the ONE retryable 409 with a code — never sniffed out of the
+      // Spanish sentence, which CLAUDE.md classifies as free to reword. A tree's 409
+      // carries no code, and the dialog must not offer what the backend will refuse
+      // anyway.
+      // A stale error from an earlier, unrelated restore must not still be on screen
+      // once this dialog is up — otherwise a genuine failure from before reads like
+      // it's about the confirmation now showing.
+      if (e.code === RESTORE_EXISTS_CODE) { setRestoreError(""); setConfirmRestore(runId) }
       else setRestoreError(String(e.message))
-    })
+    }).finally(() => setRestoring(prev => {
+      const next = new Set(prev)
+      next.delete(runId)
+      return next
+    }))
+  }
 
   return (
     <div className="space-y-4">
@@ -60,7 +75,7 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
 
       <Timeline phases={detail.fases} runs={detail.runs} activeRun={activeRun} ticketId={t.id}
                 onRun={(phase, ins, resume) => onRun(ins, phase, resume)}
-                onRestore={runId => restore(runId)} />
+                onRestore={runId => restore(runId)} restoring={restoring} />
 
       <div>
         <button className={TOGGLE} onClick={() => setShowHistory(v => !v)}>
@@ -88,9 +103,14 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
                     ✎ {r.instructions}
                   </span>
                 )}
-                {r.archive_path && (r.artifact_state === "ok" || r.artifact_state === "parcial") && (
+                {/* `restorable` — not `archive_path` — is what says the button can
+                    actually work: a fan-out survey gets an `archive_path` too, but its
+                    HUELLA is a scratch path outside every repo, so its `salida/` never
+                    holds the declared deliverable. */}
+                {!!r.restorable && (r.artifact_state === "ok" || r.artifact_state === "parcial") && (
                   <Button size="sm" variant="ghost" className="ml-auto h-6 text-xs"
-                          onClick={() => restore(r.id)} title={r.archive_path}>
+                          disabled={restoring.has(r.id)}
+                          onClick={() => restore(r.id)} title={r.archive_path ?? undefined}>
                     Restaurar
                   </Button>
                 )}

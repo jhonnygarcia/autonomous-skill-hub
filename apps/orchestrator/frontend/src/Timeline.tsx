@@ -18,13 +18,16 @@ const CHIP =
  * where the information is, the same principle that moved the repos into the project
  * header. Phases that don't exist yet show dimmed: the pending path is context.
  */
-export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore }: {
+export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, restoring }: {
   phases: Phase[]
   runs: Run[]
   activeRun: ActiveRun | null
   ticketId: number
   onRun: (phase: string, instructions?: string, resume?: boolean) => void
   onRestore: (runId: number) => void
+  /** Run ids with a restore in flight — disables the button so a fast double-click
+   *  doesn't send a second request for the file the first one just put back. */
+  restoring: Set<number>
 }) {
   const [openPhase, setOpenPhase] = useState<string | null>(null)   // instructions box
   const [instructions, setInstructions] = useState("")
@@ -59,10 +62,13 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore }
         // first one matching this phase is its most recent run, the same one that
         // produced `h`. Only `implement` sets it — the rest arrive as `null`.
         const branch = runs.find(r => r.phase === f.fase)?.branch ?? null
-        // The most recent good run of this phase that left a snapshot: what the
-        // Restore shortcut puts back when the deliverable is gone. Older snapshots are
-        // reachable from the run history.
-        const restorable = runs.find(r => r.phase === f.fase && r.archive_path
+        // The most recent good run of this phase whose salida actually holds the
+        // declared deliverable: what the Restore shortcut puts back when it's gone
+        // from disk. Older snapshots are reachable from the run history. Gated on
+        // `restorable`, not on `archive_path` alone — a fan-out survey gets an
+        // `archive_path` too, but its HUELLA is a scratch path outside every repo, so
+        // its `salida/` never has anything a restore could put back.
+        const restorableRun = runs.find(r => r.phase === f.fase && r.restorable
           && (r.artifact_state === "ok" || r.artifact_state === "parcial")) ?? null
         // Two shapes of artifact: a directory (path + "/" + each name) or a lone
         // file (the path is already complete and matches its own name). The
@@ -259,9 +265,10 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore }
                         Artefacto declarado en{" "}
                         <span className="font-mono">{h.ruta}</span>, no se encontró en disco
                       </span>
-                      {restorable && (
+                      {restorableRun && (
                         <Button size="sm" variant="outline" className="h-6 text-xs"
-                                onClick={() => onRestore(restorable.id)}>
+                                disabled={restoring.has(restorableRun.id)}
+                                onClick={() => onRestore(restorableRun.id)}>
                           Restaurar desde el archivo
                         </Button>
                       )}
