@@ -59,11 +59,16 @@ export type ActiveRun = {
 // what tells it when to look in that repo — without it, it's mounted but ignored.
 export type Repo = { path: string; label: string; primary: boolean }
 export type Project = { name: string; org: string; project: string; repos: Repo[] }
-// Model and effort each phase is launched with. Empty string = whatever the target
-// repo defaults to, which is what the orchestrator always did before this was
-// configurable.
-export type PhaseConfig = { model: string; effort: string }
+// Which CLI runs each phase, and with what model and effort. Empty model/effort =
+// whatever the target repo defaults to, which is what the orchestrator always did
+// before this was configurable; `engine` has no empty value, it defaults to claude.
+export type PhaseConfig = { engine: string; model: string; effort: string }
 export type PhaseModels = Record<string, PhaseConfig>
+// The engines the runner knows how to launch, served from the backend's own registry.
+// The efforts differ per engine and the list is NOT hardcoded here on purpose: `max`
+// is Claude's and Codex rejects it, and a second copy of that table would be free to
+// disagree with the one that validates.
+export type Engine = { id: string; label: string; efforts: string[] }
 
 const json = async <T,>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? r.statusText)
@@ -86,6 +91,7 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ruta }),
     }).then(r => json<{ existe: boolean }>(r)).then(x => x.existe),
+  engines: () => fetch("/api/engines").then(r => json<Engine[]>(r)),
   models: () => fetch("/api/modelos").then(r => json<PhaseModels>(r)),
   saveModels: (m: PhaseModels) =>
     fetch("/api/modelos", {

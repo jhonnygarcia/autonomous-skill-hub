@@ -369,20 +369,61 @@ ticket (or falls under a directory that was declared, at any depth), falls insid
 main repo or one of the ticket's extras, is a regular file, and is truncated to 512 KB
 without splitting a multibyte character.
 
-**The model and effort are also chosen per phase**, from Settings in the UI
-(`Models.tsx` → `GET/PUT /modelos`). They live in the `phase_config` table and nowhere
-else: empty means "whatever the CLI resolves in the target repo", which is the
-default behavior. `model_for` reads them **at launch time**, not at startup, because on
-Windows the backend isn't hot-reloaded. The model goes into argv, so it's validated
-against `MODEL_RE` — one starting with `-` would be another flag.
+**The engine, the model and the effort are chosen per phase**, from Settings in the UI
+(`Models.tsx` → `GET/PUT /modelos`, plus `GET /engines` for the selector's options).
+They live in the `phase_config` table and nowhere else: an empty model or effort means
+"whatever the CLI resolves in the target repo", which is the default behavior.
+`model_for` reads them **at launch time**, not at startup, because on Windows the
+backend isn't hot-reloaded. The model goes into argv, so it's validated against
+`MODEL_RE` — one starting with `-` would be another flag.
+
+**`ENGINES` is the registry of CLIs the runner can launch** (`claude` and `codex`,
+verified against real binaries on 2026-08-16 — the flag-by-flag equivalences and their
+surprises are in
+`docs/superpowers/specs/2026-08-16-orquestador-agnostico-de-engine-design.md`). Mixing
+them per phase works for the same reason the two Phase-1 routes do: **the deliverable is
+a file**, so Phase 2 never learns who wrote the analysis. Five things carry the design:
+
+- **The slash command is Claude's spelling of the skill, not the skill.** `/ticket-agent:analyze`
+  exists because a plugin is installed, and only Claude Code takes plugins. Every other
+  engine gets `PACK_HEADER` + `skill_body(phase)`: the same `SKILL.md`, inline, read from
+  `plugins/ticket-agent/skills/` in this repo. One source, two wrappings — which is also
+  why `PHASE_SKILL` must stay in sync with `PHASE_COMMANDS` (there's an `assert`).
+- **`HUELLA` needed no adapter and `session_id` did.** `STAMP_RE` parses Codex's JSONL
+  unchanged, because the stamp is the contract with the skills. The session id is each
+  CLI's own shape — Codex spells it `thread_id` — so it moved into
+  `ENGINES[...]["session_re"]`. **A resume never crosses engines**: `last_session` filters
+  by `runs.engine` (`COALESCE(engine,'claude')`, since every row predating the column was
+  Claude), because handing one CLI another's id doesn't fail cleanly — it silently starts
+  a fresh session that looks continued.
+- **Effort is per engine, not global.** `max` is legal in Claude and dies with a 400 from
+  the provider in Codex; `none`/`minimal` are the reverse. Each entry carries its own
+  `efforts` tuple, `PUT /modelos` validates against *that* one, and the UI reads the list
+  from `GET /engines` instead of keeping a second copy.
+- **The binary is `ORCH_<ENGINE>_CMD` before it's the PATH.** On the machine this was
+  built, `codex` on the PATH was 0.118.0 while the installed app shipped 0.147.0, and the
+  configured model only ran on the newer one. A bare command name is not an address.
+- **`API_KEY_VARS` grows with the registry.** "Subscription, never an API key" is the
+  project's rule, not Anthropic's: adding an engine without adding its key variable
+  quietly reintroduces API billing through the back door.
+
+What is *not* solved: **each engine's read boundary differs and the runner doesn't
+control it.** Codex's `-C` is a working root, not a limit — a verified run read the
+neighbouring repo and the parent directory's `CLAUDE.md` with nobody mounting them,
+which is the very thing the multi-repo fan-out exists to prevent. Claude Code is
+confined to `cwd` + `--add-dir`. Until an engine can be told what not to read, that
+difference is a property of the engine you pick.
 
 The plugin has no equivalent knob: neither the skills nor the commands have a model
 field, only the subagents do. That's why `.claude/ticket-agent.json` accepts
 `subagent_model`, which Phase 2b passes to each `Task`, and nothing else (see the
 plugin's README).
 
-Env var overrides (used by tests): `ORCH_DB`, `ORCH_LOGS`,
-`ORCH_CLAUDE_CMD` (JSON with the CLI's argv — `tests/fake_claude.py` substitutes it).
+Env var overrides (used by tests): `ORCH_DB`, `ORCH_LOGS`, `ORCH_SKILLS_DIR`, and one
+`ORCH_<ENGINE>_CMD` per engine (JSON with the CLI's argv — `tests/fake_claude.py` and
+`tests/fake_codex.py` substitute them). The two fakes are deliberately not each other's
+copy: the prompt reaches Codex through **stdin** and its session is a `thread_id`, and a
+fake that shared Claude's shape would pass while the runner mixed the two up.
 
 ## Project rules
 

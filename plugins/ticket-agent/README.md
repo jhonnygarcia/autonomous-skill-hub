@@ -237,7 +237,13 @@ covers a different scope:
 | This session, any phase | `/model opus` and `/effort high` before launching the command |
 | Every session in a repo | `"model"` in the repo's `.claude/settings.json` |
 | Phase 2b's subagents | `subagent_model` in `.claude/ticket-agent.json` |
-| Per phase, without touching anything by hand | the hub's orchestrator: Settings → Model per phase |
+| Per phase, without touching anything by hand | the hub's orchestrator: Settings → Engine and model per phase |
+
+**The skills are not Claude-only, the plugin is.** Commands, hooks and `.mcp.json`
+are Claude Code's packaging; a `SKILL.md` is a procedure written in markdown, and
+the hub's orchestrator runs the same file inline as the prompt when it launches a
+phase with another CLI (Codex today). If you edit a skill, you're editing what
+every engine executes — not just this plugin's.
 
 `subagent_model` is the only knob the plugin applies by itself, and it only
 reaches the subagents that Phase 2b launches per task — not the agent driving the

@@ -161,6 +161,21 @@ def _use_fake_claude(monkeypatch, fail=False, stamp=None, skill_leak=False, no_s
         monkeypatch.setenv("FAKE_HUELLA", stamp)
 
 
+def _use_fake_codex(monkeypatch, phase="analyze", stamp=None, fail=False, no_session=False):
+    """Points ONE phase at Codex and substitutes its binary. The other phases stay on
+    Claude on purpose: mixing engines per phase is the whole point of the feature, and a
+    test that flipped them all at once would never exercise the mix."""
+    fake = Path(__file__).parent / "fake_codex.py"
+    monkeypatch.setenv("ORCH_CODEX_CMD", json.dumps([sys.executable, str(fake)]))
+    monkeypatch.setenv("FAKE_FAIL", "1" if fail else "0")
+    monkeypatch.setenv("FAKE_NO_SESSION", "1" if no_session else "0")
+    if stamp is None:
+        monkeypatch.delenv("FAKE_HUELLA", raising=False)
+    else:
+        monkeypatch.setenv("FAKE_HUELLA", stamp)
+    return phase
+
+
 def test_run_success_writes_log_and_states(client, monkeypatch):
     _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
     tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
@@ -439,12 +454,13 @@ def test_implement_carries_bare_bash_and_no_hook(client, monkeypatch, tmp_path):
 
 
 def test_models_default_empty(client):
-    """With nothing configured, every launchable phase comes out empty: the CLI
-    resolves the model from the destination repo, which is how it worked before this
-    existed."""
+    """With nothing configured, every launchable phase comes out with an empty model and
+    effort — the CLI resolves them in the destination repo, which is how it worked
+    before this existed — and on `claude`, which is what every run used before engines
+    were configurable. Adding an engine must not move anybody's existing setup."""
     m = client.get("/modelos").json()
     assert set(m) == {"analyze", "brief", "survey", "consolidate", "design", "implement"}
-    assert all(v == {"model": "", "effort": ""} for v in m.values())
+    assert all(v == {"model": "", "effort": "", "engine": "claude"} for v in m.values())
 
 
 def test_model_and_effort_per_phase_reach_argv(client, monkeypatch):
@@ -2464,3 +2480,158 @@ def test_the_journal_is_a_record_not_an_input(client, monkeypatch, tmp_path):
     (tmp_path / "repo" / "docs" / "tickets" / "9-journal.md").unlink()
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     assert client.get(f"/tickets/{tid}").json()["runs"][0]["status"] == "success"
+
+
+# --- engines ---------------------------------------------------------------------
+# Everything above this line runs on Claude and must keep running on Claude: adding a
+# second engine is only worth it if it costs the first one nothing.
+
+
+def test_engines_lists_what_the_ui_needs(client):
+    """The selector is built from `ENGINES`, never from a second list in the frontend:
+    a copy of a table is a table free to disagree with it."""
+    engines = {e["id"]: e for e in client.get("/engines").json()}
+    assert set(engines) == {"claude", "codex"}
+    # The efforts are NOT the same list, and that's the point of shipping them per
+    # engine: `max` is Claude's and dies with a 400 from the provider in Codex.
+    assert "max" in engines["claude"]["efforts"]
+    assert "max" not in engines["codex"]["efforts"]
+    assert "minimal" in engines["codex"]["efforts"]
+
+
+def test_effort_is_validated_against_its_own_engine(client):
+    """`max` is legal on Claude and illegal on Codex. Validating against the union
+    would let a run reach the provider and die there, which is the worst place to find
+    out — the UI would have said "saved"."""
+    assert client.put("/modelos", json={
+        "analyze": {"engine": "claude", "effort": "max"}}).status_code == 200
+    r = client.put("/modelos", json={"analyze": {"engine": "codex", "effort": "max"}})
+    assert r.status_code == 400 and "Codex" in r.json()["detail"]
+    # And the rejected write changed nothing: validation happens before any INSERT.
+    assert client.get("/modelos").json()["analyze"] == {
+        "engine": "claude", "model": "", "effort": "max"}
+
+
+def test_unknown_engine_is_rejected(client):
+    r = client.put("/modelos", json={"analyze": {"engine": "gemini"}})
+    assert r.status_code == 400 and "gemini" in r.json()["detail"]
+
+
+def test_codex_phase_gets_the_skill_inline_and_through_stdin(client, monkeypatch):
+    """The load-bearing test of the whole engine split.
+
+    Codex has no plugin, so `/ticket-agent:analyze` means nothing to it: the procedure
+    has to travel as prose, from the SAME `SKILL.md` the plugin ships — one source, two
+    wrappings. And it travels through **stdin**, because a pack is 12 KB and up and
+    Windows caps a command line at 32 KB.
+    """
+    _use_fake_codex(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    client.put("/modelos", json={"analyze": {"engine": "codex"}})
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    # The whole file, not `log_tail`: a pack is 12 KB and up, so the tail the UI shows
+    # starts well past the prompt the runner wrote at the top.
+    detail = client.get(f"/tickets/{tid}").json()
+    log = Path(detail["runs"][0]["log_path"]).read_text(encoding="utf-8")
+    # The slash command is NOT sent: it would be literal text to Codex.
+    assert "/ticket-agent:analyze" not in log
+    # Logged by the RUNNER, under its own heading. The first version of this test looked
+    # for the pack anywhere in the log and passed because the FAKE echoed the prompt
+    # back — a real run showed the log holding only the argv line, which ends in `-`
+    # and says nothing about what was asked.
+    assert "--- prompt (stdin) ---" in log
+    pack = log.split("--- prompt (stdin) ---")[1].split("--- fin del prompt ---")[0]
+    assert "--- PROCEDURE ---" in pack and "3311" in pack
+    assert "HUELLA" in pack                    # the real SKILL.md body, not a stub
+    lines = log.splitlines()
+    args = [ln for ln in lines if ln.startswith("FAKE-CODEX ARGS:")][0]
+    # Not in argv — through stdin, and the fake proves it arrived by counting bytes.
+    assert "--- PROCEDURE ---" not in args and args.rstrip().endswith("-")
+    sent = [ln for ln in lines if ln.startswith("FAKE-CODEX STDIN-BYTES:")][0]
+    assert int(sent.split(": ")[1]) > 2000
+
+
+def test_codex_argv_carries_its_own_flags(client, monkeypatch):
+    """Not Claude's with the names changed: `exec`, `-C` instead of cwd,
+    `--approve-for-me` instead of `--permission-mode acceptEdits` (without it Codex runs
+    read-only and rejects every write), `-c model_reasoning_effort=` instead of
+    `--effort`, and `--json` instead of `--output-format stream-json`."""
+    _use_fake_codex(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    client.put("/modelos", json={
+        "analyze": {"engine": "codex", "model": "gpt-5.6-sol", "effort": "high"}})
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    argv = list(cap["argv"])
+    assert argv[-1] == "-"                      # the prompt comes from stdin
+    assert "exec" in argv and "--approve-for-me" in argv and "--json" in argv
+    assert "-m" in argv and "gpt-5.6-sol" in argv
+    assert "model_reasoning_effort=high" in argv
+    # Claude's spellings must not leak into another CLI's command line.
+    for flag in ("-p", "--permission-mode", "--allowedTools", "--effort", "--model"):
+        assert flag not in argv
+
+
+def test_codex_stamp_needs_no_regex_of_its_own(client, monkeypatch):
+    """`STAMP_RE` parses Codex's JSONL unchanged — verified against a real log on
+    2026-08-16, and pinned here. The stamp is the contract with the skills; the session
+    id is each CLI's own shape, which is why only that one is per engine."""
+    _use_fake_codex(
+        monkeypatch, stamp="parcial — docs/tickets/3311-analysis.md · falta la wiki")
+    client.put("/modelos", json={"analyze": {"engine": "codex"}})
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    f = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert f["estado"] == "parcial" and f["motivo"] == "falta la wiki"
+
+
+def test_codex_session_is_captured_from_thread_id(client, monkeypatch):
+    """Codex spells it `thread_id`. Reading `session_id` there would leave every Codex
+    run uncontinuable and nothing would say why."""
+    _use_fake_codex(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    client.put("/modelos", json={"analyze": {"engine": "codex"}})
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    detail = client.get(f"/tickets/{tid}").json()
+    assert detail["fases"][0]["puede_continuar"] is True
+
+
+def test_a_resume_never_crosses_engines(client, monkeypatch):
+    """A session id belongs to the CLI that minted it. Handing Claude a Codex
+    `thread_id` doesn't fail cleanly — it starts a fresh session that looks continued,
+    which is the one failure mode `--resume` exists to avoid."""
+    _use_fake_codex(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    client.put("/modelos", json={"analyze": {"engine": "codex"}})
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})          # leaves a codex thread_id
+    # Now the same phase is moved to Claude and continued.
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    client.put("/modelos", json={"analyze": {"engine": "claude"}})
+    cap = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run", json={"resume": True})
+    assert "--resume" not in list(cap["argv"])           # nothing of Codex's travels
+    # And never in silence: a continuation that quietly becomes a fresh run looks like
+    # the agent ignored the adjustment.
+    import app
+    assert app.NO_SESSION_TO_RESUME.strip() in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_codex_run_strips_the_openai_key_too(client, monkeypatch):
+    """Subscription, never an API key — the project's rule, not Anthropic's. It has to
+    grow with `ENGINES` or the second engine quietly reintroduces API billing."""
+    _use_fake_codex(monkeypatch, stamp="ok — docs/tickets/3311-analysis.md")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-no-deberia-viajar")
+    client.put("/modelos", json={"analyze": {"engine": "codex"}})
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    assert "SAW-API-KEY" not in client.get(f"/tickets/{tid}").json()["log_tail"]
+
+
+def test_every_phase_has_a_skill_that_exists_on_disk():
+    """The pack reads the plugin's source, so a renamed skill directory is a phase that
+    can't run on any engine but Claude — and it would only show up at launch time,
+    inside a background task, as an unhandled exception nobody sees."""
+    import app
+    for phase in app.PHASE_COMMANDS:
+        body = app.skill_body(phase)
+        assert len(body) > 500 and not body.startswith("---")

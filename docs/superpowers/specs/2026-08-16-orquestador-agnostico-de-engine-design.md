@@ -1,6 +1,6 @@
 # Orquestador agnóstico de engine — diseño
 
-**Fecha:** 2026-08-16 · **Estado:** etapas 1 y 2 hechas; la 3 (registro `ENGINES`) desbloqueada ·
+**Fecha:** 2026-08-16 · **Estado:** etapas 1, 2 y 3 hechas; queda la 4 (engines sin MCP en fase 1) ·
 **Decisión asociada:** 18 en `docs/STATUS.md`
 
 ## El problema
@@ -231,10 +231,17 @@ el plugin pasa a ser *una* de sus empaquetaduras.
    encadenados sobre una solicitud `R-`. Salió bien: prompt pack obedecido, plantilla
    completa, huella correcta en los dos sentidos (`nada` cuando debía parar), journal
    acumulado. Detalle arriba.
-3. **Ahora sí, el registro `ENGINES` con `claude` y `codex`** — la etapa 2 dio el
-   permiso. Y con dos cosas que la prueba agregó al alcance: **ruta del binario por
-   engine** (el PATH mentía) y **límite de lectura por engine** (Codex lee fuera del
-   `-C`).
+3. ~~**El registro `ENGINES` con `claude` y `codex`**~~ — construido el 2026-08-16,
+   decisión 20 en `docs/STATUS.md`. Incluye las dos cosas que la etapa 2 agregó al
+   alcance: **ruta del binario por engine** (`ORCH_<ENGINE>_CMD`, porque el PATH mentía)
+   y el **límite de lectura**, que resultó no ser configurable — quedó documentado como
+   propiedad del engine que elijas, no como perilla del runner.
+
+   Un defecto que solo apareció corriéndolo de verdad: con el prompt por stdin, el log
+   guardaba **la línea de argv y nada más**, o sea que algo se lanzó pero no qué se
+   pidió. El runner ahora escribe el prompt en el log bajo su propio encabezado. El test
+   que debía atrapar eso pasaba porque el fake devolvía el prompt como eco — un fake
+   demasiado servicial es un test que no afirma nada.
 4. Engines sin MCP en fase 1, **solo para tickets `R-`**: una solicitud no necesita
    Azure, su entrada es `docs/tickets/<id>-request.md` que el runner ya proyecta.
 5. Copilot al final o nunca.

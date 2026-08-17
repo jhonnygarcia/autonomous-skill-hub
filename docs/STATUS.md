@@ -19,7 +19,7 @@ from each one.
 |---|---|---|
 | 0 — Hub foundation | Plugin marketplace + ticket-agent skeleton | ✅ Done |
 | 1 — Ticket comprehension | `ticket-comprehension` skill + `/ticket-agent:analyze` (read-only) | ✅ **Accepted** (3311 and 3322) — skill **v0.3.0** |
-| Orchestrator (cross-cutting) | Local app: SQLite queue + headless CLI runner + React UI | ✅ **Three phases launchable**, per-phase progress, stamps and timeline. Clean-tree guard and branch under the lock. The containment hook was removed on 2026-08-16 (decision 18) |
+| Orchestrator (cross-cutting) | Local app: SQLite queue + multi-engine CLI runner + React UI | ✅ **Three phases launchable**, per-phase progress, stamps and timeline. Clean-tree guard and branch under the lock. Containment hook removed and `ENGINES` (claude, codex) added on 2026-08-16 (decisions 18 and 20) |
 | 2 — From analysis to a change plan | `change-planning` skill + `/ticket-agent:plan` → OpenSpec change | ✅ **Closed** (3323 and 3320, n=2) — plugin **v0.5.2**, with the negative-claim rule verified on a re-run |
 | 2b — From plan to code | Execute the plan: write code and commit on a branch | ✅ **Built and validated** (3332) — plugin **v0.6.1**, n=1. Ends on a branch and opens no PR |
 | ~~3 — Tests~~ | Unit tests tied to acceptance criteria | ✅ **Absorbed by 2b** (2026-08-11) — it wasn't a phase, it was a step |
@@ -221,6 +221,44 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     and **each engine must declare its read boundary, not just its write
     one** — Codex's `-C` is a working root, not a limit, and it read the
     neighbouring repo nobody had mounted.
+
+20. **`ENGINES`: the runner launches Claude or Codex, chosen per phase**
+    (2026-08-16, same spec as decision 19). Built the day the validation
+    passed, not before it. `phase_config` gains `engine`, `runs` gains
+    `engine`, Settings gains a third selector, and `ENGINES` is the one place
+    that knows how each CLI is spelled.
+
+    Four properties are what make it small rather than a framework:
+
+    - **The deliverable is a file**, so phases can be mixed freely: Phase 2
+      never learns who wrote the analysis. This is the same property that let
+      the two Phase-1 routes coexist.
+    - **The slash command is Claude's spelling of the skill, not the skill.**
+      Engines without a plugin get `PACK_HEADER` + `skill_body(phase)` — the
+      same `SKILL.md`, inline, through stdin because a pack is 12 KB and
+      Windows caps a command line at 32 KB.
+    - **`HUELLA` needed no adapter; `session_id` did.** The stamp is the
+      contract with the skills and parses both engines unchanged. The session
+      is each CLI's own shape (`thread_id` in Codex), so a resume never
+      crosses engines.
+    - **Effort is per engine.** `max` is Claude's and Codex answers it with a
+      400; `none`/`minimal` are the reverse. Each entry carries its own list
+      and the UI reads it from `GET /engines` rather than keeping a copy.
+
+    **What this does not fix, and it's worth writing down:** the read boundary
+    is the engine's, not the runner's. Codex's `-C` is a working root — a
+    verified run read the neighbouring repo and the parent's `CLAUDE.md` with
+    nobody mounting them, which is what the multi-repo fan-out exists to
+    prevent. Claude stays confined to `cwd` + `--add-dir`. Picking an engine
+    picks its blast radius, and today that's a fact to know rather than a knob
+    to set.
+
+    Also found by running it for real end to end: with the prompt on stdin the
+    log held only the argv line, so it recorded that something was launched
+    and not what was asked. The runner now writes the prompt into the log
+    under its own heading. The test that was supposed to catch this passed
+    because the fake echoed the prompt back — a fake being too helpful is a
+    test asserting nothing.
 
 ## Phase 1 acceptance — closed on 2026-08-08
 

@@ -112,11 +112,104 @@ PHASE_NOUN = {"analyze": "the analysis", "brief": "the brief",
 # unupdated.
 assert PHASE_COMMANDS.keys() == PHASE_DONE.keys() == PHASE_ALLOWED_TOOLS.keys() == PHASE_NOUN.keys()
 
+# Which skill each phase runs. `PHASE_COMMANDS` is the Claude-only spelling of the same
+# thing: a slash command exists because the plugin is installed. An engine that can't be
+# given a plugin gets the SKILL.md inline instead (see `phase_prompt`), so the procedure
+# has ONE source either way — the markdown in `plugins/ticket-agent/skills/`.
+PHASE_SKILL = {
+    "analyze": "ticket-comprehension",
+    "brief": "ticket-brief",
+    "survey": "repo-survey",
+    "consolidate": "analysis-consolidation",
+    "design": "change-planning",
+    "implement": "change-implementation",
+}
+assert PHASE_SKILL.keys() == PHASE_COMMANDS.keys()
+# The hub's own plugin, read from source. There is no install mechanism outside Claude
+# Code, so for any other engine the source file IS the distribution.
+SKILLS_DIR = Path(os.environ.get("ORCH_SKILLS_DIR") or
+                  Path(__file__).resolve().parents[3] / "plugins/ticket-agent/skills")
+
+PACK_HEADER = (
+    "Follow the procedure below to the letter, for ticket {ado_id}.\n\n"
+    "It comes from a skill of a plugin that is NOT installed on this machine: it "
+    "travels here in full. You are standing in the target repo; work there.\n\n"
+    "--- PROCEDURE ---\n\n{body}\n\n--- END OF PROCEDURE ---\n")
+
+
+def skill_body(phase: str) -> str:
+    """The SKILL.md of a phase without its YAML frontmatter.
+
+    The frontmatter is `name`/`description`: metadata for Claude Code's skill loader,
+    noise for an engine reading the procedure as prose.
+    """
+    text = (SKILLS_DIR / PHASE_SKILL[phase] / "SKILL.md").read_text(encoding="utf-8")
+    return text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
+
+
+# The engines the runner knows how to launch. Verified against real binaries on
+# 2026-08-16 — see `docs/superpowers/specs/2026-08-16-orquestador-agnostico-de-engine-design.md`,
+# which is where the flag-by-flag equivalences and their surprises are written down.
+#
+# `exe` is a fallback, not the truth: on the machine this was built, `claude` and
+# `codex` on the PATH were BOTH stale relative to what was actually installed, and
+# Codex's default model only ran on the newer binary. That's why every engine has its
+# own `ORCH_<NAME>_CMD` override, and why the tests substitute exactly that.
+ENGINES = {
+    "claude": {
+        "label": "Claude Code",
+        "exe": "claude",
+        # The session id, as it travels in the stream. Not a contract with the skills —
+        # it's the CLI's own shape, and it differs per engine, which is the whole reason
+        # a resume can never cross engines.
+        "session_re": re.compile(r'"session_id":\s*"([0-9a-fA-F-]{36})"'),
+        # Claude's own vocabulary. `""` is "whatever the CLI resolves in the target
+        # repo", which is the default for every phase and every engine.
+        "efforts": ("", "low", "medium", "high", "xhigh", "max"),
+        # It has the plugin installed, so it gets the slash command, not the pack.
+        "slash": True,
+        "stdin_prompt": False,
+    },
+    "codex": {
+        "label": "Codex CLI",
+        "exe": "codex",
+        "session_re": re.compile(r'"thread_id":\s*"([0-9a-fA-F-]{36})"'),
+        # NOT Claude's list: `max` does not exist in Codex and `none`/`minimal` do not
+        # exist in Claude. Offering one engine the other's vocabulary produces a run
+        # that dies on a 400 from the provider, which is the worst place to find out.
+        "efforts": ("", "none", "minimal", "low", "medium", "high", "xhigh"),
+        "slash": False,
+        # The prompt travels through stdin: a pack carries a whole SKILL.md (12 KB and
+        # up) plus the brief inline, and Windows caps a command line at 32 KB.
+        "stdin_prompt": True,
+    },
+}
+DEFAULT_ENGINE = "claude"
+# Subscription, never an API key: with these gone the only credential a child has left
+# is the machine's `login` session. One entry per provider the runner can launch — the
+# rule is the project's, not Anthropic's, so it grows with `ENGINES`.
+API_KEY_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")
+
+
+def engine_cmd(engine: str) -> list[str]:
+    """The binary of an engine: the `ORCH_<ENGINE>_CMD` override (a JSON argv, which is
+    what the tests substitute) or whatever the PATH resolves."""
+    raw = os.environ.get(f"ORCH_{engine.upper()}_CMD")
+    if raw:
+        return json.loads(raw)
+    exe = shutil.which(ENGINES[engine]["exe"])
+    if not exe:
+        raise HTTPException(500, f"No se encontró el CLI '{ENGINES[engine]['exe']}' en el PATH")
+    return [exe]
+
+
 # Model and effort per phase, editable from Settings in the UI. They live in the
 # `phase_config` table and nowhere else: empty means "whatever the CLI resolves in the
 # destination repo", which is the default behavior for every phase.
 # ponytail: global to the app, not per project nor per run.
-EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
+# Every effort any engine accepts. The per-engine list is what validates; this is only
+# for messages and for the UI's superset.
+EFFORTS = tuple(dict.fromkeys(e for eng in ENGINES.values() for e in eng["efforts"]))
 # The model goes straight into the CLI's argv, so it can't start with `-`: that would be
 # another flag. Accepts the aliases (`opus`, `sonnet`…) and the full ids.
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -126,7 +219,9 @@ def phase_configs() -> dict[str, dict]:
     """The launchable phases with their configuration; whichever nobody touched come out empty."""
     with db() as c:
         rows = {r["phase"]: r for r in c.execute("SELECT * FROM phase_config")}
-    return {f: {"model": rows[f]["model"] if f in rows else "",
+    return {f: {"engine": (rows[f]["engine"] if f in rows and rows[f]["engine"]
+                          else DEFAULT_ENGINE),
+                "model": rows[f]["model"] if f in rows else "",
                 "effort": rows[f]["effort"] if f in rows else ""}
             for f in PHASE_COMMANDS}
 
@@ -216,9 +311,11 @@ def now() -> str:
 # backslashes, so the behavior doesn't change: the capture reaches end of line just
 # like before.
 STAMP_RE = re.compile(r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*([^"\\]+)')
-# The CLI's session, as it travels in the stream-json. Not a contract with the skills
-# like `STAMP_RE` — it's the CLI's own shape — but just as literal.
-SESSION_RE = re.compile(r'"session_id":"([0-9a-fA-F-]{36})"')
+# The session id moved into `ENGINES[...]["session_re"]`: it was never a contract with
+# the skills like `STAMP_RE` is — it's each CLI's own shape, and Codex spells it
+# `thread_id`. `STAMP_RE` stayed here, and stayed one, because it IS the contract: it
+# parses Codex's JSONL without a single change, which is what made this whole thing
+# cheap (verified 2026-08-16).
 
 # The routing line the `brief` phase writes, naming which repos deserve a survey.
 # Same treatment as `STAMP_RE` and for the same reason: the skill's own example
@@ -422,12 +519,17 @@ def last_survey_dir(ticket_id: int) -> str | None:
     return r["artifact_path"] if r else None
 
 
-def last_session(ticket_id: int, phase: str) -> str | None:
-    """The CLI session of this phase's most recent run that had one.
+def last_session(ticket_id: int, phase: str, engine: str = DEFAULT_ENGINE) -> str | None:
+    """The CLI session of this phase's most recent run **on this engine** that had one.
 
     Not "the last run": one can die before the id shows up in the stream, and that
     shouldn't hide the session before it — a run that died halfway is precisely one
     worth continuing.
+
+    **Scoped by engine, and it has to be.** A session id belongs to the CLI that minted
+    it: handing Claude a Codex `thread_id` doesn't fail cleanly, it starts a fresh
+    session that looks continued. Rows from before this column existed read as
+    `claude`, which is what they were.
 
     No check that the directory matches: every run of a ticket shares its `repo_path`
     (copied when the ticket is created, and no endpoint edits it afterwards), and a
@@ -437,8 +539,9 @@ def last_session(ticket_id: int, phase: str) -> str | None:
     with db() as c:
         r = c.execute(
             "SELECT session_id FROM runs WHERE ticket_id=? AND phase=? "
-            "AND session_id IS NOT NULL ORDER BY id DESC LIMIT 1",
-            (ticket_id, phase)).fetchone()
+            "AND session_id IS NOT NULL AND COALESCE(engine, ?) = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (ticket_id, phase, DEFAULT_ENGINE, engine)).fetchone()
     return r["session_id"] if r else None
 
 
@@ -573,7 +676,8 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS phase_config(
               phase TEXT PRIMARY KEY,
               model TEXT NOT NULL DEFAULT '',
-              effort TEXT NOT NULL DEFAULT ''
+              effort TEXT NOT NULL DEFAULT '',
+              engine TEXT NOT NULL DEFAULT 'claude'
             );
             """
         )
@@ -613,6 +717,15 @@ def init_db() -> None:
             # The free-text request that replaces the work item when there is one.
             # NULL for ADO tickets; its presence is what `origen` derives from.
             "ALTER TABLE tickets ADD COLUMN request TEXT",
+            # Which CLI ran this phase. Nullable and read through `COALESCE(...,
+            # 'claude')` everywhere: every row that predates the column WAS claude, so
+            # backfilling it would be writing down something already known.
+            "ALTER TABLE runs ADD COLUMN engine TEXT",
+            # And which one a phase is configured to use. NOT NULL with a default here
+            # because this table is small, is written whole by `PUT /modelos`, and an
+            # empty engine has no meaning — unlike an empty model, which means
+            # "whatever the CLI resolves".
+            "ALTER TABLE phase_config ADD COLUMN engine TEXT NOT NULL DEFAULT 'claude'",
         ):
             try:
                 c.execute(alter)
@@ -681,11 +794,21 @@ def ticket_row(tid: int) -> sqlite3.Row | None:
 class PhaseConfig(BaseModel):
     model: str = ""
     effort: str = ""
+    engine: str = DEFAULT_ENGINE
 
 
 @app.get("/modelos")
 def get_models():
     return phase_configs()
+
+
+@app.get("/engines")
+def get_engines():
+    """What the UI needs to build the selector: which engines exist, what to call them,
+    and which efforts each one accepts. Derived from `ENGINES`, never a second list —
+    a copy of a table is a table free to disagree with it."""
+    return [{"id": name, "label": e["label"], "efforts": list(e["efforts"])}
+            for name, e in ENGINES.items()]
 
 
 @app.put("/modelos")
@@ -695,17 +818,26 @@ def put_models(body: dict[str, PhaseConfig]):
     for phase, cfg in body.items():
         if phase not in PHASE_COMMANDS:
             raise HTTPException(400, f"La fase '{phase}' no es ejecutable")
+        if cfg.engine not in ENGINES:
+            raise HTTPException(
+                400, f"Engine inválido: '{cfg.engine}' (usa {', '.join(ENGINES)})")
         if cfg.model and not MODEL_RE.match(cfg.model):
             raise HTTPException(400, f"Modelo inválido: '{cfg.model}'")
-        if cfg.effort not in EFFORTS:
+        # Against THAT engine's list, not the union: `max` is legal in Claude and dies
+        # with a 400 from the provider in Codex, and the run is the worst place to find
+        # that out.
+        efforts = ENGINES[cfg.engine]["efforts"]
+        if cfg.effort not in efforts:
             raise HTTPException(
-                400, f"Effort inválido: '{cfg.effort}' (usa {', '.join(EFFORTS[1:])})")
+                400, f"Effort inválido para {ENGINES[cfg.engine]['label']}: "
+                     f"'{cfg.effort}' (usa {', '.join(efforts[1:])})")
     with db() as c:
         for phase, cfg in body.items():
             c.execute(
-                "INSERT INTO phase_config(phase, model, effort) VALUES(?,?,?) "
-                "ON CONFLICT(phase) DO UPDATE SET model=excluded.model, effort=excluded.effort",
-                (phase, cfg.model, cfg.effort))
+                "INSERT INTO phase_config(phase, model, effort, engine) VALUES(?,?,?,?) "
+                "ON CONFLICT(phase) DO UPDATE SET model=excluded.model, "
+                "effort=excluded.effort, engine=excluded.engine",
+                (phase, cfg.model, cfg.effort, cfg.engine))
     return phase_configs()
 
 
@@ -1104,16 +1236,27 @@ def active_run():
     return dict(r) if r else None
 
 
-async def spawn_cli(cmd, cwd, env, log, run_id: int | None) -> bool:
+async def spawn_cli(cmd, cwd, env, log, run_id: int | None,
+                    engine: str = DEFAULT_ENGINE, stdin_prompt: str | None = None) -> bool:
     """Runs one CLI child, streaming into the already-open log. True if it exited 0.
 
     `run_id` None means "don't record the session": a fan-out run drives several
     sessions and there is no single one to continue, so `puede_continuar` stays false
     for that phase on its own, with no special case anywhere else.
+
+    `stdin_prompt` is for engines whose prompt does NOT fit in argv: a pack carries a
+    whole SKILL.md plus, on a survey, the brief inline. Windows caps a command line at
+    32 KB and the failure is a cryptic one from the OS, not a message from the CLI.
     """
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=cwd, env=env,
+        stdin=asyncio.subprocess.PIPE if stdin_prompt is not None else None,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    if stdin_prompt is not None:
+        assert proc.stdin is not None
+        proc.stdin.write(stdin_prompt.encode("utf-8"))
+        await proc.stdin.drain()
+        proc.stdin.close()
     assert proc.stdout is not None
     # In chunks, not lines: asyncio's line reader blows up with "Separator is found,
     # but chunk is longer than limit" at 64 KiB, and stream-json passes lines longer
@@ -1131,7 +1274,7 @@ async def spawn_cli(cmd, cwd, env, log, run_id: int | None) -> bool:
         text = dec.decode(chunk)
         log.write(text)
         if run_id is not None and sid is None:
-            m = SESSION_RE.search(carry + text)
+            m = ENGINES[engine]["session_re"].search(carry + text)
             if m:
                 sid = m.group(1)
                 set_run(run_id, session_id=sid)
@@ -1196,19 +1339,78 @@ RUN_LOCK = asyncio.Lock()
 
 
 def claude_cmd() -> list[str]:
-    raw = os.environ.get("ORCH_CLAUDE_CMD")
-    if raw:
-        return json.loads(raw)
-    exe = shutil.which("claude")
-    if not exe:
-        raise HTTPException(500, "No se encontró el CLI 'claude' en el PATH")
-    return [exe]
+    """Kept as the name the fan-out reads. The children are Claude's on purpose: the
+    survey's whole point is a session rooted in the other repo, with ITS `.mcp.json` and
+    ITS hooks, and that mounting is Claude Code's."""
+    return engine_cmd("claude")
 
 
-def model_for(phase: str) -> list[str]:
+def model_for(phase: str, engine: str = "claude") -> list[str]:
+    """The model and effort flags of ONE engine. Read at launch time, not at startup:
+    changing them in Settings has to affect the next run without restarting the backend
+    (on Windows there is no reloader — see the project rules)."""
     cfg = phase_configs()[phase]
+    if engine == "codex":
+        # `-c key=value` overrides `~/.codex/config.toml`. The effort lives there, not in
+        # a flag of its own, and the accepted values are Codex's, not Claude's — see
+        # `efforts` in `ENGINES`, which is what keeps the UI from offering one engine
+        # the other's vocabulary.
+        return ([*(["-m", cfg["model"]] if cfg["model"] else []),
+                 *(["-c", f"model_reasoning_effort={cfg['effort']}"] if cfg["effort"] else [])])
     return ([*(["--model", cfg["model"]] if cfg["model"] else []),
              *(["--effort", cfg["effort"]] if cfg["effort"] else [])])
+
+
+def codex_argv(prompt: str, phase: str, cwd: str, extras: list[dict],
+               surveys: str | None, prev: str | None) -> list[str]:
+    """`codex exec`, with every equivalence that isn't obvious spelled out.
+
+    Verified against codex-cli 0.147.0 on 2026-08-16; the earlier 0.118.0 on the same
+    machine took different flags, which is why the version is written down here.
+    """
+    # `resume` is a SUBCOMMAND, not a flag, and it goes before everything else.
+    head = ["exec", *(["resume", prev] if prev else [])]
+    return [
+        *head,
+        # `-C` is the working root. It is NOT a read boundary: a verified run read the
+        # neighbouring repo and the parent directory's CLAUDE.md on its own. Whatever
+        # this phase must not see cannot be kept out from here.
+        "-C", cwd,
+        # Without this, `exec` runs read-only and rejects every write even when
+        # `--sandbox workspace-write` is passed. This is the `acceptEdits` of Codex.
+        "--approve-for-me",
+        "--json",
+        *model_for(phase, "codex"),
+        *[a for e in extras for a in ("--add-dir", e["path"])],
+        *(["--add-dir", Path(surveys).as_posix()] if surveys else []),
+        # The prompt arrives through stdin; `-` is what says so.
+        "-",
+    ]
+
+
+def claude_argv(prompt: str, phase: str, cwd: str, extras: list[dict],
+                surveys: str | None, prev: str | None) -> list[str]:
+    return [
+        "-p", prompt,
+        "--output-format", "stream-json", "--verbose",
+        "--permission-mode", "acceptEdits",
+        # In headless mode, acceptEdits does NOT auto-approve MCP tools: they get
+        # denied on their own and the agent is left unable to read the work item.
+        # The rest of the tools per phase come from PHASE_ALLOWED_TOOLS (see above).
+        "--allowedTools", *(["mcp__azure-devops"] if phase in PHASE_MCP else []),
+        "Read", "Glob", "Grep", "Task", "Write", "Edit",
+        *PHASE_ALLOWED_TOOLS[phase],
+        *model_for(phase, "claude"),
+        # Always forked: the original run's transcript stays intact and every row
+        # of `runs` keeps its own id, so the chain is walkable in both directions.
+        *(["--resume", prev, "--fork-session"] if prev else []),
+        *[a for e in extras for a in ("--add-dir", e["path"])],
+        *(["--add-dir", Path(surveys).as_posix()] if surveys else []),
+    ]
+
+
+ARGV_BUILDERS = {"claude": claude_argv, "codex": codex_argv}
+assert ARGV_BUILDERS.keys() == ENGINES.keys()
 
 
 def set_run(run_id: int, **fields):
@@ -1265,6 +1467,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # the POST deduced before waiting.
             set_run(run_id, branch=branch)
         noun = PHASE_NOUN[phase]
+        # Read at launch time like the model, and written to the run: `runs.engine` is
+        # what keeps a continuation from crossing engines, which would hand one CLI's
+        # session id to another.
+        engine = phase_configs()[phase]["engine"]
+        set_run(run_id, engine=engine)
         # Resolved before the prompt is built, because the prompt has to name it: the
         # only phase whose whole job is reading the surveys was being launched with them
         # neither mounted nor named (found on run 3320, 2026-08-13).
@@ -1288,7 +1495,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             req = Path(ticket["repo_path"]) / REQUEST_FILE_REL.format(ado_id=ticket["ado_id"])
             req.parent.mkdir(parents=True, exist_ok=True)
             req.write_text(ticket["request"], encoding="utf-8")
-        prev = last_session(ticket["id"], phase) if resume else None
+        prev = last_session(ticket["id"], phase, engine) if resume else None
         if prev:
             # NOT the slash command. The session already ran the skill; sending it
             # again restarts the procedure from step 1 — rereads the work item,
@@ -1300,7 +1507,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             prompt = (instructions or "") + RESUME_STAMP_REMINDER + JOURNAL_CLAIM
             set_run(run_id, resumed_from=prev)
         else:
-            prompt = f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}"
+            # The slash command exists because the plugin is installed, and only
+            # Claude Code can be given a plugin. Every other engine gets the same
+            # procedure as prose, from the same SKILL.md — one source, two wrappings.
+            prompt = (f"{PHASE_COMMANDS[phase]} {ticket['ado_id']}" if ENGINES[engine]["slash"]
+                      else PACK_HEADER.format(ado_id=ticket["ado_id"], body=skill_body(phase)))
             prompt += repos_text(phase, extras, noun, ticket_labels(ticket)[0][0])
             if ticket.get("request") and phase in ("analyze", "brief"):
                 prompt += REQUEST_PROMPT.format(
@@ -1364,31 +1575,13 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     # point is a session that sees only its own repo's rules.
                     "--add-dir", scratch.as_posix(),
                 ]))
-        cmd = claude_cmd() + [
-            "-p", prompt,
-            "--output-format", "stream-json", "--verbose",
-            "--permission-mode", "acceptEdits",
-            # In headless mode, acceptEdits does NOT auto-approve MCP tools: they get
-            # denied on their own and the agent is left unable to read the work item.
-            # The rest of the tools per phase come from PHASE_ALLOWED_TOOLS (see above).
-            "--allowedTools", *(["mcp__azure-devops"] if phase in PHASE_MCP else []),
-            "Read", "Glob", "Grep", "Task", "Write", "Edit",
-            *PHASE_ALLOWED_TOOLS[phase],
-            # Read at launch time, not at startup: changing the model in Settings has
-            # to affect the next run without restarting the backend.
-            *model_for(phase),
-            # Always forked: the original run's transcript stays intact and every row
-            # of `runs` keeps its own id, so the chain is walkable in both directions.
-            *(["--resume", prev, "--fork-session"] if prev else []),
-        ]
-        for e in extras:
-            cmd += ["--add-dir", e["path"]]
-        if surveys:
-            cmd += ["--add-dir", Path(surveys).as_posix()]
+        cmd = engine_cmd(engine) + ARGV_BUILDERS[engine](
+            prompt, phase, ticket["repo_path"], extras, surveys, prev)
         # Guarantees the CLI uses the logged-in subscription, never API billing:
         # without these variables, the only credential available is the local /login one.
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        # One list per engine: each provider reads its own, and leaving another's in
+        # place would be leaving the door open for whichever engine gets added next.
+        env = {k: v for k, v in os.environ.items() if k not in API_KEY_VARS}
         # `--add-dir` grants file access, not configuration discovery: from a mounted
         # repo it loads `.claude/skills/` and `.claude/agents/`, but NOT its CLAUDE.md
         # nor `.claude/rules/`. Without this the agent writes the extra repo's code
@@ -1409,8 +1602,17 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     log.write(NO_SESSION_TO_RESUME)
                 if children is None:
                     log.write(f"$ {' '.join(cmd)}\n\n")
+                    # When the prompt travels through stdin it is NOT in the argv line,
+                    # so without this the log records that something was launched and
+                    # not what was asked. The log is the audit trail — it's what the UI
+                    # shows and what a human reads to know why a run did what it did.
+                    if ENGINES[engine]["stdin_prompt"]:
+                        log.write(f"--- prompt (stdin) ---\n{prompt}\n"
+                                  "--- fin del prompt ---\n\n")
                     log.flush()
-                    ok = await spawn_cli(cmd, ticket["repo_path"], env, log, run_id)
+                    ok = await spawn_cli(
+                        cmd, ticket["repo_path"], env, log, run_id, engine,
+                        prompt if ENGINES[engine]["stdin_prompt"] else None)
                 else:
                     ok = await run_fan_out(children, env, log, log_path, scratch)
         except Exception as exc:  # the error stays in the log, never brings down the server

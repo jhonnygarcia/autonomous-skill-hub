@@ -1,22 +1,25 @@
 import { useEffect, useState } from "react"
-import { api, type PhaseModels as Config } from "@/api"
+import { api, type Engine, type PhaseModels as Config } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { PHASE_LABEL } from "@/status"
 
-// The aliases the CLI resolves to each family's latest model. A full id
-// (`claude-opus-5`) also works and the backend accepts it; aliases go here
-// because they're the ones that don't go stale.
-const MODELS = ["opus", "sonnet", "haiku", "fable"]
-const EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+// The aliases each CLI resolves to its family's latest model. A full id
+// (`claude-opus-5`, `gpt-5.6-sol`) also works and the backend accepts it; aliases go
+// here because they're the ones that don't go stale.
+const MODELS: Record<string, string[]> = {
+  claude: ["opus", "sonnet", "haiku", "fable"],
+  codex: ["gpt-5.6-sol", "gpt-5.6-codex"],
+}
 
-function Selector({ value, onChange, options, label }: {
-  value: string; onChange: (v: string) => void; options: string[]; label: string
+function Selector({ value, onChange, options, label, empty = "(por defecto)" }: {
+  value: string; onChange: (v: string) => void; options: string[]
+  label: string; empty?: string | null
 }) {
   return (
     <select aria-label={label} value={value} onChange={e => onChange(e.target.value)}
             className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
-      <option value="">(por defecto)</option>
+      {empty !== null && <option value="">{empty}</option>}
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   )
@@ -24,13 +27,27 @@ function Selector({ value, onChange, options, label }: {
 
 export function Models() {
   const [cfg, setCfg] = useState<Config | null>(null)
+  const [engines, setEngines] = useState<Engine[]>([])
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState("")
 
-  useEffect(() => { api.models().then(setCfg).catch(e => setError(String(e))) }, [])
+  useEffect(() => {
+    Promise.all([api.models(), api.engines()])
+      .then(([m, e]) => { setCfg(m); setEngines(e) })
+      .catch(e => setError(String(e)))
+  }, [])
 
-  const set = (phase: string, field: "model" | "effort", v: string) => {
-    setCfg(c => c && { ...c, [phase]: { ...c[phase], [field]: v } })
+  const set = (phase: string, field: "model" | "effort" | "engine", v: string) => {
+    setCfg(c => {
+      if (!c) return c
+      const next = { ...c[phase], [field]: v }
+      // Changing the engine clears the model and the effort instead of carrying them
+      // over: they belong to the CLI that was selected. `opus` means nothing to Codex
+      // and `max` is an effort Codex rejects outright — keeping them would save a
+      // configuration the next run dies on, after the UI said "guardado".
+      if (field === "engine") { next.model = ""; next.effort = "" }
+      return { ...c, [phase]: next }
+    })
     setDirty(true)
   }
   const save = () => cfg && api.saveModels(cfg)
@@ -39,13 +56,19 @@ export function Models() {
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Modelo por fase</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-base">Engine y modelo por fase</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Con qué modelo y con cuánto esfuerzo de razonamiento corre cada fase.
-          <strong> (por defecto)</strong> deja decidir al repo destino, que es lo que
-          hacía el orquestador hasta ahora. Aplica a la siguiente corrida; no hace falta
+          Con qué CLI, qué modelo y cuánto esfuerzo de razonamiento corre cada fase.
+          Cada fase deja su entregable en un archivo, así que la siguiente no necesita
+          saber quién lo escribió: se pueden mezclar. <strong>(por defecto)</strong>
+          deja decidir al repo destino. Aplica a la siguiente corrida; no hace falta
           reiniciar el backend.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          El CLI que elijas tiene que estar instalado y con sesión iniciada en esta
+          máquina — eso es tuyo, no del orquestador. Una continuación nunca cruza
+          engines: la sesión pertenece al CLI que la creó.
         </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -53,22 +76,37 @@ export function Models() {
           <div className="space-y-1">
             <div className="flex gap-2 text-[11px] uppercase tracking-wide text-muted-foreground/70">
               <span className="w-24">fase</span>
+              <span className="w-36">engine</span>
               <span className="w-40">modelo</span>
-              <span className="w-40">effort</span>
+              <span className="w-36">effort</span>
             </div>
-            {Object.entries(cfg).map(([phase, f]) => (
-              <div key={phase} className="flex items-center gap-2">
-                <span className="w-24 text-sm font-medium">{PHASE_LABEL[phase] ?? phase}</span>
-                <div className="w-40">
-                  <Selector label={`Modelo de ${PHASE_LABEL[phase] ?? phase}`} value={f.model}
-                            options={MODELS} onChange={v => set(phase, "model", v)} />
+            {Object.entries(cfg).map(([phase, f]) => {
+              const name = PHASE_LABEL[phase] ?? phase
+              // The effort list comes from the backend's registry, per engine. An
+              // engine it doesn't know about yet (a stale tab against a newer backend)
+              // gets no options rather than someone else's.
+              const efforts = engines.find(e => e.id === f.engine)?.efforts ?? []
+              return (
+                <div key={phase} className="flex items-center gap-2">
+                  <span className="w-24 text-sm font-medium">{name}</span>
+                  <div className="w-36">
+                    <Selector label={`Engine de ${name}`} value={f.engine} empty={null}
+                              options={engines.map(e => e.id)}
+                              onChange={v => set(phase, "engine", v)} />
+                  </div>
+                  <div className="w-40">
+                    <Selector label={`Modelo de ${name}`} value={f.model}
+                              options={MODELS[f.engine] ?? []}
+                              onChange={v => set(phase, "model", v)} />
+                  </div>
+                  <div className="w-36">
+                    <Selector label={`Effort de ${name}`} value={f.effort}
+                              options={efforts.filter(Boolean)}
+                              onChange={v => set(phase, "effort", v)} />
+                  </div>
                 </div>
-                <div className="w-40">
-                  <Selector label={`Effort de ${PHASE_LABEL[phase] ?? phase}`} value={f.effort}
-                            options={EFFORTS} onChange={v => set(phase, "effort", v)} />
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
