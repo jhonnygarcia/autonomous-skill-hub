@@ -2013,18 +2013,37 @@ def restore_run(tid: int, body: RestoreIn):
     dest = (repo / rel).resolve()
     if not dest.is_relative_to(repo):
         raise HTTPException(400, f"Ruta fuera del repo: {rel}")
+    # A type flip (tree over a file, file over a tree) means the repo holds something
+    # structurally different from what was archived. Without this, `dest.rglob("*")`
+    # on a plain file silently returns nothing (making the tree guard below pass) and
+    # `shutil.copytree(..., dirs_exist_ok=True)` then raises `FileExistsError`; and
+    # `shutil.copy2` onto an existing directory copies INTO it as `dest/<name>` instead
+    # of replacing it, so `overwrite` would silently misplace the file one level deep.
+    # `overwrite` does not bypass this: it's not this endpoint's call to resolve a
+    # structural mismatch.
+    if dest.exists() and dest.is_dir() != src.is_dir():
+        raise HTTPException(
+            409, f"{rel} es {'un directorio' if dest.is_dir() else 'un archivo'} en el "
+                 f"repo pero el snapshot es {'un archivo' if src.is_dir() else 'un directorio'}. "
+                 "Bórralo a mano si de verdad quieres reemplazarlo por el otro tipo.")
     if src.is_dir():
         if dest.exists() and any(x.is_file() for x in dest.rglob("*")):
             raise HTTPException(
                 409, f"Ya hay archivos en {rel}: un árbol nunca se sobreescribe. "
                      "Si de verdad quieres volver atrás, bórralo a mano y vuelve a restaurar")
-        shutil.copytree(src, dest, dirs_exist_ok=True)
+        try:
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(409, f"No se pudo restaurar {rel}: {exc}")
         n = sum(1 for x in src.rglob("*") if x.is_file())
     else:
         if dest.exists() and not body.overwrite:
             raise HTTPException(409, f"Ya existe {rel}; repite con overwrite para reemplazarlo")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest)
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            raise HTTPException(409, f"No se pudo restaurar {rel}: {exc}")
         n = 1
     append_journal(dict(t), "restaurar", "ok", rel, note=f"desde run {r['id']}")
     return {"restaurado": rel, "archivos": n}

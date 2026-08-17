@@ -3071,3 +3071,47 @@ def test_deleting_the_archive_changes_nothing_about_the_next_run(client, monkeyp
     detail = client.get(f"/tickets/{tid}").json()
     assert detail["runs"][0]["status"] == "success"
     assert "/ticket-agent:plan 1" in detail["log_tail"]
+
+
+def test_restore_refuses_when_tree_snapshot_meets_a_file_destination(client, monkeypatch, tmp_path):
+    """A type flip is not this endpoint's call to resolve: 409, not a crash, and the
+    file on disk is left exactly as it was."""
+    _archive_on(client, tmp_path)
+    change = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    change.mkdir(parents=True)
+    (change / "tasks.md").write_text("- [ ] 1")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    run_id = client.get(f"/tickets/{tid}").json()["runs"][0]["id"]
+    shutil.rmtree(change)
+    change.write_text("no soy un árbol")   # the destination is now a plain file
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 409
+    assert change.read_text() == "no soy un árbol"
+
+
+def test_restore_refuses_when_file_snapshot_meets_a_dir_destination_even_with_overwrite(
+        client, monkeypatch, tmp_path):
+    """`overwrite=True` must not let a file snapshot land INSIDE a directory that
+    happens to share its name — that's a silent misplacement, not a restore."""
+    tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
+    p.unlink()
+    p.mkdir()   # the destination is now a directory with the same path
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id, "overwrite": True})
+    assert r.status_code == 409
+    assert not (p / p.name).exists()   # nothing landed nested one level deep
+
+
+def test_restore_wraps_an_oserror_from_the_copy_as_409(client, monkeypatch, tmp_path):
+    import app as app_module
+    tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
+    p.unlink()
+
+    def boom(*a, **k):
+        raise OSError("disco lleno")
+
+    monkeypatch.setattr(app_module.shutil, "copy2", boom)
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 409
+    assert "disco lleno" in r.json()["detail"]
