@@ -1192,7 +1192,12 @@ def archive_run(ticket: dict, run_id: int, phase: str, kind: str, rels: list[str
                 notes.append(f"archivo: {skipped}")
         write_run_meta(folder, ticket, run_id)
         set_run(run_id, archive_path=str(folder))
-    except OSError as exc:
+    except Exception as exc:
+        # Wider than OSError on purpose: this function's whole job is best-effort
+        # bookkeeping, and set_run above is a SQLite write that can raise
+        # sqlite3.Error, not an OSError subclass. A record that can't be written is a
+        # lost line, not a lost run — the docstring's "never raises" is a total
+        # contract, not one scoped to filesystem failures.
         notes.append(f"archivo: no copiado — {exc}")
     return notes
 

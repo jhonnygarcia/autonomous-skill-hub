@@ -2851,3 +2851,32 @@ def test_archive_failure_does_not_touch_the_run(client, monkeypatch, tmp_path):
     assert run["status"] == "success" and run["artifact_state"] == "ok"
     journal = (tmp_path / "repo" / "docs" / "tickets" / "1-journal.md").read_text(encoding="utf-8")
     assert "· archivo: no copiado" in journal
+
+
+def test_archive_run_survives_a_non_oserror_failure(client, monkeypatch, tmp_path):
+    """`archive_run`'s own docstring promises it never raises. `write_run_meta` is the
+    last statement inside its try before `set_run`, and both can fail with something
+    that isn't an OSError (e.g. a SQLite error) — the handler must be wide enough to
+    catch that too, or the close aborts before the run is fully wrapped up."""
+    import sqlite3 as sq
+
+    import app as app_module
+
+    _archive_on(client, tmp_path)
+    (tmp_path / "repo" / "a.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+
+    real_write_run_meta = app_module.write_run_meta
+    calls = {"n": 0}
+
+    def flaky_write_run_meta(folder, ticket, run_id):
+        calls["n"] += 1
+        if calls["n"] == 1:  # the call inside archive_run's try — the one under review
+            raise sq.OperationalError("boom")
+        return real_write_run_meta(folder, ticket, run_id)
+
+    monkeypatch.setattr(app_module, "write_run_meta", flaky_write_run_meta)
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "success" and run["artifact_state"] == "ok"
