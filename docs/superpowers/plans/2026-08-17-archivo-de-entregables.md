@@ -64,7 +64,7 @@ copiarlo. Los tests 1 y 2 cubren ambas formas.
 - Produces: `setting(key: str) -> str` (vacío si no existe), `set_setting(key, value)`,
   `GET /archivo -> {"dir": str}`, `PUT /archivo {"dir": str} -> {"dir": str}`.
 
-- [ ] **Step 1: test rojo**
+- [x] **Step 1: test rojo**
 
 ```python
 def test_archive_dir_setting_roundtrip_and_validation(client, tmp_path):
@@ -84,12 +84,12 @@ def test_archive_dir_setting_roundtrip_and_validation(client, tmp_path):
     assert client.put("/archivo", json={"dir": ""}).json() == {"dir": ""}
 ```
 
-- [ ] **Step 2: correr y ver que falla**
+- [x] **Step 2: correr y ver que falla**
 
 `.venv/Scripts/python -m pytest tests/test_app.py::test_archive_dir_setting_roundtrip_and_validation -v`
 → FAIL: 404 en `/archivo`.
 
-- [ ] **Step 3: implementar**
+- [x] **Step 3: implementar**
 
 En `init_db`, dentro del `executescript` que crea las tablas, añadir después de
 `phase_config`:
@@ -150,11 +150,11 @@ def put_archive(body: ArchiveIn):
     return {"dir": d}
 ```
 
-- [ ] **Step 4: verde**
+- [x] **Step 4: verde**
 
 Mismo comando → PASS. Y la suite completa: `.venv/Scripts/python -m pytest tests/ -q`.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -184,7 +184,7 @@ git commit -m "feat(orchestrator): archive_dir en settings, GET/PUT /archivo"
     `## Hallazgos`)
   - columna `runs.archive_path`.
 
-- [ ] **Step 1: tests rojos**
+- [x] **Step 1: tests rojos**
 
 ```python
 def _archive_on(client, tmp_path):
@@ -257,12 +257,12 @@ def test_archive_failure_does_not_touch_the_run(client, monkeypatch, tmp_path):
     assert "· archivo: no copiado" in journal
 ```
 
-- [ ] **Step 2: correr y ver que fallan**
+- [x] **Step 2: correr y ver que fallan**
 
 `.venv/Scripts/python -m pytest tests/test_app.py -k "archives or archive_off or archive_failure" -v`
 → FAIL: `KeyError: 'archive_path'`.
 
-- [ ] **Step 3: implementar**
+- [x] **Step 3: implementar**
 
 Migración, al final de la tupla de `ALTER TABLE` en `init_db`:
 
@@ -421,11 +421,11 @@ hasta antes del bloque `if phase == "analyze"`):
 `llave` numérica: `_seg(3323)` → `"3323"`; `json.dumps` conserva el `int` en `run.json`
 (el test lo compara con `3323`).
 
-- [ ] **Step 4: verde**
+- [x] **Step 4: verde**
 
 Los cuatro tests → PASS. Suite completa en verde (`pytest tests/ -q`).
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -447,7 +447,7 @@ git commit -m "feat(orchestrator): snapshot de salida por corrida, con run.json 
 - Produces: `entrada_rels(ticket: dict) -> list[str]`; `append_journal` gana un
   parámetro `extra: list[str] | None = None` (sub-líneas `   · <x>` tras la del run).
 
-- [ ] **Step 1: tests rojos**
+- [x] **Step 1: tests rojos**
 
 ```python
 def test_launch_archives_what_the_phase_will_read_including_human_edits(client, monkeypatch, tmp_path):
@@ -509,11 +509,11 @@ def test_entrada_includes_the_change_tree_a_previous_run_declared(client, monkey
 limpio, que el fixture no monta; lo que se prueba es la regla «árbol declarado antes →
 va en la entrada», no la fase.)
 
-- [ ] **Step 2: correr y ver que fallan**
+- [x] **Step 2: correr y ver que fallan**
 
 `pytest tests/test_app.py -k "entrada or no_stamp_still" -v` → FAIL.
 
-- [ ] **Step 3: implementar**
+- [x] **Step 3: implementar**
 
 Helper junto a `archive_run`:
 
@@ -564,11 +564,11 @@ de la salida (Task 2) sigue detrás con `journal_note`.
 Los tres retornos tempranos anteriores (repo no preparado, sin surveys, sin brief) están
 **antes** de este punto y no snapshotean nada — coherente con el spec §3.2.
 
-- [ ] **Step 4: verde**
+- [x] **Step 4: verde**
 
 Los tres tests y la suite completa → PASS.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -584,7 +584,7 @@ git commit -m "feat(orchestrator): snapshot de entrada al lanzar — lo que la f
   y ajusta si hace falta
 - Test: `apps/orchestrator/backend/tests/test_app.py`
 
-- [ ] **Step 1: test rojo (o verde de una: entonces sigue al commit)**
+- [x] **Step 1: test rojo (o verde de una: entonces sigue al commit)**
 
 ```python
 def test_a_declared_tree_over_the_cap_is_skipped_not_copied(client, monkeypatch, tmp_path):
@@ -608,12 +608,12 @@ def test_a_declared_tree_over_the_cap_is_skipped_not_copied(client, monkeypatch,
     assert "· archivo: omitido — docs:" in journal
 ```
 
-- [ ] **Step 2: correr**
+- [x] **Step 2: correr**
 
 `pytest tests/test_app.py::test_a_declared_tree_over_the_cap_is_skipped_not_copied -v`.
 Si falla, la causa está en `copy_into` (Task 2) — corregir ahí, no aquí.
 
-- [ ] **Step 3: commit**
+- [x] **Step 3: commit**
 
 ```bash
 git add apps/orchestrator/backend/tests/test_app.py apps/orchestrator/backend/app.py
@@ -634,7 +634,7 @@ git commit -m "test(orchestrator): un árbol declarado sobre el tope se omite y 
   -> {"restaurado": str, "archivos": int}`; `404` sin snapshot, `409` con run activo /
   destino presente.
 
-- [ ] **Step 1: tests rojos**
+- [x] **Step 1: tests rojos**
 
 ```python
 def _archived_analysis(client, monkeypatch, tmp_path, key=3323):
@@ -736,13 +736,13 @@ def test_deleting_the_archive_changes_nothing_about_the_next_run(client, monkeyp
 
 `import shutil` al inicio de `test_app.py` si no está.
 
-- [ ] **Step 2: correr y ver que fallan**
+- [x] **Step 2: correr y ver que fallan**
 
 `pytest tests/test_app.py -k "restore or deleting_the_archive" -v` → FAIL: 404 en
 `/restaurar` (los dos primeros asserts del test 404 pasarían por la razón equivocada —
 por eso el resto tiene que fallar antes de implementar).
 
-- [ ] **Step 3: implementar**
+- [x] **Step 3: implementar**
 
 Junto a `run_ticket`:
 
@@ -797,11 +797,11 @@ def restore_run(tid: int, body: RestoreIn):
     return {"restaurado": rel, "archivos": n}
 ```
 
-- [ ] **Step 4: verde**
+- [x] **Step 4: verde**
 
 Los seis tests y la suite completa → PASS.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```bash
 git add apps/orchestrator/backend/app.py apps/orchestrator/backend/tests/test_app.py
@@ -822,7 +822,7 @@ git commit -m "feat(orchestrator): POST /tickets/{tid}/restaurar — archivos co
   `api.saveArchive(dir): Promise<{dir: string}>`;
   `api.restore(id, runId, overwrite=false): Promise<{restaurado: string; archivos: number}>`.
 
-- [ ] **Step 1: `api.ts`**
+- [x] **Step 1: `api.ts`**
 
 En `Run`, después de `branch`:
 
@@ -850,7 +850,7 @@ En `api`, después de `saveModels`:
     }).then(r => json<{ restaurado: string; archivos: number }>(r)),
 ```
 
-- [ ] **Step 2: `Archive.tsx`**
+- [x] **Step 2: `Archive.tsx`**
 
 ```tsx
 import { useEffect, useState } from "react"
@@ -896,7 +896,7 @@ export function Archive() {
 }
 ```
 
-- [ ] **Step 3: `App.tsx`**
+- [x] **Step 3: `App.tsx`**
 
 Importar `Archive` y renderizarlo tras `<Models />` en la vista `settings`:
 
@@ -907,13 +907,13 @@ import { Archive } from "@/Archive"
             <Archive />
 ```
 
-- [ ] **Step 4: check**
+- [x] **Step 4: check**
 
 `npm run build && npm run lint` → sin errores; los mismos dos warnings de siempre.
 A mano: backend arriba, Settings → guardar un directorio real → recargar → sigue ahí;
 guardar uno inexistente → error en rojo, el anterior se conserva.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/api.ts apps/orchestrator/frontend/src/Archive.tsx apps/orchestrator/frontend/src/App.tsx
@@ -936,7 +936,7 @@ git commit -m "feat(ui): directorio de archivo en Settings"
 - Produces: `TicketDetail` prop `onRestore: (runId: number, overwrite: boolean) => Promise<void>`;
   `Timeline` prop `onRestore: (runId: number) => void`.
 
-- [ ] **Step 1: `App.tsx`**
+- [x] **Step 1: `App.tsx`**
 
 Donde se renderiza `TicketDetail` (junto a `onRun`), añadir:
 
@@ -948,7 +948,7 @@ onRestore={(runId, overwrite) => api.restore(detail.ticket.id, runId, overwrite)
 
 (`refresh` es la misma función que `act` encadena en `App.tsx:77-80`.)
 
-- [ ] **Step 2: `TicketDetail.tsx`**
+- [x] **Step 2: `TicketDetail.tsx`**
 
 Estado y handler:
 
@@ -990,7 +990,7 @@ Diálogo, junto al `ConfirmDialog` de borrado:
 
 Pasar a `Timeline`: `onRestore={runId => restore(runId)}`.
 
-- [ ] **Step 3: `Timeline.tsx`**
+- [x] **Step 3: `Timeline.tsx`**
 
 Prop nueva `onRestore: (runId: number) => void`. En el `map`, junto a `branch`:
 
@@ -1019,7 +1019,7 @@ En la rama `!h.existe` (el `span` ámbar «no se encontró en disco»), envolver
                     </span>
 ```
 
-- [ ] **Step 4: check**
+- [x] **Step 4: check**
 
 `npm run build && npm run lint` → limpio. A mano, con el archivo encendido: correr
 `analyze` sobre un ticket de prueba, borrar el análisis del repo, ver el aviso ámbar con
@@ -1027,7 +1027,7 @@ el botón, restaurar, ver la huella verde de nuevo y la línea `restaurar · ok`
 journal. Sobreescribir un archivo existente pasa por el diálogo; sobre un árbol el
 error se muestra y no hay diálogo.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```bash
 git add apps/orchestrator/frontend/src/Timeline.tsx apps/orchestrator/frontend/src/TicketDetail.tsx apps/orchestrator/frontend/src/App.tsx
@@ -1046,7 +1046,7 @@ git commit -m "feat(ui): restaurar un entregable desde la timeline o el historia
   restaurar es manual
 - Modify: `docs/superpowers/plans/2026-08-17-archivo-de-entregables.md` — checkboxes
 
-- [ ] **Step 1: `CLAUDE.md`**
+- [x] **Step 1: `CLAUDE.md`**
 
 Añadir después del párrafo «The journal is written after every run…»:
 
@@ -1071,7 +1071,7 @@ declared, and putting the older tree back would untick real progress. It journal
 itself as `restaurar · ok`.
 ```
 
-- [ ] **Step 2: `STATUS.md`**
+- [x] **Step 2: `STATUS.md`**
 
 - En la decisión 21, primer punto: prefijar `**Hecho el 2026-08-17** —`.
 - En «Immediate pending items», tachar «The next two-repo ticket: copy the analysis
@@ -1081,12 +1081,12 @@ itself as `restaurar · ok`.
   restaurar, `run.json`, tope), cuántos tests (contar), y la nota de que **no** corrió
   contra un ticket real todavía.
 
-- [ ] **Step 3: README del orquestador**
+- [x] **Step 3: README del orquestador**
 
 Sección «Archivo de entregables»: cómo encenderlo, la estructura de carpetas, qué es
 `run.json`, y que restaurar es un botón en el ticket (o el `POST`) — nunca automático.
 
-- [ ] **Step 4: tildar este plan y commit**
+- [x] **Step 4: tildar este plan y commit**
 
 ```bash
 git add CLAUDE.md docs/STATUS.md apps/orchestrator/README.md docs/superpowers/plans/2026-08-17-archivo-de-entregables.md

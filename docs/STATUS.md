@@ -289,7 +289,7 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     and effort goes into the UI's ergonomics, not the plugin's. Three
     consequences, in the order they'll be built:
 
-    - **An archive of deliverables, with restore** — the safeguard the
+    - **Hecho el 2026-08-17** — **An archive of deliverables, with restore** — the safeguard the
       plugin alone can't offer: `docs/tickets/*.md` and `openspec/changes/`
       are untracked in the target repo and can be deleted or overwritten
       (3320's single-session analysis was). Snapshot per run into a
@@ -875,6 +875,32 @@ de recolección en `ticket-brief/SKILL.md` (`**Collected:** <date> by ticket-age
 vX.Y.Z`), que faltaba en el texto y se descubrió recién al implementar la tarea 5 de
 este plan. Corregido.
 
+## Undécima sesión — 2026-08-17: el archivo de entregables
+
+Plan de 8 tareas (7 de implementación + esta, la de documentación), ejecutado con un
+subagente por tarea más una revisión por tarea. Cinco rondas de revisión encontraron
+defectos reales, todos corregidos con test: `archive_run` prometía «nunca lanza»
+mientras solo atrapaba `OSError`; un comentario afirmaba que los tres retornos
+tempranos de `execute_run` no archivan nada, cuando en realidad solo dos cierran antes
+del snapshot de entrada; un snapshot de árbol contra un destino que era archivo tiraba
+un 500; un snapshot de archivo contra un destino que era directorio lo anidaba en
+silencio adentro reportando éxito; y un mensaje del 409 tenía un ternario invertido que
+nombraba mal el tipo del snapshot en ambos sentidos — este último lo encontró una
+lectura de código hecha para verificar otro punto, después de que un revisor calificara
+esa misma línea como «densa pero correcta».
+
+**Qué se construyó.** Dos disparadores por corrida (`entrada/` al lanzar, `salida/` al
+cerrar, después de la línea del journal para que la copia ya la lleve), `run.json` por
+snapshot, tope `ARCHIVE_TREE_MAX_FILES`/`_BYTES` para árboles declarados de más, y
+`POST /tickets/{tid}/restaurar` como la única puerta de vuelta — nunca sobreescribe un
+árbol, exige `overwrite` para un archivo existente, y se journala como
+`restaurar · ok`. **221 tests** backend en verde, build y lint del frontend en su línea
+base de siempre (dos warnings).
+
+**Nada de esto corrió contra un ticket real todavía.** Toda la verificación es
+mecánica — los 221 tests, el build, el lint — nadie encendió el archivo contra
+`ProvidenceTMSTenant` y restauró un análisis real.
+
 ## Immediate pending items
 
 - [ ] **A first real run of a vague request through the fan-out route.** Every check
@@ -900,10 +926,12 @@ este plan. Corregido.
   the design. Two bugs only a real run found, both fixed with tests: the prompt never
   named the primary repo (the agent invented `main`; the parser widened to every repo,
   so the safety net held) and `consolidate` couldn't reach the surveys.
-- [ ] **The next two-repo ticket: copy the analysis before running the fan-out.**
+- [ ] ~~**The next two-repo ticket: copy the analysis before running the fan-out.**
   Both Phase-1 routes write `docs/tickets/<id>-analysis.md` by design, so
   `consolidate` overwrote 3320's single-session analysis and the side-by-side
-  comparison is gone for that ticket. It was untracked, so git doesn't have it either.
+  comparison is gone for that ticket. It was untracked, so git doesn't have it
+  either.~~ — **superseded 2026-08-17**: every run snapshots its entrada/salida when
+  the archive is on; the pre-fan-out copy is automatic.
 - [x] ~~**`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` in `implement`**~~ — done
   2026-08-13 as task 1 of the plan, gated on `extras`.
 - [ ] **Rotate the `cr360dev` PAT.** It was pasted in a session transcript on

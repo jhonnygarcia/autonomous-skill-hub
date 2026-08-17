@@ -298,6 +298,30 @@ safe only because `is_dirty`'s clean-tree guard ignores `??` entries on purpose:
 blocks `implement` is tracked work in progress, not an untracked file the tooling
 itself just wrote.
 
+**Every run leaves a snapshot, and no phase ever reads it.** With `archive_dir` set
+(Settings → `GET/PUT /archivo`, table `settings`, read at snapshot time like
+`model_for`), `archive_run` copies to
+`<archive_dir>/<org>/<project>/<llave>/<run_id>-<fase>-<YYYYMMDD-HHMM>/`: `entrada/`
+at launch (every `docs/tickets/<llave>-*` file plus any tree a previous good run
+declared — the human's ticked `DECIDIR` boxes live nowhere else), `salida/` at close
+(the declared path, request and journal, taken **after** the journal line so the copy
+carries this run), and `run.json` (enough to read the folder after a DB wipe). Trees
+over `ARCHIVE_TREE_MAX_FILES`/`_BYTES` are skipped with a journal line — a stamp
+clipped to `docs` would otherwise archive the folder every run. A failed copy is a
+journal line, never an error run. `runs.archive_path` is the folder; NULL means
+nothing archived. **A record, never an input**: a test guards that deleting the
+archive changes nothing about the next run. The one door back is
+`POST /tickets/{tid}/restaurar {run_id, overwrite}`: it copies that run's `salida/`
+to the repo, refuses while a run is active, needs `overwrite` for an existing file,
+and **never overwrites a tree** — `implement` ticks `tasks.md` inside the tree `design`
+declared, and putting the older tree back would untick real progress. It journals
+itself as `restaurar · ok`.
+
+Of `execute_run`'s three early returns, only two close before the entrada snapshot;
+the `survey` phase's no-brief return closes *after* it, so a run that hits it keeps
+an `entrada/` and a `run.json` and never gets a `salida/`. Reviewed and kept as-is
+rather than made uniform.
+
 **`org` and `project` are labels here, not configuration.** The runner never exports
 `ADO_ORG` and never puts the project name in the prompt: the subprocess inherits the
 backend's environment and Claude Code resolves both from the *target repo's*

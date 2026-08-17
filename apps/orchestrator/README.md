@@ -67,6 +67,36 @@ wiki). Each `extraDir` is mounted with `--add-dir`.
 Paths are validated on save: if they don't exist, the registration fails with
 a 400 instead of blowing up later inside the subprocess.
 
+## Archive of deliverables
+
+Off by default. Set a directory in Settings (the *Archive* card, `GET/PUT /archivo`)
+and every run starts snapshotting what it consumed and what it produced — an empty
+directory turns it back off.
+
+Each run writes to
+`<archive_dir>/<org>/<project>/<key>/<run_id>-<phase>-<YYYYMMDD-HHMM>/`:
+
+- `entrada/` — taken at launch: every `docs/tickets/<key>-*` file, plus any directory
+  a previous good run of this ticket declared (so the human's ticked `DECIDIR` boxes
+  aren't lost even if nothing else changed).
+- `salida/` — taken at close, after the journal line, so the copy already carries this
+  run's entry: the deliverable the phase declared, the request file, and the journal.
+- `run.json` — enough to identify the folder (ticket, run, phase, timestamp) if the
+  database is ever wiped.
+
+A tree above a fixed file/byte cap is skipped with a note in the journal instead of
+being copied — that's what keeps a `docs`-wide artifact from archiving the whole
+folder on every run. A copy that fails is also just a journal note: it never turns a
+successful run into an error.
+
+**Restoring is never automatic.** The archive is a record — nothing reads it to decide
+anything, and deleting it changes nothing about the next run. The only way back is a
+human action: a *Restore* button next to a run in the ticket's history, or on the
+timeline when the declared artifact is missing from disk (`POST
+/tickets/{tid}/restaurar {run_id, overwrite}`). It copies that run's `salida/` back
+into the repo, refuses while a run is active, and never overwrites a directory —
+overwriting a single file needs `overwrite: true`.
+
 ## Start
 
 From the release zip it's one command — `run.cmd` / `./run.sh` — and one URL,
