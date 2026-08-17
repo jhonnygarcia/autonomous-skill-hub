@@ -2781,3 +2781,73 @@ def test_archive_dir_setting_roundtrip_and_validation(client, tmp_path):
     assert client.get("/archivo").json() == {"dir": d.as_posix()}
     # empty switches it off
     assert client.put("/archivo", json={"dir": ""}).json() == {"dir": ""}
+
+
+def _archive_on(client, tmp_path):
+    d = tmp_path / "archivo"
+    d.mkdir()
+    assert client.put("/archivo", json={"dir": d.as_posix()}).status_code == 200
+    return d
+
+
+def test_close_archives_the_declared_file_and_writes_run_json(client, monkeypatch, tmp_path):
+    arch = _archive_on(client, tmp_path)
+    (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "repo" / "docs" / "tickets" / "3323-analysis.md").write_text("análisis", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    folder = Path(run["archive_path"])
+    # <archive>/<org>/<project>/<llave>/<run_id>-<fase>-<ts>/
+    assert folder.parent == arch / "DemoOrg" / "Demo" / "3323"
+    assert folder.name.startswith(f"{run['id']}-analyze-")
+    assert (folder / "salida" / "docs" / "tickets" / "3323-analysis.md").read_text(encoding="utf-8") == "análisis"
+    meta = json.loads((folder / "run.json").read_text(encoding="utf-8"))
+    assert meta["llave"] == 3323 and meta["phase"] == "analyze"
+    assert meta["artifact_state"] == "ok" and meta["engine"] == "claude"
+    # the journal copied into salida/ already carries THIS run's line
+    journal = (folder / "salida" / "docs" / "tickets" / "3323-journal.md").read_text(encoding="utf-8")
+    assert "· analyze · ok · docs/tickets/3323-analysis.md" in journal
+
+
+def test_close_archives_a_declared_tree(client, monkeypatch, tmp_path):
+    _archive_on(client, tmp_path)
+    change = tmp_path / "repo" / "openspec" / "changes" / "3323-xpo"
+    (change / "specs" / "pagos").mkdir(parents=True)
+    (change / "proposal.md").write_text("p")
+    (change / "specs" / "pagos" / "spec.md").write_text("s")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/3323-xpo")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    folder = Path(client.get(f"/tickets/{tid}").json()["runs"][0]["archive_path"])
+    assert (folder / "salida" / "openspec" / "changes" / "3323-xpo" / "specs" / "pagos" / "spec.md").exists()
+    assert (folder / "salida" / "openspec" / "changes" / "3323-xpo" / "proposal.md").exists()
+
+
+def test_archive_off_copies_nothing(client, monkeypatch, tmp_path):
+    (tmp_path / "repo" / "a.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "success" and run["archive_path"] is None
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "1-journal.md").read_text(encoding="utf-8")
+    assert "archivo:" not in journal
+
+
+def test_archive_failure_does_not_touch_the_run(client, monkeypatch, tmp_path):
+    """The deliverable exists in the repo; a copy that fails is a journal line."""
+    arch = _archive_on(client, tmp_path)
+    (tmp_path / "repo" / "a.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    # the directory disappears between the save and the close
+    arch.rmdir()
+    # …and a FILE takes its place, so mkdir fails with an OSError on every OS
+    arch.write_text("no soy un directorio")
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "success" and run["artifact_state"] == "ok"
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "1-journal.md").read_text(encoding="utf-8")
+    assert "· archivo: no copiado" in journal

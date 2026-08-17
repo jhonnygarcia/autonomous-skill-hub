@@ -790,6 +790,10 @@ def init_db() -> None:
             # empty engine has no meaning — unlike an empty model, which means
             # "whatever the CLI resolves".
             "ALTER TABLE phase_config ADD COLUMN engine TEXT NOT NULL DEFAULT 'claude'",
+            # The snapshot folder this run wrote (`<archive_dir>/.../<run_id>-<phase>-<ts>`).
+            # NULL = nothing archived — the archive was off, or the copy failed before
+            # the folder existed. Read by the UI (restore button) and by `/restaurar`.
+            "ALTER TABLE runs ADD COLUMN archive_path TEXT",
         ):
             try:
                 c.execute(alter)
@@ -1076,6 +1080,121 @@ def append_journal(ticket: dict, phase: str, state: str, detail: str,
         p.write_text(text, encoding="utf-8")
     except OSError:
         pass  # ponytail: a record that can't be written is a lost line, not a lost run
+
+
+# A declared tree bigger than this is not copied: a stamp that got clipped to `docs`
+# (see the backslash risk in STATUS.md) would otherwise archive the whole folder on
+# every run. The run is untouched; the journal says what was skipped.
+ARCHIVE_TREE_MAX_FILES = 200
+ARCHIVE_TREE_MAX_BYTES = 20 * 1024 * 1024
+
+
+def journal_note(ticket: dict, text: str) -> None:
+    """One indented sub-line under the most recent run line — same shape as
+    `· reserva:`. Inserted right before `## Hallazgos`, like the run lines."""
+    p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
+    try:
+        body = p.read_text(encoding="utf-8", errors="replace") if p.exists() else \
+            JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
+        line = f"   · {text}\n"
+        i = body.find("## Hallazgos")
+        body = body + line if i < 0 else body[:i] + line + body[i:]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+    except OSError:
+        pass  # ponytail: same policy as append_journal — a lost note, not a lost run
+
+
+def _seg(value) -> str:
+    """A path segment out of an org, a project or a key: anything not [\\w.-] → `_`."""
+    return re.sub(r"[^\w.-]", "_", str(value)) or "_"
+
+
+def archive_folder(ticket: dict, run_id: int, phase: str, started: str) -> Path | None:
+    """`<archive_dir>/<org>/<project>/<llave>/<run_id>-<phase>-<YYYYMMDD-HHMM>`, or None
+    when the archive is off. `org`/`project` are the ticket's own copies, so renaming
+    the project moves nothing. The timestamp is the LAUNCH time, so entrada and salida
+    of one run land in the same folder."""
+    root = setting("archive_dir")
+    if not root:
+        return None
+    ts = started[:16].replace("-", "").replace(":", "").replace("T", "-")  # 20260817-1530
+    return (Path(root) / _seg(ticket["org"]) / _seg(ticket["project"])
+            / _seg(ticket["ado_id"]) / f"{run_id}-{phase}-{ts}")
+
+
+def copy_into(repo: Path, rel: str, dest: Path) -> tuple[int, str | None]:
+    """Copy `repo/rel` (file or tree) to `dest/rel`, keeping the relative path.
+    Returns (files copied, skip reason). Rule 2 of `declared_file` applies — the
+    resolved source must fall under the repo — and nothing else: this copies, it
+    doesn't serve. A source that doesn't exist copies nothing and says nothing."""
+    root = repo.resolve()
+    try:
+        src = (root / rel).resolve()
+    except (ValueError, OSError):
+        return 0, None
+    if not src.is_relative_to(root) or not src.exists():
+        return 0, None
+    target = dest / rel
+    if src.is_dir():
+        files = [x for x in src.rglob("*") if x.is_file()]
+        size = sum(x.stat().st_size for x in files)
+        if len(files) > ARCHIVE_TREE_MAX_FILES or size > ARCHIVE_TREE_MAX_BYTES:
+            return 0, f"omitido — {rel}: {len(files)} archivos / {size // (1024 * 1024)} MB"
+        shutil.copytree(src, target, dirs_exist_ok=True)
+        return len(files), None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, target)
+    return 1, None
+
+
+RUN_META_FIELDS = ("phase", "engine", "instructions", "resumed_from", "session_id",
+                   "started_at", "finished_at", "status", "artifact_state",
+                   "artifact_path", "artifact_note", "branch")
+
+
+def run_meta(ticket: dict, run_id: int) -> dict:
+    """What `run.json` holds: enough to read the folder without the DB (which has been
+    wiped once). Human and forensic reading only — nothing in the orchestrator reads it."""
+    with db() as c:
+        r = c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+    cfg = phase_configs().get(r["phase"], {}) if r else {}
+    return {"ticket_id": ticket["id"], "llave": ticket["ado_id"], "org": ticket["org"],
+            "project": ticket["project"], "repo_path": ticket["repo_path"],
+            "extra_dirs": json.loads(ticket.get("extra_dirs") or "[]"),
+            "run_id": run_id, "model": cfg.get("model", ""), "effort": cfg.get("effort", ""),
+            **({k: r[k] for k in RUN_META_FIELDS} if r else {})}
+
+
+def write_run_meta(folder: Path, ticket: dict, run_id: int) -> None:
+    """Raises OSError like any write; callers decide what a lost run.json costs."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "run.json").write_text(
+        json.dumps(run_meta(ticket, run_id), indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def archive_run(ticket: dict, run_id: int, phase: str, kind: str, rels: list[str],
+                started: str) -> list[str]:
+    """Snapshot `rels` (relative to the primary repo) under `<folder>/<kind>/`, rewrite
+    `run.json`, record `archive_path`. `kind` is `entrada` (what the phase is about to
+    read) or `salida` (what it declared). Returns the notes the journal should carry —
+    a skipped tree, a failed copy. Never raises: a record that can't be written is a
+    lost line, not a lost run."""
+    folder = archive_folder(ticket, run_id, phase, started)
+    if not folder:
+        return []
+    notes = []
+    try:
+        (folder / kind).mkdir(parents=True, exist_ok=True)
+        for rel in rels:
+            _, skipped = copy_into(Path(ticket["repo_path"]), rel, folder / kind)
+            if skipped:
+                notes.append(f"archivo: {skipped}")
+        write_run_meta(folder, ticket, run_id)
+        set_run(run_id, archive_path=str(folder))
+    except OSError as exc:
+        notes.append(f"archivo: no copiado — {exc}")
+    return notes
 
 
 def stamp_stat(repo: str, rel: str) -> dict:
@@ -1754,6 +1873,25 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                 artifact_exists=None if on_disk is None else int(on_disk))
         append_journal(ticket, phase, state, path, note,
                        seconds(started, fin), branch, prev)
+        # AFTER the journal line, so the journal copied into salida/ already carries
+        # this run. Only what closed with a footprint has a salida; the request and the
+        # journal ride along because they're the two files a returning human reads
+        # next to the deliverable.
+        if state in ("ok", "parcial") and path:
+            key = ticket["ado_id"]
+            for n in archive_run(ticket, run_id, phase, "salida",
+                                 [path, f"docs/tickets/{key}-request.md",
+                                  f"docs/tickets/{key}-journal.md"], started):
+                journal_note(ticket, n)
+        # run.json is rewritten at close for EVERY outcome, `nada` included: the entrada
+        # (Task 3) writes it with the run still `running`, and a folder that says so
+        # forever would lie about a run that finished.
+        folder = archive_folder(ticket, run_id, phase, started)
+        if folder and folder.is_dir():
+            try:
+                write_run_meta(folder, ticket, run_id)
+            except OSError:
+                pass  # ponytail: same policy as the copies — a lost record, not a lost run
         # The title travels with the analysis, so it only gets read when that phase
         # closes with a footprint. `title` is only written when one is found: a re-run
         # that comes out worse must not erase the title the previous one left.
