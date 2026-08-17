@@ -407,6 +407,16 @@ def stamp_in(text: str) -> tuple[str, str] | None:
     return LEGACY_STATES.get(state, state), rest.strip()
 
 
+def ticket_roots(ticket: dict | sqlite3.Row) -> list[Path]:
+    """The primary repo, then the extras, in that order — the order both
+    `artifact_on_disk` and `archive_run` resolve a declared path against, because a
+    phase can leave its deliverable in a mounted repo. Kept as one function so the two
+    callers can't drift into checking a different set of roots or a different order."""
+    roots = [Path(ticket["repo_path"])]
+    roots += [Path(d["path"]) for d in normalize_dirs(json.loads(ticket["extra_dirs"] or "[]"))]
+    return roots
+
+
 def artifact_on_disk(ticket: dict | sqlite3.Row, path: str) -> bool:
     """Is the thing a stamp declared actually there?
 
@@ -425,11 +435,9 @@ def artifact_on_disk(ticket: dict | sqlite3.Row, path: str) -> bool:
     a phase can leave its deliverable in a mounted repo. **A directory counts**: Phase
     2's deliverable is `openspec/changes/<id>-<slug>/`, not a file.
     """
-    roots = [ticket["repo_path"]]
-    roots += [d["path"] for d in normalize_dirs(json.loads(ticket["extra_dirs"] or "[]"))]
-    for r in roots:
+    for r in ticket_roots(ticket):
         try:
-            if (Path(r) / path).exists():
+            if (r / path).exists():
                 return True
         except (ValueError, OSError):
             continue          # an absurd path is not an existing one
@@ -794,6 +802,13 @@ def init_db() -> None:
             # NULL = nothing archived — the archive was off, or the copy failed before
             # the folder existed. Read by the UI (restore button) and by `/restaurar`.
             "ALTER TABLE runs ADD COLUMN archive_path TEXT",
+            # Whether the `salida/` this run archived actually contains the declared
+            # deliverable — set at close, from a single `exists()` check. **Nullable on
+            # purpose, same convention as `artifact_exists`**: NULL means "nobody
+            # checked" (every row before this column, and any run whose salida branch
+            # never ran), never backfilled to 0 or 1. The UI treats NULL as
+            # not-restorable, since those runs predate the check.
+            "ALTER TABLE runs ADD COLUMN restorable INTEGER",
         ):
             try:
                 c.execute(alter)
@@ -1139,15 +1154,45 @@ def copy_into(repo: Path, rel: str, dest: Path) -> tuple[int, str | None]:
         return 0, None
     target = dest / rel
     if src.is_dir():
-        files = [x for x in src.rglob("*") if x.is_file()]
-        size = sum(x.stat().st_size for x in files)
-        if len(files) > ARCHIVE_TREE_MAX_FILES or size > ARCHIVE_TREE_MAX_BYTES:
-            return 0, f"omitido — {rel}: {len(files)} archivos / {size // (1024 * 1024)} MB"
+        # Stop counting the instant either cap is crossed — don't walk (or stat) the
+        # rest of the tree first. A stamp clipped to `docs` (STATUS.md records this
+        # happening) used to make every launch and close of that ticket `rglob` and
+        # `stat` the WHOLE `docs/` tree, under the global run lock, only to copy
+        # nothing and append the same skip line again. The note trades an exact count
+        # for "more than N" — informative enough, and the only thing an early exit can
+        # still promise.
+        n, size, over = 0, 0, None
+        for x in src.rglob("*"):
+            if not x.is_file():
+                continue
+            n += 1
+            size += x.stat().st_size
+            if n > ARCHIVE_TREE_MAX_FILES:
+                over = f"más de {ARCHIVE_TREE_MAX_FILES} archivos"
+                break
+            if size > ARCHIVE_TREE_MAX_BYTES:
+                over = f"más de {ARCHIVE_TREE_MAX_BYTES // (1024 * 1024)} MB"
+                break
+        if over:
+            return 0, f"omitido — {rel}: {over}"
         shutil.copytree(src, target, dirs_exist_ok=True)
-        return len(files), None
+        return n, None
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, target)
     return 1, None
+
+
+def copy_into_any(roots: list[Path], rel: str, dest: Path) -> tuple[int, str | None]:
+    """`copy_into`, tried against each root in order, stopping at the first one that
+    actually has `rel` — same order `artifact_on_disk` checks, so a run whose
+    deliverable landed in a mounted repo (Decision D) archives it from there instead of
+    silently archiving nothing, or worse, an unrelated file that happens to share the
+    same relative path under the primary repo."""
+    for repo in roots:
+        n, skipped = copy_into(repo, rel, dest)
+        if n or skipped:
+            return n, skipped
+    return 0, None
 
 
 RUN_META_FIELDS = ("phase", "engine", "instructions", "resumed_from", "session_id",
@@ -1176,20 +1221,34 @@ def write_run_meta(folder: Path, ticket: dict, run_id: int) -> None:
 
 
 def archive_run(ticket: dict, run_id: int, phase: str, kind: str, rels: list[str],
-                started: str) -> list[str]:
-    """Snapshot `rels` (relative to the primary repo) under `<folder>/<kind>/`, rewrite
-    `run.json`, record `archive_path`. `kind` is `entrada` (what the phase is about to
-    read) or `salida` (what it declared). Returns the notes the journal should carry —
-    a skipped tree, a failed copy. Never raises: a record that can't be written is a
-    lost line, not a lost run."""
-    folder = archive_folder(ticket, run_id, phase, started)
-    if not folder:
-        return []
+                started: str, roots: list[Path] | None = None) -> list[str]:
+    """Snapshot `rels` under `<folder>/<kind>/`, rewrite `run.json`, record
+    `archive_path`. `kind` is `entrada` (what the phase is about to read) or `salida`
+    (what it declared). `roots` is where each `rel` is looked up, tried in order via
+    `copy_into_any`; defaults to the primary repo alone, which is right for `entrada`
+    — the `docs/tickets/<llave>-*` files and the previously declared tree genuinely
+    live there. `salida`'s caller passes `ticket_roots(ticket)` instead, because the
+    declared path can be a mounted repo's (Decision D, same resolution as
+    `artifact_on_disk`). Returns the notes the journal should carry — a skipped tree, a
+    failed copy.
+
+    Never raises: a record that can't be written is a lost line, not a lost run. That
+    covers `archive_folder`'s own DB read too — it used to run before this function's
+    `try` even started, so a locked DB there (`sqlite3.OperationalError`) escaped
+    straight into the caller. Left uncaught in `execute_run`'s entrada call, which runs
+    right after the run is marked `running` and well before it's closed, that exception
+    stranded the run in `running` forever — neither `/run` nor `/restaurar` would ever
+    stop 409ing on it. Moving `archive_folder` inside the `try` is what puts every DB
+    and filesystem access on this path under the same handler as the copies below.
+    """
     notes = []
     try:
+        folder = archive_folder(ticket, run_id, phase, started)
+        if not folder:
+            return []
         (folder / kind).mkdir(parents=True, exist_ok=True)
         for rel in rels:
-            _, skipped = copy_into(Path(ticket["repo_path"]), rel, folder / kind)
+            _, skipped = copy_into_any(roots or [Path(ticket["repo_path"])], rel, folder / kind)
             if skipped:
                 notes.append(f"archivo: {skipped}")
         write_run_meta(folder, ticket, run_id)
@@ -1768,8 +1827,19 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # is harmless (Task 5's restore requires artifact_state in ok/parcial, so
         # nothing can ever be restored from it) — reordering the guards to make this
         # invariant cosmetic-clean would be a bigger change than the problem.
-        archive_notes = archive_run(ticket, run_id, phase, "entrada",
-                                    entrada_rels(ticket), started)
+        try:
+            # `entrada_rels(ticket)` runs its own DB query, evaluated as this call's
+            # argument — BEFORE `archive_run`'s own try even starts. A locked DB there
+            # (`sqlite3.OperationalError`) would otherwise escape into this background
+            # task with the run already marked `running` (set above) and never closed:
+            # both `POST /run` and `POST /restaurar` 409 on it forever, recoverable only
+            # by editing the DB — exactly what Decision E forbids. `archive_run` itself
+            # promises never to raise, but that promise can't cover an exception thrown
+            # while building its own arguments.
+            archive_notes = archive_run(ticket, run_id, phase, "entrada",
+                                        entrada_rels(ticket), started)
+        except Exception:
+            archive_notes = []
         prev = last_session(ticket["id"], phase, engine) if resume else None
         if prev:
             # NOT the slash command. The session already ran the skill; sending it
@@ -1920,8 +1990,35 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             key = ticket["ado_id"]
             for n in archive_run(ticket, run_id, phase, "salida",
                                  [path, f"docs/tickets/{key}-request.md",
-                                  f"docs/tickets/{key}-journal.md"], started):
+                                  f"docs/tickets/{key}-journal.md"],
+                                 started, roots=ticket_roots(ticket)):
                 journal_note(ticket, n)
+            # Whether the salida actually holds the declared deliverable — NOT the same
+            # thing as `archive_path` getting set. `archive_folder` creates the folder
+            # and `archive_path` is recorded even when nothing relevant ended up inside
+            # it: a fan-out survey's HUELLA is an absolute scratch path outside every
+            # repo, so `copy_into_any` finds nothing to copy there and the folder is
+            # still created empty. Both the Timeline's and the history's Restore button
+            # key off THIS flag, not off `archive_path`, so a button that could never
+            # work (400 "Ruta fuera del repo", or a 404) stops appearing. Nullable and
+            # left NULL for anything that isn't this branch — same convention as
+            # `artifact_exists`: NULL means "nobody checked", not "not restorable".
+            try:
+                salida_folder = archive_folder(ticket, run_id, phase, started)
+                if salida_folder:
+                    salida_root = (salida_folder / "salida").resolve()
+                    # `path` can be an absolute scratch path (the fan-out's own
+                    # HUELLA): `salida_root / path` then discards `salida_root`
+                    # entirely — that's how `/` joins an absolute operand — and
+                    # resolves to the scratch dir itself, which of course "exists"
+                    # even though nothing was ever copied under the archive. The
+                    # `is_relative_to` check is what catches that: only a candidate
+                    # that actually landed INSIDE `salida/` counts.
+                    candidate = (salida_root / path).resolve()
+                    restorable = candidate.is_relative_to(salida_root) and candidate.exists()
+                    set_run(run_id, restorable=int(restorable))
+            except Exception:
+                pass  # ponytail: a lost flag, not a lost run — same policy as archive_run
         # run.json is rewritten at close for EVERY outcome, `nada` included: the entrada
         # (Task 3) writes it with the run still `running`, and a folder that says so
         # forever would lie about a run that finished.
@@ -1985,6 +2082,17 @@ class RestoreIn(BaseModel):
     overwrite: bool = False
 
 
+# Contract literal, read by `api.ts`'s `json()` helper: the ONLY `/restaurar` 409 the
+# frontend may retry with `overwrite: true`. Every other detail in this file is prose
+# — CLAUDE.md classifies HTTPException details as UI-facing Spanish that may be
+# reworded — so the retry can't key off substring-matching a word in the sentence.
+# That's what run 17-overwrite-guard exposed: an OpenSpec slug containing the literal
+# word "overwrite" made the TREE refusal (never retryable) match too, and the dialog
+# reopened forever. `detail` becomes `{"code": ..., "msg": <the Spanish sentence>}`
+# for this one case; every other 409/400 here keeps a plain string `detail`.
+RESTORE_EXISTS_CODE = "existe_archivo"
+
+
 @app.post("/tickets/{tid}/restaurar")
 def restore_run(tid: int, body: RestoreIn):
     """Copies the salida/ of one run back to where the phases read it. A human act,
@@ -2039,14 +2147,20 @@ def restore_run(tid: int, body: RestoreIn):
         n = sum(1 for x in src.rglob("*") if x.is_file())
     else:
         if dest.exists() and not body.overwrite:
-            raise HTTPException(409, f"Ya existe {rel}; repite con overwrite para reemplazarlo")
+            raise HTTPException(409, {
+                "code": RESTORE_EXISTS_CODE,
+                "msg": f"Ya existe {rel}; repite con overwrite para reemplazarlo",
+            })
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.copy2(src, dest)
         except OSError as exc:
             raise HTTPException(409, f"No se pudo restaurar {rel}: {exc}")
         n = 1
-    append_journal(dict(t), "restaurar", "ok", rel, note=f"desde run {r['id']}")
+    # `extra=`, not `note=`: `note` renders as `· reserva: ...`, and `reserva` is the
+    # label for a `parcial` stamp's caveat — this line isn't one, it's the restore's
+    # own provenance and reads as itself.
+    append_journal(dict(t), "restaurar", "ok", rel, extra=[f"desde run {r['id']}"])
     return {"restaurado": rel, "archivos": n}
 
 

@@ -3007,7 +3007,9 @@ def test_restore_refuses_to_overwrite_a_file_unless_asked(client, monkeypatch, t
     tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
     p.write_text("versión dos", encoding="utf-8")   # e.g. consolidate rewrote it
     r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
-    assert r.status_code == 409 and "overwrite" in r.json()["detail"]
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "existe_archivo" and "overwrite" in detail["msg"]
     assert p.read_text(encoding="utf-8") == "versión dos"
     r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id, "overwrite": True})
     assert r.status_code == 200
@@ -3059,17 +3061,26 @@ def test_restore_404_when_the_run_has_no_snapshot(client, monkeypatch, tmp_path)
 
 
 def test_deleting_the_archive_changes_nothing_about_the_next_run(client, monkeypatch, tmp_path):
-    """A record, never an input: no phase reads from the archive."""
+    """A record, never an input: no phase reads from the archive. The directory is
+    left DELETED here, never recreated — recreating an empty folder before the next
+    run only proves the runner doesn't crash against a directory that exists; it
+    doesn't pin that nothing reads from an archive that's actually gone. The next run
+    still has to produce its deliverable and its stamp with the archive absent the
+    whole time — that's what "never an input" actually claims."""
     _archive_on(client, tmp_path)
     (tmp_path / "repo" / "a.md").write_text("x")
     _use_fake_claude(monkeypatch, stamp="ok — a.md")
     tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
-    shutil.rmtree(tmp_path / "archivo")
-    (tmp_path / "archivo").mkdir()
+    shutil.rmtree(tmp_path / "archivo")   # gone, and stays gone through the next run
+    change = tmp_path / "repo" / "openspec" / "changes" / "1-xpo"
+    change.mkdir(parents=True)
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/1-xpo")
     client.post(f"/tickets/{tid}/run", json={"phase": "design"})
     detail = client.get(f"/tickets/{tid}").json()
-    assert detail["runs"][0]["status"] == "success"
+    run = detail["runs"][0]
+    assert run["status"] == "success" and run["artifact_state"] == "ok"
+    assert run["artifact_path"] == "openspec/changes/1-xpo"
     assert "/ticket-agent:plan 1" in detail["log_tail"]
 
 
@@ -3121,3 +3132,198 @@ def test_restore_wraps_an_oserror_from_the_copy_as_409(client, monkeypatch, tmp_
     r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
     assert r.status_code == 409
     assert "disco lleno" in r.json()["detail"]
+
+
+def test_a_locked_db_during_entrada_does_not_strand_the_run_in_running(
+        client, monkeypatch, tmp_path):
+    """`entrada_rels(ticket)` runs its own DB query, evaluated as an argument to
+    `archive_run` — BEFORE that function's own `try` starts. Without a guard at the
+    call site, a `sqlite3.OperationalError` there (a locked DB) escapes into the
+    background task with the run already marked `running`, and the run is never
+    closed: both `POST /run` and `POST /restaurar` 409 on it forever, recoverable
+    only by editing the DB — exactly what Decision E forbids."""
+    import sqlite3 as sq
+
+    import app as app_module
+
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+
+    def boom(ticket):
+        raise sq.OperationalError("database is locked")
+
+    monkeypatch.setattr(app_module, "entrada_rels", boom)
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={})
+    assert r.status_code == 202
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] in ("success", "error")
+    assert run["finished_at"] is not None
+
+
+def test_close_archives_the_declared_file_from_the_extra_repo(client, monkeypatch, tmp_path):
+    """`artifact_on_disk` resolves a declared path against the primary repo AND the
+    ticket's extras, because a phase can leave its deliverable in a mounted repo. The
+    archive must resolve the same way — an `implement` run whose deliverable lives in
+    an extra repo used to close `ok`, get an `archive_path`, and leave `salida/`
+    silently empty."""
+    _archive_on(client, tmp_path)
+    (tmp_path / "backend-repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "backend-repo" / "docs" / "tickets" / "3323-analysis.md").write_text(
+        "solo en el mount", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "success" and run["artifact_state"] == "ok"
+    folder = Path(run["archive_path"])
+    assert (folder / "salida" / "docs" / "tickets" / "3323-analysis.md").read_text(
+        encoding="utf-8") == "solo en el mount"
+
+
+def test_close_archives_from_the_root_artifact_on_disk_would_pick(client, monkeypatch, tmp_path):
+    """When the SAME relative path exists in both the primary repo and an extra, the
+    archive must pick the same root `artifact_on_disk` picks (primary first) — not an
+    unrelated file that happens to share the path, which a later restore would then
+    write into the wrong place."""
+    _archive_on(client, tmp_path)
+    (tmp_path / "repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "repo" / "docs" / "tickets" / "3323-analysis.md").write_text(
+        "primario", encoding="utf-8")
+    (tmp_path / "backend-repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "backend-repo" / "docs" / "tickets" / "3323-analysis.md").write_text(
+        "del mount", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    folder = Path(run["archive_path"])
+    assert (folder / "salida" / "docs" / "tickets" / "3323-analysis.md").read_text(
+        encoding="utf-8") == "primario"
+
+
+def test_survey_run_gets_no_restorable_flag_while_analyze_does(client, monkeypatch, tmp_path):
+    """A fan-out `survey` stamps `HUELLA: ok — <scratch path>` — an absolute path
+    outside every repo, by design. The salida branch still fires (request/journal get
+    copied) and `archive_path` gets set, so both UI affordances used to key off it and
+    offer a Restore button that could only ever 400 or 404. `restorable` records
+    whether the salida ACTUALLY holds the declared deliverable."""
+    _archive_on(client, tmp_path)
+    _write_brief(tmp_path, 45, routing="SONDEAR: backend")
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    tid = client.post("/tickets", json={"ado_id": 45, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    survey_run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert survey_run["status"] == "success" and survey_run["archive_path"] is not None
+    assert not survey_run["restorable"]
+
+    (tmp_path / "repo" / "a.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — a.md")
+    client.post(f"/tickets/{tid}/run", json={"phase": "analyze"})
+    analyze_run = next(r for r in client.get(f"/tickets/{tid}").json()["runs"]
+                       if r["phase"] == "analyze")
+    assert analyze_run["restorable"] == 1
+
+
+def test_tree_cap_stops_walking_as_soon_as_it_is_crossed(client, monkeypatch, tmp_path):
+    """A stamp clipped to `docs` used to make the runner `rglob`+`stat` the WHOLE tree,
+    under the global lock, before even checking the cap. With the cap crossed on the
+    4th file, `copy_into` must never `stat` anywhere near all 60."""
+    import pathlib
+
+    import app as app_module
+
+    _archive_on(client, tmp_path)
+    monkeypatch.setattr("app.ARCHIVE_TREE_MAX_FILES", 3)
+    docs = tmp_path / "repo" / "docs"
+    docs.mkdir()
+    for i in range(60):
+        (docs / f"f{i}.md").write_text("x")
+
+    calls = {"n": 0}
+    real_stat = pathlib.Path.stat
+
+    def counting_stat(self, *a, **kw):
+        if str(self).startswith(str(docs)):
+            calls["n"] += 1
+        return real_stat(self, *a, **kw)
+
+    monkeypatch.setattr(pathlib.Path, "stat", counting_stat)
+    _use_fake_claude(monkeypatch, stamp="ok — docs")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    # Read directly from the DB and disk — NOT `GET /tickets/{id}`, which folds
+    # `phases_for` → `stamp_stat`, itself a recursive walk of the declared directory
+    # for the "huella" display. That's a real cost too, but it's a different code path
+    # than the one this test is pinning (`copy_into`'s archive cap), and counting it
+    # here would hide a regression in the archive behind an unrelated, legitimate walk.
+    with app_module.db() as c:
+        run = dict(c.execute("SELECT * FROM runs WHERE ticket_id=?", (tid,)).fetchone())
+    assert run["status"] == "success"
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "1-journal.md").read_text(encoding="utf-8")
+    assert "· archivo: omitido — docs: más de 3 archivos" in journal
+    # A full walk stats every one of the 60 files at least once (120+ calls between
+    # `is_file()` and the explicit `.stat().st_size`), plus whatever else in this
+    # request happens to touch `docs/`. Short-circuiting at the 4th file keeps the
+    # total well under half the tree instead of covering all of it.
+    assert calls["n"] < 30
+
+
+def test_restore_journal_note_is_not_labeled_as_a_reserve(client, monkeypatch, tmp_path):
+    """`· reserva:` is the label for a `parcial` stamp's caveat. A restore's provenance
+    is its own note, via `extra=`, and must not borrow that label."""
+    tid, run_id, p = _archived_analysis(client, monkeypatch, tmp_path)
+    p.unlink()
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
+    assert r.status_code == 200
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "3323-journal.md").read_text(encoding="utf-8")
+    assert f"   · desde run {run_id}" in journal
+    assert "reserva" not in journal
+
+
+def test_only_the_retryable_restore_409_carries_a_machine_readable_code(
+        client, monkeypatch, tmp_path):
+    """`String(e.message).includes("overwrite")` used to decide the UI's retry — prose
+    that CLAUDE.md itself classifies as reworded-at-will. Worse: every `/restaurar` 409
+    interpolates the relative path, so a ticket whose declared path literally contains
+    the word `overwrite` made the TREE refusal (never retryable) match too. The fix is
+    a `code` field on the ONE refusal that's actually safe to retry with
+    `overwrite: true`; every other 409/400 here keeps a plain string `detail`."""
+    _archive_on(client, tmp_path)
+    change = tmp_path / "repo" / "openspec" / "changes" / "17-overwrite-guard"
+    (change / "specs").mkdir(parents=True)
+    (change / "specs" / "s.md").write_text("s")
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/17-overwrite-guard")
+    tid = client.post("/tickets", json={"ado_id": 17, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    run_id = client.get(f"/tickets/{tid}").json()["runs"][0]["id"]
+
+    # The tree is still there (never deleted): restoring it 409s, and the word
+    # "overwrite" sits right inside the declared path itself.
+    tree_r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id, "overwrite": True})
+    assert tree_r.status_code == 409
+    tree_detail = tree_r.json()["detail"]
+    assert isinstance(tree_detail, str) and "overwrite" in tree_detail
+
+    # The retryable case, a lone file: DOES carry the code. (Archive is already on
+    # from above — `_archived_analysis` would try to switch it on again and 409 on a
+    # directory that already exists.)
+    p = tmp_path / "repo" / "docs" / "tickets" / "3324-analysis.md"
+    p.write_text("versión uno", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3324-analysis.md")
+    tid2 = client.post("/tickets", json={"ado_id": 3324, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid2}/run", json={})
+    run_id2 = client.get(f"/tickets/{tid2}").json()["runs"][0]["id"]
+    p.write_text("otra versión", encoding="utf-8")
+    file_r = client.post(f"/tickets/{tid2}/restaurar", json={"run_id": run_id2})
+    assert file_r.status_code == 409
+    file_detail = file_r.json()["detail"]
+    assert isinstance(file_detail, dict) and file_detail["code"] == "existe_archivo"
+
+    # An unrelated 409 (no active run needed here — reuse the "run active" guard).
+    import app as app_module
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?,?,?)",
+                   (tid2, "analyze", "running"))
+    active_r = client.post(f"/tickets/{tid2}/restaurar", json={"run_id": run_id2})
+    assert active_r.status_code == 409
+    assert isinstance(active_r.json()["detail"], str)
