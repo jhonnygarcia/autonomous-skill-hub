@@ -246,17 +246,39 @@ it, anything else replaces it. `project_out` reports only `ado_pat_configured`, 
 boolean — never the value. `ticket_out` has to pop `ado_pat` explicitly, because it
 builds its response with `dict(t)` over every column: an allowlist would have been
 one more place to remember to update; a pop next to the one place the ticket becomes
-an API response can't be forgotten as easily. When a ticket carries a token,
-`execute_run` sets `ADO_AUTH=envvar` and `ADO_MCP_AUTH_TOKEN` in the subprocess
-environment; when it doesn't, it sets neither, and `${ADO_AUTH:-azcli}` in the
-plugin's `.mcp.json` keeps governing exactly as before. **This is a secret at rest in
-plaintext in `orchestrator.db`.** Write-only in the API means it doesn't leak
-*through the API* — it says nothing about the file on disk. Whoever can read
-`orchestrator.db` can read every configured token; there is no encryption at rest.
-The token must never reach a log, the journal, `run.json`, or an error message: `cmd`
-(what gets logged and put in `run.json` via `run_meta`) is the argv list, never the
-env dict, and `run_meta`'s ticket fields are an explicit allowlist that was never
-grown to include it.
+an API response can't be forgotten as easily. When a ticket carries a token AND the
+phase is one of `PHASE_MCP`, `execute_run` sets `ADO_AUTH=envvar` and
+`ADO_MCP_AUTH_TOKEN` in the subprocess environment; otherwise it sets neither, and
+`${ADO_AUTH:-azcli}` in the plugin's `.mcp.json` keeps governing exactly as before.
+The `PHASE_MCP` gate isn't optional: `run_fan_out` reuses the SAME `env` dict for
+every `survey` child, and `survey` children are rooted in a secondary repo on
+purpose — CLAUDE.md's own multi-repo section says those sessions need no `ADO_ORG`,
+no token and no `ticket-agent.json`, and reusing an ungated `env` would hand a
+credential straight into exactly the repos that isolation exists to protect.
+
+**FastAPI's default validation-error handler echoes the whole offending body back**
+in Pydantic v2's `errors()[…]["input"]` — a `POST /projects` that 422s (a missing
+`name`, say) put `ado_pat`'s value straight into the response. The caller already
+knows the value, so this wasn't escalation, but it landed in browser devtools, any
+proxy or access log recording error bodies, and the frontend's error toast.
+`strip_secrets_from_validation_errors`, registered with
+`@app.exception_handler(RequestValidationError)`, strips `input` from every error
+entry and keeps the rest (`loc`, `msg`, `type`).
+
+**This is a secret at rest in plaintext in `orchestrator.db`.** Write-only in the API
+means it doesn't leak *through the API* — it says nothing about the file on disk.
+Whoever can read `orchestrator.db` can read every configured token; there is no
+encryption at rest. Inside the **runner**, the token never reaches a log, the
+journal, `run.json`, or an error message: `cmd` (what gets logged and put in
+`run.json` via `run_meta`) is the argv list, never the env dict, and `run_meta`'s
+ticket fields are an explicit allowlist that was never grown to include it. That
+guarantee stops at the runner's own boundary, though: the **child process's own
+stdout is the log** (`logs/<run_id>.log`, served verbatim as `log_tail` by
+`GET /tickets/{tid}`), and `implement` carries `Bash` with no specifier — an agent
+that runs something like `env` or `printenv` writes the PAT straight into that log,
+and nothing in the orchestrator would catch it. Handing a credential to an agent
+that can run arbitrary shell is a real exposure, not a hypothetical one; this is a
+property of the design, not a bug to fix here.
 
 **`POST /tickets` accepts one of two shapes, never both.** `{ado_id, project}` is a
 work item, as always; `{request, project}` is a free-text request that replaces it —
@@ -406,19 +428,37 @@ UI is the product and the plugin is the engine: every friction of using the plug
 bare is a feature the UI owes") makes that failure the orchestrator's to fix, since
 it already has both values as columns on the ticket.
 
-So now it does two things, both in `execute_run`, right before launching:
+So now it does two things, both in `execute_run`, right before launching, and both
+gated on `phase in PHASE_MCP` — the phases that actually stop without them, and
+the same gate that keeps a `survey` fan-out child (rooted in a SECONDARY repo on
+purpose) from ever seeing either:
 - **Exports `ADO_ORG`** from `ticket["org"]` into the subprocess environment, but
-  **only when it isn't already there** — the repo's own `.claude/settings.json` is
-  the more specific setting and must win over a label typed in the UI, so this is a
-  fallback, not an override.
+  **only when it isn't already set and non-empty** — the repo's own
+  `.claude/settings.json` is the more specific setting and must win over a label
+  typed in the UI, so this is a fallback, not an override. `env.get("ADO_ORG")` is
+  what's checked, not `"ADO_ORG" in env`: an inherited `ADO_ORG=""` (trivially
+  produced by `set ADO_ORG=` on Windows) must count as absent, or the MCP builds
+  `https://dev.azure.com/` and lands right back on the failure this feature exists to
+  eliminate. Symmetrically, `check_org` rejects an empty `org` at `POST`/`PUT
+  /projects` time, so the UI can't hand the runner an empty value to export in the
+  first place.
 - **Creates `.claude/ticket-agent.json`** in the primary repo when it's missing
-  (`ensure_ticket_agent_config`, for the phases in `PHASE_MCP` — the ones that
-  actually stop without it), writing only `organization` and `project`: the two keys
-  the orchestrator has an actual source for. It never overwrites an existing file,
-  whatever it contains — a human may have tuned it, or added `autonomy` or
-  `subagent_model`, keys the orchestrator has no value for and won't invent. When it
-  writes the file, it says so in the ticket's journal (`journal_note`), because a
-  file that appears by itself with nobody saying so is worse than no file.
+  (`ensure_ticket_agent_config`, next to `journal_note` — it uses the same
+  never-strand-the-run discipline), writing only `organization` and `project`: the
+  two keys the orchestrator has an actual source for. It never overwrites an
+  existing file, whatever it contains — a human may have tuned it, or added
+  `autonomy` or `subagent_model`, keys the orchestrator has no value for and won't
+  invent. It returns `"created"`, `"exists"`, or `"error: <reason>"` and **never
+  raises**: the write used to sit between `set_run(status="running")` and every
+  guarded region of `execute_run`, so a `.claude` that's a file instead of a
+  directory, an ACL denial, or a full disk raised `OSError` straight into a
+  `BackgroundTask` — reaching nobody, leaving the run row `running` forever, and
+  409ing `POST /run`/`POST /restaurar` on that ticket permanently (recoverable only
+  by editing the DB by hand). Same failure mode `archive_run`'s own call site
+  documents as forbidden, fixed the same way: caught, and turned into a journal
+  line either way — `"created"` gets "the runner created it", an error gets what
+  went wrong — because a file that appears (or fails to appear) by itself with
+  nobody saying so is worse than silence either direction.
 
 What `app.py` reads `org`/`project` for beyond this is still just display and the
 "another project's ticket is running" message — registering a repo in the

@@ -22,6 +22,9 @@ If you have Claude Code, Node and an `az login` session, this is the entire inst
     # 3 — restart Claude Code, then
     /ticket-agent:analyze 3311
 
+Step 2 is for running the plugin **standalone**. Driven through the orchestrator app
+instead, both files are supplied for you — see Step 4's note.
+
 The rest of the page is the same four steps with the reasons, the token
 alternative, and what each failure actually means.
 
@@ -208,6 +211,15 @@ Leaving the token path is just removing `ADO_AUTH`: unset, you're back on `az lo
 The plugin is installed but knows nothing about your organization. It reads that from
 **the repo you run it in**, not from a global config — which is what lets different
 repos target different Azure DevOps organizations.
+
+**This step is for running the plugin standalone.** If a repo is driven through the
+orchestrator app (`apps/orchestrator/`), it supplies both of these for you at launch
+time: `ADO_ORG` as a fallback (only when the repo doesn't already export one) and
+`.claude/ticket-agent.json` created from the project's saved `org`/`project` when it's
+missing — never overwriting a file you already committed. See `CLAUDE.md`'s
+Orchestrator section ("the runner supplies what the target repo is missing") for the
+mechanism. Standalone use (no orchestrator, just `claude` in a terminal) still needs
+both set up by hand, exactly as below.
 
 **`.claude/settings.json`** — what the MCP server connects with (add `ADO_AUTH` here
 too if you chose Option B):

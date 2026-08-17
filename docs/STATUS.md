@@ -307,6 +307,29 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
       a live chat with the agent mid-run: `claude -p` has no TTY, the seam is
       between phases by design, and a bidirectional protocol would be
       per-engine.
+    - **Hecho el 2026-08-17** — **The runner supplies what the target repo is
+      missing.** A user registered a project in the UI with the correct org
+      and project and launched a phase, and it failed: the target repo on
+      disk had no `ADO_ORG` and no `.claude/ticket-agent.json`, and the UI
+      said nothing, because it never had the authority to. Two fixes, both
+      in `execute_run`: `ADO_ORG` is exported as a fallback only (never
+      overriding a repo's own `.claude/settings.json`, and an empty inherited
+      value counts as absent so it doesn't suppress the fallback either), and
+      `.claude/ticket-agent.json` is created with `organization`/`project`
+      when missing — never overwriting a human-tuned file, never inventing
+      `autonomy` or `subagent_model`. The write is wrapped so a hostile
+      filesystem (`.claude` as a file, a full disk) can't strand the run.
+      Gated on `PHASE_MCP` throughout, so the fan-out's secondary-repo
+      children — deliberately outside it — never see either.
+    - **Hecho el 2026-08-17** — **An optional Azure PAT, per project, from the
+      UI.** The plugin already supported `ADO_AUTH=envvar` /
+      `ADO_MCP_AUTH_TOKEN` as an alternative to `az login`; there was no way
+      to configure it without hand-editing the target repo. Added as
+      `ado_pat` on `projects` (copied onto the ticket like `org`/`project`),
+      write-only end to end — `GET` reports only `ado_pat_configured`, a
+      boolean. This is a secret at rest in plaintext in `orchestrator.db`;
+      write-only in the API stops it leaking through the API, not through
+      the file on disk, and both the UI and `CLAUDE.md` say so plainly.
 
 21. **A false stamp stops counting as progress, without being erased**
     (2026-08-17). `codex exec` closed `HUELLA: ok — salida.md` with exit 0

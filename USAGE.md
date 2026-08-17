@@ -326,6 +326,12 @@ stuck, and the baseline to compare against. Both write the same file.
       "subagent_model": "sonnet"
     }
 
+Written by hand for standalone use. Driven through the orchestrator app instead,
+this file is created for you (`organization`/`project` only, from the project's
+saved configuration) the first time a phase in `PHASE_MCP` runs and finds it
+missing — it never overwrites one you already committed, and never invents
+`autonomy` or `subagent_model`.
+
 | Key | Required | Values | What it does |
 |---|---|---|---|
 | `organization` | yes | the org subdomain | must match `ADO_ORG`; nothing validates it |
@@ -367,9 +373,9 @@ while the driving stays on the good one.
 
 | Setting | Where it goes | What it does |
 |---|---|---|
-| `env.ADO_ORG` | `settings.json` | the org the MCP server connects to. **Required** |
+| `env.ADO_ORG` | `settings.json` | the org the MCP server connects to. **Required for standalone use** — an orchestrator-driven run supplies it as a fallback when the repo doesn't already export one |
 | `env.ADO_AUTH` | `settings.json` | auth mode; unset = the `az login` session |
-| `env.ADO_MCP_AUTH_TOKEN` | `settings.local.json` or the real environment | the PAT, when `ADO_AUTH=envvar`. **Never committed** |
+| `env.ADO_MCP_AUTH_TOKEN` | `settings.local.json` or the real environment | the PAT, when `ADO_AUTH=envvar`. **Never committed** — an orchestrator-driven run can source this from a PAT saved per project in its own UI instead (plaintext in `orchestrator.db`; see that app's `CLAUDE.md`) |
 | `permissions.additionalDirectories` | any of the three settings files | the other repos' paths. Relative paths work |
 
 `additionalDirectories` is valid in `.claude/settings.json` (the team's),

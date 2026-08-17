@@ -45,7 +45,10 @@ credential first** (see "Credentials").
 
 Step by step, with the prerequisite checks and the usual failures:
 [INSTALL.md](../../INSTALL.md); day-to-day use and the full configuration reference:
-[USAGE.md](../../USAGE.md). The short version:
+[USAGE.md](../../USAGE.md). The short version, for running the plugin **standalone**
+(no orchestrator) — a repo driven through `apps/orchestrator/` gets steps 3 and 4
+supplied at launch time instead (`ADO_ORG` as a fallback, `.claude/ticket-agent.json`
+created if missing), and adds an optional PAT of its own, saved per project in its UI:
 
 1. `/plugin marketplace add jhonnygarcia/autonomous-skill-hub`
 2. `/plugin install ticket-agent@autonomous-skill-hub`
@@ -282,6 +285,14 @@ machine with no Azure CLI, or for unattended runs.
 `envvar` is the one to use: one variable, plain PAT. The PAT needs at least Work
 Items (read), Code (read), and Wiki (read) — plus Code (write) only if you're going
 to ask Phase 2b to push its branch, which it never does on its own.
+
+**Orchestrator-driven runs have a fourth way to set this up: a PAT saved per project
+in the orchestrator's own UI.** It's stored in `orchestrator.db` (plaintext — see
+that app's own `CLAUDE.md` for what "write-only in the API" does and doesn't protect
+against) and, when configured, `execute_run` sets `ADO_AUTH=envvar` and
+`ADO_MCP_AUTH_TOKEN` in the launched subprocess's environment automatically — nothing
+to put in `.claude/settings.local.json` for that repo. Standalone use still needs one
+of the rows below.
 
 **Where the two variables go is not the same place.** `ADO_AUTH` is safe to commit;
 the token is not:
