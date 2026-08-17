@@ -2952,3 +2952,24 @@ def test_survey_without_a_brief_still_archives_the_entrada(client, monkeypatch, 
     assert (folder / "entrada").is_dir()
     assert (folder / "run.json").exists()
     assert not (folder / "salida").exists()
+
+
+def test_a_declared_tree_over_the_cap_is_skipped_not_copied(client, monkeypatch, tmp_path):
+    """A stamp clipped to `docs` would otherwise archive the whole folder every run."""
+    _archive_on(client, tmp_path)
+    monkeypatch.setattr("app.ARCHIVE_TREE_MAX_FILES", 3)
+    docs = tmp_path / "repo" / "docs"
+    docs.mkdir()
+    for i in range(4):
+        (docs / f"f{i}.md").write_text("x")
+    _use_fake_claude(monkeypatch, stamp="ok — docs")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "success"
+    folder = Path(run["archive_path"])
+    assert not (folder / "salida" / "docs" / "f0.md").exists()
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "1-journal.md").read_text(encoding="utf-8")
+    # not "4 archivos": by close time `docs/` also holds `docs/tickets/1-journal.md`,
+    # and the count is whatever the tree held when it was measured
+    assert "· archivo: omitido — docs:" in journal
