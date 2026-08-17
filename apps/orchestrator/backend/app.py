@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from itertools import takewhile
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 BASE = Path(__file__).resolve().parent
@@ -685,33 +687,6 @@ REQUEST_PROMPT = (
     "other document in the repo.")
 NO_BRIEF_REASON = (
     "no existe el brief de la fase anterior; corre primero la fase «brief»")
-TICKET_AGENT_CONFIG_REL = ".claude/ticket-agent.json"
-
-
-def ensure_ticket_agent_config(ticket: dict) -> bool:
-    """Creates `.claude/ticket-agent.json` in the primary repo if it's missing.
-    Returns whether it wrote anything.
-
-    **Never overwrites.** A human may have tuned the file, or added keys the
-    orchestrator knows nothing about (`autonomy`, `subagent_model`) — an existing
-    file is left byte-for-byte alone, whatever it holds.
-
-    Writes only what the orchestrator actually has a source for: `organization`
-    and `project`, copied from the ticket the same way `org`/`project` already are.
-    No `autonomy`: the skills treat it (and its absence) as `supervised`, the safe
-    default, so inventing a value here would be filler with no source — see
-    `ticket-comprehension/SKILL.md` step 4. No `subagent_model` either: the
-    orchestrator has no value for it and the README's example is not a source.
-    """
-    path = Path(ticket["repo_path"]) / TICKET_AGENT_CONFIG_REL
-    if path.exists():
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"organization": ticket["org"], "project": ticket["project"]},
-                  indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8")
-    return True
 JOURNAL_REL = "docs/tickets/{ado_id}-journal.md"
 JOURNAL_HEADER = "# Journal — {ado_id}\n\n## Corridas\n\n## Hallazgos\n"
 # Prompt-facing. The skills know how to write their own run line — that is what makes
@@ -784,6 +759,17 @@ def repos_columns(body) -> tuple:   # ProjectIn is defined further below; no ann
     primary, rest = split_repos(body.repos)
     return (primary.path, primary.label,
             json.dumps([{"path": r.path, "label": r.label} for r in rest]))
+
+
+def check_org(org: str) -> None:
+    """An empty `org` used to be harmless (the runner never exported `ADO_ORG`, see
+    CLAUDE.md). Now it isn't: `execute_run` exports it whenever the environment
+    doesn't already carry one, so a project saved with `org: ""` would export an
+    EMPTY `ADO_ORG` where before none existed at all — the MCP then builds
+    `https://dev.azure.com/` and fails with the exact "MCP not connected" message
+    this feature exists to eliminate. Caught at save time instead."""
+    if not org.strip():
+        raise HTTPException(400, "Falta la organización de Azure DevOps")
 
 
 def db() -> sqlite3.Connection:
@@ -938,6 +924,19 @@ app = FastAPI(title="ticket-orchestrator")
 init_db()
 
 
+@app.exception_handler(RequestValidationError)
+async def strip_secrets_from_validation_errors(request: Request, exc: RequestValidationError):
+    """FastAPI's default handler echoes the WHOLE offending body back in every error's
+    `input` (Pydantic v2's `errors()`) — verified: `POST /projects` missing `name`
+    puts `ado_pat`'s value straight into the 422 body. The caller already knows the
+    value, so this isn't privilege escalation, but it lands in browser devtools, in
+    any proxy or access log that records error bodies, and in the frontend's error
+    toast regardless. Strip `input` from every entry; the rest (`loc`, `msg`, `type`)
+    stays exactly as useful for debugging a bad request as before."""
+    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 class Repo(BaseModel):
     path: str
     label: str = ""       # "backend", "app de autenticación"… travels to the agent's prompt
@@ -1077,6 +1076,7 @@ def list_projects():
 
 @app.post("/projects", status_code=201)
 def create_project(body: ProjectIn):
+    check_org(body.org)
     cols = repos_columns(body)
     with db() as c:
         if c.execute("SELECT 1 FROM projects WHERE name=?", (body.name,)).fetchone():
@@ -1099,6 +1099,7 @@ def update_project(name: str, body: ProjectIn):
     # of them point here. All that matters is keeping the name unique.
     if body.name != name and get_project(body.name):
         raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
+    check_org(body.org)
     cols = repos_columns(body)
     # `None` (the field wasn't sent) keeps the stored token — the API never returns
     # it, so the form has nothing to resend. Anything else, including "", replaces it.
@@ -1234,6 +1235,46 @@ def journal_note(ticket: dict, text: str) -> None:
         p.write_text(body, encoding="utf-8")
     except OSError:
         pass  # ponytail: same policy as append_journal — a lost note, not a lost run
+
+
+TICKET_AGENT_CONFIG_REL = ".claude/ticket-agent.json"
+
+
+def ensure_ticket_agent_config(ticket: dict) -> str:
+    """Creates `.claude/ticket-agent.json` in the primary repo if it's missing.
+    Returns `"created"`, `"exists"`, or `"error: <reason>"`.
+
+    **Never raises.** Same policy as `archive_run` and `journal_note`: a config file
+    that can't be written must not strand the run. Before this, the write sat between
+    `set_run(status="running")` and every guarded region of `execute_run` — a `.claude`
+    that's a file instead of a directory, an ACL denial, or a full disk raised `OSError`
+    straight into a `BackgroundTask`, where it reaches nobody, the run row is never
+    closed, and `POST /run`/`POST /restaurar` 409 on that ticket forever (the exact
+    failure mode `archive_run`'s own call site documents as forbidden).
+
+    **Never overwrites.** A human may have tuned the file, or added keys the
+    orchestrator knows nothing about (`autonomy`, `subagent_model`) — an existing
+    file is left byte-for-byte alone, whatever it holds.
+
+    Writes only what the orchestrator actually has a source for: `organization`
+    and `project`, copied from the ticket the same way `org`/`project` already are.
+    No `autonomy`: the skills treat it (and its absence) as `supervised`, the safe
+    default, so inventing a value here would be filler with no source — see
+    `ticket-comprehension/SKILL.md` step 4. No `subagent_model` either: the
+    orchestrator has no value for it and the README's example is not a source.
+    """
+    path = Path(ticket["repo_path"]) / TICKET_AGENT_CONFIG_REL
+    try:
+        if path.exists():
+            return "exists"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"organization": ticket["org"], "project": ticket["project"]},
+                      indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8")
+        return "created"
+    except OSError as exc:
+        return f"error: {exc}"
 
 
 def _seg(value) -> str:
@@ -1932,12 +1973,17 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             req = Path(ticket["repo_path"]) / REQUEST_FILE_REL.format(ado_id=ticket["ado_id"])
             req.parent.mkdir(parents=True, exist_ok=True)
             req.write_text(ticket["request"], encoding="utf-8")
-        if phase in PHASE_MCP and ensure_ticket_agent_config(ticket):
-            # A file that appears by itself with nobody saying so is worse than no
-            # file — recorded right away, not folded into the close-of-run line,
-            # since the run itself may still end in error.
-            journal_note(ticket, "el runner creó .claude/ticket-agent.json "
-                                 "(organization, project) porque no existía")
+        if phase in PHASE_MCP:
+            # Recorded right away, not folded into the close-of-run line, since the
+            # run itself may still end in error. `ensure_ticket_agent_config` never
+            # raises: a config file that can't be written must not strand the run.
+            cfg_result = ensure_ticket_agent_config(ticket)
+            if cfg_result == "created":
+                journal_note(ticket, "el runner creó .claude/ticket-agent.json "
+                                     "(organization, project) porque no existía")
+            elif cfg_result.startswith("error: "):
+                journal_note(ticket, "no se pudo crear .claude/ticket-agent.json: "
+                                     + cfg_result.removeprefix("error: "))
         # The entrada is what the phase is about to read, human edits included (the
         # ticked DECIDIR boxes live nowhere else). Taken AFTER the request projection
         # so it matches the disk the agent sees. Notes wait for the journal line.
@@ -2051,20 +2097,29 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # One list per engine: each provider reads its own, and leaving another's in
         # place would be leaving the door open for whichever engine gets added next.
         env = {k: v for k, v in os.environ.items() if k not in API_KEY_VARS}
-        # The orchestrator already knows the org (it's a column on the ticket, copied
-        # from the project) — exporting it is what lets a target repo that lacks its
-        # own `ADO_ORG` still connect, instead of failing with a message that reads
-        # like a wrong org and sends you to the wrong file. Only when it's NOT already
-        # in the inherited environment: the repo's own `.claude/settings.json` is the
-        # more specific setting and must win over a label typed in the UI.
-        if "ADO_ORG" not in env:
-            env["ADO_ORG"] = ticket["org"]
-        # The Azure PAT, when the project has one configured. Absent, nothing changes:
-        # `${ADO_AUTH:-azcli}` in the plugin's `.mcp.json` keeps defaulting to the
-        # `az login` session, exactly as before this feature existed.
-        if ticket.get("ado_pat"):
-            env["ADO_AUTH"] = "envvar"
-            env["ADO_MCP_AUTH_TOKEN"] = ticket["ado_pat"]
+        # Both of these are gated on `PHASE_MCP`, same as `ensure_ticket_agent_config`:
+        # `survey` children are rooted in a SECONDARY repo on purpose (the whole point
+        # of the fan-out is a session that sees only that repo's own rules), and
+        # neither the org label nor the token belongs there — CLAUDE.md is explicit
+        # that those children need no `ADO_ORG`, no token and no `ticket-agent.json`.
+        if phase in PHASE_MCP:
+            # The orchestrator already knows the org (it's a column on the ticket,
+            # copied from the project) — exporting it is what lets a target repo that
+            # lacks its own `ADO_ORG` still connect, instead of failing with a message
+            # that reads like a wrong org and sends you to the wrong file. Only when
+            # it's NOT already set (and non-empty — `ADO_ORG=""`, trivial to produce
+            # with `set ADO_ORG=` on Windows, must count as absent or the MCP builds
+            # `https://dev.azure.com/` and fails with the very message this feature
+            # exists to eliminate): the repo's own `.claude/settings.json` is the more
+            # specific setting and must win over a label typed in the UI.
+            if not env.get("ADO_ORG"):
+                env["ADO_ORG"] = ticket["org"]
+            # The Azure PAT, when the project has one configured. Absent, nothing
+            # changes: `${ADO_AUTH:-azcli}` in the plugin's `.mcp.json` keeps
+            # defaulting to the `az login` session, exactly as before this existed.
+            if ticket.get("ado_pat"):
+                env["ADO_AUTH"] = "envvar"
+                env["ADO_MCP_AUTH_TOKEN"] = ticket["ado_pat"]
         # `--add-dir` grants file access, not configuration discovery: from a mounted
         # repo it loads `.claude/skills/` and `.claude/agents/`, but NOT its CLAUDE.md
         # nor `.claude/rules/`. Without this the agent writes the extra repo's code

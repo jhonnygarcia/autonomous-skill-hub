@@ -3371,6 +3371,13 @@ def test_tree_cap_stops_walking_as_soon_as_it_is_crossed(client, monkeypatch, tm
 
     _archive_on(client, tmp_path)
     monkeypatch.setattr("app.ARCHIVE_TREE_MAX_FILES", 3)
+    # Pre-created so `ensure_ticket_agent_config` finds it already there and does
+    # nothing: this test pins the archive cap's own stat budget, and letting an
+    # unrelated feature's write share the budget is how budgets stop meaning anything.
+    cfg_dir = tmp_path / "repo" / ".claude"
+    cfg_dir.mkdir()
+    (cfg_dir / "ticket-agent.json").write_text(
+        '{"organization": "DemoOrg", "project": "Demo"}', encoding="utf-8")
     docs = tmp_path / "repo" / "docs"
     docs.mkdir()
     for i in range(60):
@@ -3401,12 +3408,8 @@ def test_tree_cap_stops_walking_as_soon_as_it_is_crossed(client, monkeypatch, tm
     # A full walk stats every one of the 60 files at least once (120+ calls between
     # `is_file()` and the explicit `.stat().st_size`), plus whatever else in this
     # request happens to touch `docs/`. Short-circuiting at the 4th file keeps the
-    # total well under half the tree instead of covering all of it. The margin above
-    # 30 (raised from an exact 30) covers the extra couple of stats from
-    # `ensure_ticket_agent_config`'s own `journal_note`, which also touches
-    # `docs/tickets/1-journal.md` — real work from a real feature, not the walk this
-    # test pins.
-    assert calls["n"] < 40
+    # total well under half the tree instead of covering all of it.
+    assert calls["n"] < 30
 
 
 def test_restore_journal_note_is_not_labeled_as_a_reserve(client, monkeypatch, tmp_path):
@@ -3474,6 +3477,11 @@ def test_only_the_retryable_restore_409_carries_a_machine_readable_code(
 
 
 def test_ado_org_reaches_the_subprocess(client, monkeypatch):
+    # The ambient shell may already export ADO_ORG (the cr360dev setup in docs/ does
+    # this on purpose) — a test that only passes on a machine with a clean
+    # environment isn't a test. Cleared explicitly so this test proves the runner's
+    # OWN export, not an accident of whoever's shell runs it.
+    monkeypatch.delenv("ADO_ORG", raising=False)
     _use_fake_claude(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 50, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
@@ -3482,9 +3490,15 @@ def test_ado_org_reaches_the_subprocess(client, monkeypatch):
 
 
 def test_inherited_ado_org_is_not_overridden(client, monkeypatch):
-    """The repo's own `.claude/settings.json` (simulated here by the inherited
-    process environment) is the more specific setting and has to win over the label
-    typed in the UI."""
+    """What this actually exercises is the fallback logic in `execute_run`: `env`
+    starts as a filtered copy of the BACKEND's own process environment (`os.environ`),
+    and `ADO_ORG` is only added when that copy doesn't already carry one. A real
+    target repo's `.claude/settings.json` doesn't reach this env dict at all — Claude
+    Code reads that file itself, from `cwd`, once the subprocess is running — so what
+    "wins" here is whatever the backend process inherited, simulated below with
+    `monkeypatch.setenv`. The property under test is real (a non-empty `ADO_ORG` in
+    the subprocess's environment is never clobbered), the docstring just used to
+    misdescribe which environment it belonged to."""
     _use_fake_claude(monkeypatch)
     monkeypatch.setenv("ADO_ORG", "YaConfigurado")
     tid = client.post("/tickets", json={"ado_id": 51, "project": "Demo"}).json()["id"]
@@ -3492,6 +3506,27 @@ def test_inherited_ado_org_is_not_overridden(client, monkeypatch):
     log = client.get(f"/tickets/{tid}").json()["log_tail"]
     assert "FAKE-CLAUDE ADO_ORG=YaConfigurado" in log
     assert "FAKE-CLAUDE ADO_ORG=DemoOrg" not in log
+
+
+def test_empty_ado_org_in_the_environment_does_not_suppress_the_fallback(client, monkeypatch):
+    """`ADO_ORG=` in a Windows shell (`set ADO_ORG=`) leaves the variable SET but
+    empty — trivially produced, and `"ADO_ORG" not in env` would count it as already
+    configured and skip the fallback, sending the run right back to the "MCP not
+    connected" failure this feature exists to eliminate."""
+    monkeypatch.setenv("ADO_ORG", "")
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 501, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_ORG=DemoOrg" in log
+
+
+def test_empty_org_is_rejected_at_save_time(client):
+    r = client.post("/projects", json={
+        "name": "SinOrg", "org": "  ", "project": "P",
+        "repos": [{"path": (Path(__file__).parent).as_posix(), "primary": True}],
+    })
+    assert r.status_code == 400 and "organización" in r.json()["detail"]
 
 
 def test_ticket_agent_config_is_created_when_missing(client, monkeypatch, tmp_path):
@@ -3540,6 +3575,73 @@ def test_config_creation_only_journaled_once(client, monkeypatch, tmp_path):
     assert journal.count("creó .claude/ticket-agent.json") == 1
 
 
+def test_config_write_failure_does_not_strand_the_run(client, monkeypatch, tmp_path):
+    """`.claude` existing as a FILE (not a directory) makes `mkdir` raise `OSError`
+    inside `ensure_ticket_agent_config`. Before the fix this sat between
+    `set_run(status="running")` and every guarded region of `execute_run`: the
+    exception reached nobody inside the `BackgroundTask`, the run row was never
+    closed, and every later `POST /run`/`POST /restaurar` on the ticket 409'd
+    forever — exactly the failure mode `archive_run`'s own call site documents as
+    forbidden. The run must still close, with a journal line, and the ticket must
+    still be launchable afterward."""
+    (tmp_path / "repo" / ".claude").write_text("no soy un directorio", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/56-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 56, "project": "Demo"}).json()["id"]
+    r = client.post(f"/tickets/{tid}/run", json={})
+    assert r.status_code == 202
+    detail = client.get(f"/tickets/{tid}").json()
+    run = detail["runs"][0]
+    assert run["status"] in ("success", "error") and run["finished_at"] is not None
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "56-journal.md").read_text(
+        encoding="utf-8")
+    assert "no se pudo crear .claude/ticket-agent.json" in journal
+    # The ticket isn't stuck: a second run is still launchable, not a 409.
+    r2 = client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    assert r2.status_code == 202
+
+
+def test_survey_children_never_see_ado_org_or_the_token(client, monkeypatch, tmp_path):
+    """`survey` is deliberately outside `PHASE_MCP`: its children are rooted in a
+    SECONDARY repo, and CLAUDE.md is explicit that they need no `ADO_ORG`, no token
+    and no `.claude/ticket-agent.json` — that isolation is the whole point of the
+    fan-out design. Regression: `env` used to be built once in `execute_run` and
+    handed to `run_fan_out` unchanged, so every child inherited both."""
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    client.put("/projects/Demo", json={
+        "name": "Demo", "org": "DemoOrg", "project": "Demo", "ado_pat": "secreto-fanout",
+        "repos": _repos(client),
+    })
+    tid = client.post("/tickets", json={"ado_id": 70, "project": "Demo"}).json()["id"]
+    _write_brief(tmp_path, 70)
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_ORG=" not in log
+    assert "FAKE-CLAUDE ADO_AUTH=" not in log
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" not in log
+
+    # The twin: an `analyze` run on the SAME (now token-carrying) project gets both.
+    tid2 = client.post("/tickets", json={"ado_id": 71, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid2}/run", json={})
+    log2 = client.get(f"/tickets/{tid2}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_ORG=DemoOrg" in log2
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" in log2
+
+
+def test_422_never_echoes_the_token(client, tmp_path):
+    """FastAPI's default validation-error handler puts the WHOLE offending body in
+    every error's `input` (Pydantic v2), so a malformed `POST /projects` carrying
+    `ado_pat` used to hand the token straight back in the response body — read by
+    browser devtools, any proxy/access log, and the frontend's error toast."""
+    (tmp_path / "leaky-repo").mkdir()
+    r = client.post("/projects", json={
+        # "name" deliberately missing -> 422
+        "org": "O", "project": "P", "ado_pat": "no-debe-aparecer",
+        "repos": [{"path": (tmp_path / "leaky-repo").as_posix(), "primary": True}],
+    })
+    assert r.status_code == 422
+    assert "no-debe-aparecer" not in r.text
+
+
 # --- Feature B: the Azure PAT, optional, from the project's configuration -------
 
 
@@ -3566,6 +3668,12 @@ def test_project_token_is_write_only_and_reported_as_boolean(client, tmp_path):
 
 
 def test_token_reaches_subprocess_only_when_configured(client, monkeypatch, tmp_path):
+    # An ambient ADO_AUTH/ADO_MCP_AUTH_TOKEN in the shell running the tests would
+    # make the "absent" assertions below fail for a reason that has nothing to do
+    # with this code path — the runner would be innocently inheriting it, same as
+    # the ADO_ORG case. Cleared so this test proves the runner's OWN behavior.
+    monkeypatch.delenv("ADO_AUTH", raising=False)
+    monkeypatch.delenv("ADO_MCP_AUTH_TOKEN", raising=False)
     _use_fake_claude(monkeypatch)
     _new_project_with_token(client, tmp_path)
     tid = client.post("/tickets", json={"ado_id": 60, "project": "ConToken"}).json()["id"]
@@ -3582,16 +3690,24 @@ def test_token_reaches_subprocess_only_when_configured(client, monkeypatch, tmp_
     assert "FAKE-CLAUDE SAW-ADO-TOKEN" not in log2
 
 
-def test_clearing_the_token_works(client, tmp_path):
+def test_clearing_the_token_works(client, monkeypatch, tmp_path):
     _new_project_with_token(client, tmp_path)
     r = client.put("/projects/ConToken", json={
         "name": "ConToken", "org": "O", "project": "P", "ado_pat": "",
         "repos": [{"path": (tmp_path / "ConToken-repo").as_posix(), "primary": True}],
     })
     assert r.status_code == 200 and r.json()["ado_pat_configured"] is False
+    # The boolean alone would pass even if PUT stored a mangled token: prove it via
+    # the subprocess environment, the same way `test_token_reaches_subprocess_...` does.
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 64, "project": "ConToken"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_AUTH=" not in log
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" not in log
 
 
-def test_omitting_the_token_on_update_leaves_it_untouched(client, tmp_path):
+def test_omitting_the_token_on_update_leaves_it_untouched(client, monkeypatch, tmp_path):
     """The field is never sent back by the API, so a form editing other fields must
     not have to resend the secret to keep it — omitting it means "unchanged"."""
     _new_project_with_token(client, tmp_path)
@@ -3600,6 +3716,13 @@ def test_omitting_the_token_on_update_leaves_it_untouched(client, tmp_path):
         "repos": [{"path": (tmp_path / "ConToken-repo").as_posix(), "primary": True}],
     })
     assert r.status_code == 200 and r.json()["ado_pat_configured"] is True
+    # Same proof, the other direction: the ORIGINAL token still reaches the subprocess.
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 65, "project": "ConToken"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    log = client.get(f"/tickets/{tid}").json()["log_tail"]
+    assert "FAKE-CLAUDE ADO_AUTH=envvar" in log
+    assert "FAKE-CLAUDE SAW-ADO-TOKEN" in log
 
 
 def test_ticket_predating_a_token_still_runs(client, monkeypatch, tmp_path):
