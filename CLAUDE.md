@@ -305,17 +305,54 @@ itself just wrote.
 at launch (every `docs/tickets/<llave>-*` file plus any tree a previous good run
 declared — the human's ticked `DECIDIR` boxes live nowhere else), `salida/` at close
 (the declared path, request and journal, taken **after** the journal line so the copy
-carries this run), and `run.json` (enough to read the folder after a DB wipe). Trees
-over `ARCHIVE_TREE_MAX_FILES`/`_BYTES` are skipped with a journal line — a stamp
-clipped to `docs` would otherwise archive the folder every run. A failed copy is a
-journal line, never an error run. `runs.archive_path` is the folder; NULL means
-nothing archived. **A record, never an input**: a test guards that deleting the
-archive changes nothing about the next run. The one door back is
+carries this run), and `run.json` (enough to read the folder after a DB wipe). The
+declared path is resolved the same way `artifact_on_disk` resolves it —
+`ticket_roots(ticket)`, primary repo first, then the extras — because a phase can
+leave its deliverable in a mounted repo; `entrada`'s own files stay primary-only,
+since `docs/tickets/...` genuinely lives there. Trees over
+`ARCHIVE_TREE_MAX_FILES`/`_BYTES` are skipped with a journal line, and `copy_into`
+stops counting the instant either cap is crossed instead of walking (and `stat`-ing)
+the rest of the tree first — a stamp clipped to `docs` used to make every launch and
+close of that ticket pay for the whole `docs/` tree, under the global lock, only to
+copy nothing. A failed copy is a journal line, never an error run. `runs.archive_path`
+is the folder; NULL means nothing archived — but it is **not** the same thing as
+`runs.restorable`, a second nullable column set at close from a single `exists()`
+check on `<archive_path>/salida/<artifact_path>`. The two disagree exactly for a
+fan-out `survey`: its HUELLA is an absolute scratch path outside every repo, so
+`archive_path` still gets set (the folder exists, request/journal got copied into it)
+while `restorable` stays 0 — nothing a restore could put back. Both the Timeline's and
+the run history's Restore button key off `restorable`, never off `archive_path` alone,
+and treat NULL (every row before the column, same convention as `artifact_exists`) as
+not-restorable. **A record, never an input**: a test guards that deleting the archive
+— and leaving it deleted, not recreating an empty directory before the next run — the
+next run still produces its own deliverable and its own stamp. The one door back is
 `POST /tickets/{tid}/restaurar {run_id, overwrite}`: it copies that run's `salida/`
 to the repo, refuses while a run is active, needs `overwrite` for an existing file,
 and **never overwrites a tree** — `implement` ticks `tasks.md` inside the tree `design`
 declared, and putting the older tree back would untick real progress. It journals
-itself as `restaurar · ok`.
+itself as `restaurar · ok`, with the source run as its own `extra` note (`· desde run
+N`) rather than `note=`, which renders as `· reserva: ...` — the label a `parcial`
+stamp's caveat owns, not a restore's provenance.
+
+The retryable 409 (an existing file, no `overwrite`) is the one `/restaurar` refusal
+the frontend may resend with `overwrite: true`; every other detail in this file is
+Spanish prose, reworded at will (see the language rule below), which is exactly why
+the UI can't key off it. It's tagged `{"code": "existe_archivo", "msg": <sentence>}`
+instead of a plain string — a ticket whose declared path or OpenSpec slug happens to
+contain the literal word "overwrite" used to make the (never retryable) tree refusal
+match a substring check too, reopening the confirmation dialog forever. `api.ts`'s
+`json()` surfaces `.msg` for display and carries `.code` on the thrown `ApiError` for
+the one caller that branches on it.
+
+**`entrada_rels(ticket)` runs its own DB query, and it's evaluated as an argument to
+`archive_run` — before that function's own `try` even starts.** A locked DB there
+(`sqlite3.OperationalError`) used to escape straight into `execute_run`'s background
+task, past every guard, with the run already marked `running`: neither `POST /run` nor
+`POST /restaurar` would ever stop 409ing on it, recoverable only by editing the DB.
+The entrada call site now wraps both `entrada_rels(ticket)` and `archive_run` in one
+`try`/`except`, and `archive_run` itself moved its own `archive_folder` call (another
+DB read) inside its `try` — every DB and filesystem access on that path now answers to
+the same handler `archive_run`'s docstring already promised: never raises.
 
 Of `execute_run`'s three early returns, only two close before the entrada snapshot;
 the `survey` phase's no-brief return closes *after* it, so a run that hits it keeps

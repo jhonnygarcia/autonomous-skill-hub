@@ -84,18 +84,32 @@ Each run writes to
 - `run.json` — enough to identify the folder (ticket, run, phase, timestamp) if the
   database is ever wiped.
 
+The deliverable is resolved against the primary repo **and** the ticket's extra
+repos, in that order — the same roots the artifact viewer already checks — since a
+phase can leave its output in a mounted repo instead of the primary one.
+
 A tree above a fixed file/byte cap is skipped with a note in the journal instead of
-being copied — that's what keeps a `docs`-wide artifact from archiving the whole
-folder on every run. A copy that fails is also just a journal note: it never turns a
-successful run into an error.
+being copied, and the copy stops counting the moment either cap is crossed rather
+than walking the whole tree first — that's what keeps a `docs`-wide artifact from
+archiving (and re-scanning) the whole folder on every run. A copy that fails is also
+just a journal note: it never turns a successful run into an error.
+
+Not every run with an `archive_path` can actually be restored: a fan-out `survey`
+archives its request and journal, but its declared "path" is a scratch folder outside
+every repo, so its `salida/` never holds anything to put back. Each run also carries
+a `restorable` flag, checked once at close, and only a run with `restorable` set
+offers a Restore button.
 
 **Restoring is never automatic.** The archive is a record — nothing reads it to decide
-anything, and deleting it changes nothing about the next run. The only way back is a
-human action: a *Restore* button next to a run in the ticket's history, or on the
-timeline when the declared artifact is missing from disk (`POST
-/tickets/{tid}/restaurar {run_id, overwrite}`). It copies that run's `salida/` back
-into the repo, refuses while a run is active, and never overwrites a directory —
-overwriting a single file needs `overwrite: true`.
+anything, and a run started after the archive folder was deleted still produces its
+own deliverable and its own stamp. The only way back is a human action: a *Restore*
+button next to a run in the ticket's history, or on the timeline when the declared
+artifact is missing from disk (`POST /tickets/{tid}/restaurar {run_id, overwrite}`).
+It copies that run's `salida/` back into the repo, refuses while a run is active, and
+never overwrites a directory — overwriting a single file needs `overwrite: true`. The
+one refusal that's safe to retry that way (an existing file, no `overwrite`) comes
+back tagged with a machine-readable code instead of prose, so the UI's retry can't be
+tricked by a ticket whose own path happens to contain a word from the message.
 
 ## Start
 
