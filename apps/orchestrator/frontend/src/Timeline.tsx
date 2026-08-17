@@ -18,12 +18,13 @@ const CHIP =
  * where the information is, the same principle that moved the repos into the project
  * header. Phases that don't exist yet show dimmed: the pending path is context.
  */
-export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
+export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore }: {
   phases: Phase[]
   runs: Run[]
   activeRun: ActiveRun | null
   ticketId: number
   onRun: (phase: string, instructions?: string, resume?: boolean) => void
+  onRestore: (runId: number) => void
 }) {
   const [openPhase, setOpenPhase] = useState<string | null>(null)   // instructions box
   const [instructions, setInstructions] = useState("")
@@ -58,6 +59,11 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
         // first one matching this phase is its most recent run, the same one that
         // produced `h`. Only `implement` sets it — the rest arrive as `null`.
         const branch = runs.find(r => r.phase === f.fase)?.branch ?? null
+        // The most recent good run of this phase that left a snapshot: what the
+        // Restore shortcut puts back when the deliverable is gone. Older snapshots are
+        // reachable from the run history.
+        const restorable = runs.find(r => r.phase === f.fase && r.archive_path
+          && (r.artifact_state === "ok" || r.artifact_state === "parcial")) ?? null
         // Two shapes of artifact: a directory (path + "/" + each name) or a lone
         // file (the path is already complete and matches its own name). The
         // decision is made ONCE, outside the map — doing it inside the map (as in
@@ -248,9 +254,17 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
                       </div>
                     </>
                   ) : (
-                    <span className="text-amber-600 dark:text-amber-500">
-                      Artefacto declarado en{" "}
-                      <span className="font-mono">{h.ruta}</span>, no se encontró en disco
+                    <span className="flex flex-wrap items-center gap-2 text-amber-600 dark:text-amber-500">
+                      <span>
+                        Artefacto declarado en{" "}
+                        <span className="font-mono">{h.ruta}</span>, no se encontró en disco
+                      </span>
+                      {restorable && (
+                        <Button size="sm" variant="outline" className="h-6 text-xs"
+                                onClick={() => onRestore(restorable.id)}>
+                          Restaurar desde el archivo
+                        </Button>
+                      )}
                     </span>
                   )}
                 </div>

@@ -145,7 +145,10 @@ export default function App() {
           <TicketDetail detail={detail} activeRun={activeRun} projectName={project.name}
                         onBack={back}
                         onRun={(ins, phase, resume) => act(() => api.run(detail.ticket.id, ins, phase, resume))}
-                        onDelete={() => { act(() => api.remove(detail.ticket.id)); back() }} />
+                        onDelete={() => { act(() => api.remove(detail.ticket.id)); back() }}
+                        // NOT through `act`: that helper swallows the error into the global banner, and
+                        // TicketDetail needs the 409 to decide whether to offer the overwrite dialog.
+                        onRestore={(runId, overwrite) => api.restore(detail.ticket.id, runId, overwrite).then(() => refresh())} />
         )}
       </main>
 
