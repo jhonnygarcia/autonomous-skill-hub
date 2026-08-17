@@ -33,6 +33,9 @@ export type Phase = {
   estado?: "pendiente" | "corriendo" | "ok" | "parcial" | "error"
   corridas?: number; fallidas?: number
   en?: string | null; duracion_s?: number | null; motivo?: string; huella?: Footprint
+  /** Did what the stamp declared exist on disk when the run closed? Absent means
+   *  nobody checked — a run older than the column — which is not the same as `true`. */
+  entregable?: boolean
   /** Only on `implement` and only while running. An estimate: a big task weighs the
    *  same as a small one, so it's shown as a count and never as a percentage. */
   progreso?: { hechas: number; total: number } | null

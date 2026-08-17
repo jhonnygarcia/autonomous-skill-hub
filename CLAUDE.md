@@ -355,6 +355,29 @@ anchoring on the last one
 isn't incidental: the skill's body travels through the log and contains all three stamp
 values literally, so checking for mere presence would make the check find itself.
 
+**The stamp is the agent's word, and `artifact_exists` is the only place it's checked.**
+`claude -p` exiting 0 was never enough, and neither is the stamp: a run verified on
+2026-08-16 with `codex exec` had its write rejected by the sandbox, said so in prose,
+and still closed `HUELLA: ok — salida.md` with exit 0. Nothing about that is Codex's
+fault — the contract always took the agent at its word, and Claude can lie the same way.
+At close, `artifact_on_disk` resolves the declared path against the primary repo and the
+extras (a **directory** counts: Phase 2's deliverable is `openspec/changes/<id>-<slug>/`)
+and the answer is stored. **Checked once, at close, never on read** — the ticket list
+deliberately doesn't touch disk (`with_footprint=False`), and a stat per ticket per phase
+would undo exactly that.
+
+What the answer is used for is the part that took a decision. It does **not** rewrite the
+state the run declared: a false stamp still gives itself away instead of being hidden,
+which is the older decision and it stands — the phase shows the `ok` the agent claimed,
+next to `entregable: false`. What it stops is that claim **counting as progress**:
+`folded_status` won't advance the ticket on it, and `canRunPhase` won't offer the next
+phase, with a message that separates "run it first" from "it ran and left nothing".
+`artifact_exists` is **nullable and must stay nullable**: NULL means nobody checked,
+which is the honest value for every row written before the column. Backfilling it as 0
+would call every historical run a liar; as 1, it would vouch for runs nobody verified —
+which is why `entregable` is *absent* from a phase rather than `true`, and why the fold
+tests `is not False` instead of falsy.
+
 **Progress is folded from `runs`, not stored separately.** `GET /tickets/{id}` returns
 `fases`: one entry per `PHASES` name with the state of its most recent run.
 `tickets.status` is no longer a source column — it's computed by folding those phases on

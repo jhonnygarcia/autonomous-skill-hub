@@ -308,6 +308,29 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
       between phases by design, and a bidirectional protocol would be
       per-engine.
 
+21. **A false stamp stops counting as progress, without being erased**
+    (2026-08-17). `codex exec` closed `HUELLA: ok — salida.md` with exit 0
+    after the sandbox rejected its write: no file, and the orchestrator
+    recorded a run that had produced a deliverable. The stamp exists to catch
+    exactly "finished without doing anything" and it didn't, because it takes
+    the agent at its word — and Claude can lie the same way.
+
+    Three ways out were on the table and the middle one lost on purpose.
+    Downgrading the run to `nada` would have closed the hole in one line, but
+    it contradicts decision-by-test
+    `test_declared_path_that_does_not_exist_on_disk_is_not_hidden`: a false
+    stamp **gives itself away rather than being hidden**. What shipped keeps
+    both facts, because they are different facts — `artifact_state` is what
+    the agent claimed, `artifact_exists` is what disk says — and only stops
+    the claim from propagating: the ticket doesn't advance and the next phase
+    isn't offered.
+
+    Two details worth keeping: the check runs **once, at close**, because the
+    ticket list deliberately never touches disk; and the column is **nullable
+    and stays nullable**, since NULL is the only honest value for rows written
+    before it existed. Backfilling 0 calls every historical run a liar, 1
+    vouches for runs nobody checked.
+
 ## Phase 1 acceptance — closed on 2026-08-08
 
 Run on ticket **3311** in the TMS repo, twice: with skill v0.1.0 and, after

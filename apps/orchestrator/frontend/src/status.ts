@@ -116,7 +116,16 @@ export function phaseColor(status?: string): string {
  * of this: a phase can be launched if it's available, there's no active run, and
  * the previous one landed on `ok` or `parcial`. The first phase has no previous one,
  * so it can always be launched.
+ *
+ * **A phase whose deliverable isn't on disk doesn't count as landed.** The stamp is
+ * the agent's word and it can be wrong: a run verified on 2026-08-16 closed `HUELLA:
+ * ok` with exit 0 after its write had been rejected. `entregable === false` is the
+ * backend saying it looked and found nothing; absent means nobody looked (a run older
+ * than the column), and that keeps counting as it always did.
  */
+const landed = (p: Phase) =>
+  (p.estado === "ok" || p.estado === "parcial") && p.entregable !== false
+
 export function canRunPhase(
   phases: Phase[], i: number, activeRun: ActiveRun | null, ticketId: number,
 ): string {
@@ -128,6 +137,10 @@ export function canRunPhase(
     .map(name => phases.find(p => p.fase === name && p.disponible))
     .filter((p): p is Phase => !!p)
   if (!options.length) return ""
-  if (options.some(p => p.estado === "ok" || p.estado === "parcial")) return ""
+  if (options.some(landed)) return ""
+  // The distinction is worth the extra branch: "run it first" and "it ran and left
+  // nothing" send you to different places.
+  if (options.some(p => p.estado === "ok" || p.estado === "parcial"))
+    return `${options.map(p => PHASE_LABEL[p.fase] ?? p.fase).join(" o ")} declaró un entregable que no está en disco`
   return `necesita ${options.map(p => PHASE_LABEL[p.fase] ?? p.fase).join(" o ")} en verde`
 }

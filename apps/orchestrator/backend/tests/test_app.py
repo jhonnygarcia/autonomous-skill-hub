@@ -2674,3 +2674,93 @@ def test_codex_gets_network_only_where_commands_run(client, monkeypatch):
     cap2 = _spy_argv(monkeypatch)
     client.post(f"/tickets/{tid}/run", json={"phase": "analyze"})
     assert KEY not in list(cap2["argv"])
+
+
+# --- the stamp is the agent's word ------------------------------------------------
+# A false stamp gives itself away instead of being hidden (that decision predates this
+# and stands: the phase keeps the state the agent declared). What changed is that the
+# lie stops there — it no longer advances the ticket.
+
+
+def test_a_stamp_that_declares_a_file_nobody_wrote_does_not_advance_the_ticket(
+        client, monkeypatch):
+    """Verified against a real engine on 2026-08-16: `codex exec` had its write rejected
+    by the sandbox, said so in prose, and still closed `HUELLA: ok — salida.md` with
+    exit 0. Claude can lie the same way; the contract always took the agent at its word.
+
+    Both facts survive, because they are different facts: the phase still shows the `ok`
+    the agent claimed, and the ticket refuses to call itself analyzed over a file that
+    isn't there.
+    """
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/fantasma.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    t = client.get(f"/tickets/{tid}").json()
+    f = t["fases"][0]
+    assert f["estado"] == "ok"              # what the agent said, still visible
+    assert f["entregable"] is False         # and what disk says, next to it
+    assert f["huella"]["existe"] is False
+    assert t["ticket"]["status"] == "queued"   # the lie stops here
+    # It's in the list too, which never touches disk: the flag is read from the row,
+    # not stat'd per ticket per phase.
+    assert [x for x in client.get("/tickets").json() if x["id"] == tid][0]["status"] == "queued"
+
+
+def test_a_real_deliverable_advances_it_as_always(client, monkeypatch, tmp_path):
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/1-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    out = tmp_path / "repo" / "docs" / "tickets"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "1-analysis.md").write_text("# analisis", encoding="utf-8")
+    client.post(f"/tickets/{tid}/run", json={})
+    t = client.get(f"/tickets/{tid}").json()
+    assert t["fases"][0]["entregable"] is True
+    assert t["ticket"]["status"] == "analyzed"
+
+
+def test_a_directory_deliverable_counts(client, monkeypatch, tmp_path):
+    """Phase 2 delivers `openspec/changes/<id>-<slug>/`, a directory. Checking for a
+    regular file would call every planned ticket a liar."""
+    _use_fake_claude(monkeypatch, stamp="ok — openspec/changes/1-notas")
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    (tmp_path / "repo" / "openspec" / "changes" / "1-notas").mkdir(parents=True, exist_ok=True)
+    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
+    f = _phase(client, tid, "design")
+    assert f["entregable"] is True
+    assert client.get(f"/tickets/{tid}").json()["ticket"]["status"] == "planned"
+
+
+def test_a_deliverable_in_a_mounted_repo_counts(client, monkeypatch, tmp_path):
+    """`implement` writes where the plan says, and that can be an extra repo. Resolving
+    only against the primary would mark a good run as empty-handed."""
+    for d in ("repo", "backend-repo"):
+        _git_init(tmp_path / d)
+    _use_fake_claude(monkeypatch, stamp="ok — src/Notas.cs")
+    (tmp_path / "backend-repo" / "src").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "backend-repo" / "src" / "Notas.cs").write_text("//", encoding="utf-8")
+    tid = client.post("/tickets", json={"ado_id": 3320, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "implement"})
+    assert _phase(client, tid, "implement")["entregable"] is True
+
+
+def test_runs_older_than_the_column_are_not_called_liars(client, monkeypatch):
+    """`artifact_exists` is NULL for every run written before it existed. NULL means
+    "nobody checked", which is neither "it's there" nor "it isn't": the key is absent
+    from the phase, and the fold keeps counting the phase exactly as it did before.
+    Backfilling would have been the alternative, and both fills lie."""
+    import os
+    import sqlite3 as sq
+
+    tid = client.post("/tickets", json={"ado_id": 1, "project": "Demo"}).json()["id"]
+    conn = sq.connect(os.environ["ORCH_DB"])
+    conn.execute(
+        "INSERT INTO runs(ticket_id, phase, status, started_at, finished_at, "
+        "artifact_state, artifact_path) VALUES(?,?,?,?,?,?,?)",
+        (tid, "analyze", "success", "2026-08-01T10:00:00Z", "2026-08-01T10:05:00Z",
+         "ok", "docs/tickets/1-analysis.md"))
+    conn.commit()
+    conn.close()
+    t = client.get(f"/tickets/{tid}").json()
+    f = t["fases"][0]
+    assert f["estado"] == "ok" and "entregable" not in f
+    assert t["ticket"]["status"] == "analyzed"

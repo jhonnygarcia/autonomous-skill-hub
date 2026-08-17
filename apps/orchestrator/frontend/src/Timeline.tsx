@@ -81,6 +81,11 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
         const paths = items.map(it => it.ruta)
         const isLast = i === phases.length - 1
         const isRunning = f.estado === "corriendo"
+        // A phase that declared a deliverable nobody can find must not read as success.
+        // It keeps the state the agent claimed —that decision stands, a false stamp
+        // gives itself away rather than being hidden— but it wears the amber this app
+        // already uses for "done, with caveats" instead of the green that means done.
+        const badge = f.entregable === false ? "parcial" : f.estado
 
         // Neutral metadata on a single line — time, duration, run count — instead
         // of a row of loose chips: this way the phase name stays the only element
@@ -104,10 +109,10 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun }: {
             <span
               className={`absolute left-0 top-1.5 flex h-6 w-6 items-center justify-center
                           rounded-full border text-[11px] font-semibold shadow-sm transition-colors
-                          ${phaseColor(f.estado)}
+                          ${phaseColor(badge)}
                           ${isRunning ? "animate-pulse ring-2 ring-blue-500/30 ring-offset-2 ring-offset-background" : ""}`}
             >
-              {phaseIcon(f.estado)}
+              {phaseIcon(badge)}
             </span>
 
             <div className={`-mx-2 rounded-lg px-2 transition-colors ${isRunning ? "bg-blue-500/5" : ""}`}>

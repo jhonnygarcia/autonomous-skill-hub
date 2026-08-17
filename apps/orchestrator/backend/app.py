@@ -393,6 +393,35 @@ def stamp_in(text: str) -> tuple[str, str] | None:
     return LEGACY_STATES.get(state, state), rest.strip()
 
 
+def artifact_on_disk(ticket: dict | sqlite3.Row, path: str) -> bool:
+    """Is the thing a stamp declared actually there?
+
+    **The stamp is the agent's word, and this is the only place it's checked.** Verified
+    on 2026-08-16 with `codex exec`: its write was rejected by the sandbox, it said so
+    in prose, and it still closed `HUELLA: ok — salida.md` with exit 0. Nothing about
+    that is Codex's fault — the contract always took the agent at its word, and Claude
+    can lie the same way.
+
+    What the answer is used for matters as much as the answer: it does **not** rewrite
+    the state the run declared (that stays visible, which is the decision already taken
+    — a false stamp gives itself away instead of being hidden). It only stops that state
+    from counting as progress in `folded_status`.
+
+    Resolved like `declared_file` does it (`repo_path / path`), plus the extras, because
+    a phase can leave its deliverable in a mounted repo. **A directory counts**: Phase
+    2's deliverable is `openspec/changes/<id>-<slug>/`, not a file.
+    """
+    roots = [ticket["repo_path"]]
+    roots += [d["path"] for d in normalize_dirs(json.loads(ticket["extra_dirs"] or "[]"))]
+    for r in roots:
+        try:
+            if (Path(r) / path).exists():
+                return True
+        except (ValueError, OSError):
+            continue          # an absurd path is not an existing one
+    return False
+
+
 def read_stamp(log_path: Path) -> tuple[str, str] | None:
     """`(state, path-or-reason)` from the LAST match in the log, or None if there is none.
 
@@ -728,6 +757,12 @@ def init_db() -> None:
             # The free-text request that replaces the work item when there is one.
             # NULL for ADO tickets; its presence is what `origen` derives from.
             "ALTER TABLE tickets ADD COLUMN request TEXT",
+            # Whether what the run's stamp declared was really on disk when it
+            # closed. **Nullable on purpose and it must stay nullable**: NULL means
+            # "nobody checked", which is the honest value for every row written before
+            # this column existed. Backfilling it as 0 would call every historical run
+            # a liar; as 1, it would vouch for runs nobody verified.
+            "ALTER TABLE runs ADD COLUMN artifact_exists INTEGER",
             # Which CLI ran this phase. Nullable and read through `COALESCE(...,
             # 'claude')` everywhere: every row that predates the column WAS claude, so
             # backfilling it would be writing down something already known.
@@ -1150,6 +1185,11 @@ def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) ->
             e["estado"] = "error"
         e["en"] = latest["finished_at"] or latest["started_at"]
         e["duracion_s"] = seconds(latest["started_at"], latest["finished_at"])
+        # Only when somebody actually checked. Absent — not `true` — for the runs that
+        # predate the column: "nobody looked" and "it's there" are different answers,
+        # and only one of them is an endorsement.
+        if latest["artifact_exists"] is not None:
+            e["entregable"] = bool(latest["artifact_exists"])
         if e["estado"] == "error":
             if latest["artifact_path"]:
                 e["motivo"] = latest["artifact_path"]
@@ -1179,7 +1219,10 @@ def folded_status(phases: list[dict]) -> str:
     depending on a column that used to get overwritten on every run."""
     if any(f.get("estado") == "corriendo" for f in phases):
         return "running"
-    done = [f for f in phases if f.get("estado") in ("ok", "parcial")]
+    # `entregable is False` — not falsy: absent means nobody checked (a run older than
+    # the column), and that must keep counting exactly as it did before.
+    done = [f for f in phases
+            if f.get("estado") in ("ok", "parcial") and f.get("entregable") is not False]
     if done:
         return PHASE_DONE[done[-1]["fase"]]
     if any(f.get("estado") == "error" for f in phases):
@@ -1653,9 +1696,15 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         if state == "nada":
             ok = False
         path, note = split_reserve(state, rest)
+        # Checked ONCE, here, and written down. Not on every read: the ticket list
+        # deliberately doesn't touch disk (`with_footprint=False`), and a stat per
+        # ticket per phase would undo exactly that.
+        on_disk = (artifact_on_disk(ticket, path)
+                   if state in ("ok", "parcial") and path else None)
         fin = now()
         set_run(run_id, status="success" if ok else "error", finished_at=fin,
-                artifact_state=state, artifact_path=path, artifact_note=note)
+                artifact_state=state, artifact_path=path, artifact_note=note,
+                artifact_exists=None if on_disk is None else int(on_disk))
         append_journal(ticket, phase, state, path, note,
                        seconds(started, fin), branch, prev)
         # The title travels with the analysis, so it only gets read when that phase
