@@ -3089,6 +3089,9 @@ def test_restore_refuses_when_tree_snapshot_meets_a_file_destination(client, mon
     r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id})
     assert r.status_code == 409
     assert change.read_text() == "no soy un árbol"
+    detail = r.json()["detail"]
+    assert "es un archivo en el repo" in detail          # dest: a plain file
+    assert "el snapshot es un directorio" in detail       # src: a tree
 
 
 def test_restore_refuses_when_file_snapshot_meets_a_dir_destination_even_with_overwrite(
@@ -3101,6 +3104,9 @@ def test_restore_refuses_when_file_snapshot_meets_a_dir_destination_even_with_ov
     r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run_id, "overwrite": True})
     assert r.status_code == 409
     assert not (p / p.name).exists()   # nothing landed nested one level deep
+    detail = r.json()["detail"]
+    assert "es un directorio en el repo" in detail        # dest: a directory
+    assert "el snapshot es un archivo" in detail           # src: a plain file
 
 
 def test_restore_wraps_an_oserror_from_the_copy_as_409(client, monkeypatch, tmp_path):

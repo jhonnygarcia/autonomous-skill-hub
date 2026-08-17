@@ -2022,9 +2022,10 @@ def restore_run(tid: int, body: RestoreIn):
     # `overwrite` does not bypass this: it's not this endpoint's call to resolve a
     # structural mismatch.
     if dest.exists() and dest.is_dir() != src.is_dir():
+        en_repo = "un directorio" if dest.is_dir() else "un archivo"
+        en_snapshot = "un directorio" if src.is_dir() else "un archivo"
         raise HTTPException(
-            409, f"{rel} es {'un directorio' if dest.is_dir() else 'un archivo'} en el "
-                 f"repo pero el snapshot es {'un archivo' if src.is_dir() else 'un directorio'}. "
+            409, f"{rel} es {en_repo} en el repo pero el snapshot es {en_snapshot}. "
                  "Bórralo a mano si de verdad quieres reemplazarlo por el otro tipo.")
     if src.is_dir():
         if dest.exists() and any(x.is_file() for x in dest.rglob("*")):
