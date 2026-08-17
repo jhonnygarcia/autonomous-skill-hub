@@ -277,6 +277,48 @@ def test_stamp_anchors_on_last_match(client, monkeypatch):
     assert run["status"] == "error" and run["artifact_state"] == "nada"
 
 
+def test_wrapped_example_stamp_does_not_beat_a_real_one():
+    """`change-planning/SKILL.md:243` wraps its own example stamp across two lines,
+    leaving `HUELLA: parcial —` alone on one line with nothing after the dash until the
+    next line's indentation. That prose travels through the log like any other
+    SKILL.md text (CLAUDE.md says so, and `skill_body(phase)` inlines it verbatim for
+    non-Claude engines).
+
+    With the capture group as `((?:\\"|\\\\|[^"\\])*)` — a `*`, zero-or-more — that
+    wrapped line alone matches with an EMPTY capture: `('parcial', '')`. And because
+    `stamp_in` anchors on the LAST match, that empty match beats a real, non-empty
+    stamp that closed the run earlier in the log — `artifact_state='ok'` with an empty
+    `artifact_path`, the exact "check finds itself" hazard the comment above `STAMP_RE`
+    warns about, just with an empty string standing in for `nada`. The `+` quantifier
+    is what closes this: a required non-empty capture can't be satisfied by the wrapped
+    line's dash-then-newline, so that occurrence produces no match at all and the real
+    stamp is what `stamp_in` finds.
+
+    The literal is read straight from the skill file via `app.skill_body`, the same
+    function the runner uses to inline it for non-Claude engines, so this test breaks
+    on its own if the wrapped example ever moves or changes shape."""
+    import json
+    import app
+    body = app.skill_body("design")
+    marker = "HUELLA: parcial —\n"
+    start = body.index(marker)
+    end = body.index("`.", start)
+    wrapped_literal = body[start:end]
+    # Two events, JSON-encoded exactly like the real stream-json shape: the real
+    # closing stamp first, then the skill body's wrapped example arriving later in the
+    # log — as it would if the skill text itself got echoed back in a tool_result.
+    log = (
+        '{"type":"assistant","text":'
+        + json.dumps("resumen. HUELLA: ok — docs/tickets/3359-analysis.md",
+                      ensure_ascii=False)
+        + "}\n"
+        + '{"type":"tool_result","text":'
+        + json.dumps(wrapped_literal, ensure_ascii=False)
+        + "}\n"
+    )
+    assert app.stamp_in(log) == ("ok", "docs/tickets/3359-analysis.md")
+
+
 def test_legacy_PLAN_stamp_still_understood(client, monkeypatch):
     """The 3323 run logs were written with `PLAN:`. Translating them keeps existing
     history from showing up as failed the day the timeline is looked at."""
@@ -2012,11 +2054,25 @@ def test_implement_partial_stamp_with_backslash_in_caveat_keeps_a_clean_path(
 def test_split_reserve_survives_separator_without_trailing_space():
     """The separator constant is ` · ` (with a trailing space); `stamp_in` used to
     lose that trailing space in exactly the escaped-quote case above once the capture
-    got cut short. `split_reserve` on its own should tolerate the bare `·` too, not
-    just as a side effect of the regex fix upstream."""
+    got cut short. `split_reserve` on its own should tolerate the space-prefixed `·`
+    (`" ·"`, no trailing space) too, not just as a side effect of the regex fix
+    upstream — and with nothing after the dot, the reserve is empty, so `note` must
+    come back `None`, not `""`."""
     import app
     path, note = app.split_reserve("parcial", "docs/tickets/3359-analysis.md ·")
     assert path == "docs/tickets/3359-analysis.md"
+    assert note is None
+
+
+def test_split_reserve_does_not_split_a_path_with_an_unspaced_middle_dot():
+    """A path can legitimately contain `·` with no space before it
+    (`informe·anexo.md`) — that is not the reserve separator, and falling back to a
+    bare `·` (instead of the space-prefixed `" ·"`) would truncate the path and
+    invent a note out of its second half."""
+    import app
+    path, note = app.split_reserve("parcial", "docs/tickets/informe·anexo.md")
+    assert path == "docs/tickets/informe·anexo.md"
+    assert note is None
 
 
 def test_implement_with_second_repo_dirty_does_not_leave_the_first_on_another_branch(

@@ -340,18 +340,30 @@ def now() -> str:
 # run 8 of ticket 3359). The fix lets exactly the two escape pairs the CLI's own JSON
 # encoder produces through as single "characters" the capture keeps consuming: `\"`
 # (an agent-written quote) and `\\` (an agent-written backslash, e.g. a Windows path
-# in the caveat). Any OTHER backslash sequence — chiefly `\n`, the JSON encoding of a
-# real newline — still stops the capture cold, same as before: neither alternative
-# below matches a bare backslash followed by anything other than `"` or `\`, so the
-# whole alternation fails there and the regex engine has nowhere left to extend the
-# match. That's what keeps this from running away over a plain-text log line ending
-# in a literal `\n`, and it's also what makes the fix work unchanged on legacy
-# `PLAN:` logs: those have no backslashes at all, so the capture still just reaches
-# end of line. `_unescape_stamp` below turns the two allowed pairs back into their
-# literal characters before the stamp is stored.
+# in the caveat). Any OTHER backslash sequence — chiefly `\n` AS STREAM-JSON
+# ENCODES IT, the two literal characters backslash-n — still stops the capture
+# cold, same as before: neither alternative below matches a bare backslash followed by
+# anything other than `"` or `\`, so the whole alternation fails there and the regex
+# engine has nowhere left to extend the match. On a LEGACY plain-text `PLAN:` log this
+# buys nothing by itself — `[^"\\]` matches a real newline character just fine,
+# so the capture would run to end of file on such a log if nothing else bounded it.
+# What actually bounds it is `stamp_in`'s 4000-character window (`text[-4000:]`),
+# applied before this regex ever runs — not the regex itself.
+#
+# The `+` at the end is load-bearing, not `*`: with `*` the alternation can match zero
+# characters, so a bare `HUELLA: parcial —` with nothing legible after it
+# becomes a VALID match with an EMPTY capture. That isn't hypothetical —
+# `change-planning/SKILL.md` wraps its own example stamp across two lines, leaving
+# `HUELLA: parcial —` alone on one line; that body travels through the log like
+# any other SKILL.md text, and because `stamp_in` anchors on the LAST match, an empty
+# match from that wrapped literal beats a real, non-empty stamp earlier in the same
+# log — exactly the "the check finds itself" hazard the comment on `stamp_in`
+# warns about, turned into `artifact_state='ok'` with an empty `artifact_path`.
+# `_unescape_stamp` below turns the two allowed escape pairs back into their literal
+# characters before the stamp is stored.
 STAMP_RE = re.compile(
     r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)'
-    r'\s*[—-]\s*((?:\\"|\\\\|[^"\\])*)')
+    r'\s*[—-]\s*((?:\\"|\\\\|[^"\\])+)')
 
 
 def _unescape_stamp(text: str) -> str:
@@ -416,21 +428,24 @@ def split_reserve(state: str, rest: str) -> tuple[str, str | None]:
     `artifact_note`). A `parcial` without ` · ` has no reserve and `rest` in full is the
     path, same as before this change.
 
-    Tries the full separator (with both spaces) first, then falls back to the bare
-    middle dot alone: a `rest` that arrives already stripped of its trailing space —
-    which is what `stamp_in` used to hand this function before `STAMP_RE` was fixed to
-    stop swallowing the trailing content — would otherwise glue the `·` onto the path
-    instead of splitting on it. The bare-dot fallback only fires when the full
-    separator isn't there at all, so a normal reserve still goes through the first
-    branch unchanged."""
+    Tries the full separator (with both spaces) first, then falls back to `" ·"`
+    (the separator minus only its TRAILING space): a `rest` that arrives already
+    stripped of its trailing space — which is what `stamp_in` used to hand this
+    function before `STAMP_RE` was fixed to stop swallowing the trailing content —
+    would otherwise glue the `·` onto the path instead of splitting on it. The
+    fallback keeps the leading space on purpose, unlike a bare `·`: a path that
+    legitimately contains a middle dot with no space before it (`informe·anexo.md`)
+    must NOT be split, and only the space-prefixed form is specific enough to the
+    separator to fall back on. The fallback only fires when the full separator isn't
+    there at all, so a normal reserve still goes through the first branch unchanged."""
     if state != "parcial":
         return rest, None
     if RESERVE_SEP in rest:
         path, note = rest.split(RESERVE_SEP, 1)
         return path.strip(), note.strip()
-    bare = RESERVE_SEP.strip()  # "·", no surrounding spaces
-    if bare in rest:
-        path, note = rest.split(bare, 1)
+    lead = RESERVE_SEP.rstrip()  # " ·" — space, middle dot, no trailing space
+    if lead in rest:
+        path, note = rest.split(lead, 1)
         note = note.strip()
         return path.strip(), (note or None)
     return rest, None

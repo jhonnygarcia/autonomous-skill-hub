@@ -425,12 +425,17 @@ back onto `ok|parcial|nada`, and it takes a plain hyphen as well as an em dash. 
 stamp travels nested inside the stream-json, so a quote the agent wrote in its caveat
 (citing a document name, `"doc 09"`) arrives in the log escaped as `\"`, and a backslash
 the agent wrote (a Windows path in the caveat) arrives as `\\`. The path capture is
-`(?:\\"|\\\\|[^"\\])*` — it lets those two escape pairs through as single "characters"
+`(?:\\"|\\\\|[^"\\])+` — it lets those two escape pairs through as single "characters"
 instead of stopping at their backslash, and `_unescape_stamp` turns them back into `"`
 and `\` before the stamp is stored; any OTHER backslash sequence (chiefly `\n`, a real
 newline's JSON encoding) still stops the capture, so a stray quote no longer corrupts
 `artifact_path` or drops `artifact_note` the way it did in real run 8 of ticket 3359
-(fixed 2026-08-17). Read the regex before touching any of it. It decides based on the
+(fixed 2026-08-17). **The `+` is not cosmetic**: with `*` the capture can be empty, and
+`change-planning/SKILL.md` wraps its own example stamp across two lines, leaving
+`HUELLA: parcial —` alone on one line — that prose travels through the log like any
+other SKILL.md text, so a `*` let it match with an empty capture that, anchored as the
+**last** match, silently beat a real stamp earlier in the log (`artifact_state='ok'`
+with an empty `artifact_path`). Read the regex before touching any of it. It decides based on the
 **last** match in the log — anchoring on the last one
 isn't incidental: the skill's body travels through the log and contains all three stamp
 values literally, so checking for mere presence would make the check find itself.
