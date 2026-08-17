@@ -22,6 +22,9 @@ export type Run = {
   // Only the phase that prepares the branch (`implement`) sets this; every other
   // run leaves it `null`, which is the normal case, not a missing value.
   branch: string | null
+  // The snapshot folder this run left, when the archive was on. `null` is the normal
+  // case for every run before the archive existed and for runs with it switched off.
+  archive_path: string | null
 }
 export type Footprint = {
   ruta: string; existe: boolean; archivos: number; bytes: number; nombres: string[]
@@ -101,6 +104,19 @@ export const api = {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(m),
     }).then(r => json<PhaseModels>(r)),
+  archive: () => fetch("/api/archivo").then(r => json<{ dir: string }>(r)),
+  saveArchive: (dir: string) =>
+    fetch("/api/archivo", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir }),
+    }).then(r => json<{ dir: string }>(r)),
+  /** Puts a run's declared deliverable back into the repo from its snapshot. Files
+   *  need `overwrite` when the destination exists; a tree is never overwritten. */
+  restore: (id: number, runId: number, overwrite = false) =>
+    fetch(`/api/tickets/${id}/restaurar`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runId, overwrite }),
+    }).then(r => json<{ restaurado: string; archivos: number }>(r)),
   tickets: () => fetch("/api/tickets").then(r => json<Ticket[]>(r)),
   activeRun: () => fetch("/api/runs/active").then(r => json<ActiveRun | null>(r)),
   detail: (id: number) => fetch(`/api/tickets/${id}`).then(r => json<TicketDetail>(r)),

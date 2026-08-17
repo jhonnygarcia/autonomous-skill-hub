@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api, type ActiveRun, type Project, type Ticket, type TicketDetail as Detail } from "@/api"
+import { Archive } from "@/Archive"
 import { ConfirmDialog } from "@/ConfirmDialog"
 import { Models } from "@/Models"
 import { ProjectForm } from "@/ProjectForm"
@@ -111,6 +112,7 @@ export default function App() {
                       onNew={() => setView({ kind: "projectForm", name: null })}
                       onChange={() => refreshProjects()} />
             <Models />
+            <Archive />
           </>
         )}
 
