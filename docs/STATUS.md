@@ -279,6 +279,35 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     because the fake echoed the prompt back — a fake being too helpful is a
     test asserting nothing.
 
+21. **The UI is the product; the plugin is the engine** (2026-08-17). Stated
+    by Jhonny while framing the next three pieces of work. The plugin keeps
+    working on its own — that is what makes it installable anywhere and what
+    the standalone `R-<slug>` mode exists for — but using it alone is the
+    hard way: keys minted by hand, `DECIDIR` boxes ticked in an editor, the
+    analysis copied by hand before a fan-out, engine and model chosen per
+    invocation. **Every one of those frictions is a feature the UI owes**,
+    and effort goes into the UI's ergonomics, not the plugin's. Three
+    consequences, in the order they'll be built:
+
+    - **An archive of deliverables, with restore** — the safeguard the
+      plugin alone can't offer: `docs/tickets/*.md` and `openspec/changes/`
+      are untracked in the target repo and can be deleted or overwritten
+      (3320's single-session analysis was). Snapshot per run into a
+      configurable directory; restore is an explicit human action that puts
+      the file back where the phases read it. Record, never input.
+    - **One entry point: the human's prompt, with an optional work item.**
+      `POST /tickets` stops being an XOR: `{request, ado_id?}`. With both,
+      the key is the work item's number, the request is projected next to it,
+      and the prompt says the human's framing narrows or adds; on conflict
+      the human wins and it's recorded as `DECIDIR`.
+    - **The ticket reads as a conversation.** One composer (prompt, phase
+      defaulting to the next one missing, fresh/resume), runs rendered as
+      turns, and `DECIDIR`/`BLOQUEA` answerable from the UI — which edits the
+      `.md` and ticks the box, the convention the skills already obey. **Not**
+      a live chat with the agent mid-run: `claude -p` has no TTY, the seam is
+      between phases by design, and a bidirectional protocol would be
+      per-engine.
+
 ## Phase 1 acceptance — closed on 2026-08-08
 
 Run on ticket **3311** in the TMS repo, twice: with skill v0.1.0 and, after
