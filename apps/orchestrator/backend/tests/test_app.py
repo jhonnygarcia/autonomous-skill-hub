@@ -1968,6 +1968,57 @@ def test_implement_partial_stamp_keeps_the_reserve(client, monkeypatch, tmp_path
     assert run["artifact_note"] == "3/5 tareas, build en rojo"
 
 
+def test_implement_partial_stamp_with_quoted_caveat_keeps_a_clean_path(
+    client, monkeypatch
+):
+    """Real run 8 of ticket 3359. The agent's caveat quoted a document name (`"doc
+    09"`), which the real CLI escapes to `\\"` inside the stream-json line. The old
+    path capture `[^"\\\\]+` stopped dead at that backslash: `artifact_path` came out
+    as `docs/tickets/3359-analysis.md ·` (the separator glued on, no trailing space,
+    because `stamp_in`'s `.strip()` ate the space that would have made ` · ` match) and
+    `artifact_note` was lost entirely — a 276-line analysis really on disk reported as
+    no deliverable. This is the exact case from CLAUDE.md's stamp paragraph."""
+    _use_fake_claude(
+        monkeypatch,
+        stamp='parcial — docs/tickets/3359-analysis.md · '
+              '"doc 09" (spec del corte V1→V2 citada por el código) no está en el repo')
+    tid = client.post("/tickets", json={"ado_id": 3359, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["artifact_state"] == "parcial"
+    assert run["artifact_path"] == "docs/tickets/3359-analysis.md"
+    assert run["artifact_note"] == (
+        '"doc 09" (spec del corte V1→V2 citada por el código) no está en el repo')
+
+
+def test_implement_partial_stamp_with_backslash_in_caveat_keeps_a_clean_path(
+    client, monkeypatch
+):
+    """A caveat citing a Windows-style path (a literal backslash) must not corrupt
+    `artifact_path` either — a bare backslash is what used to terminate the capture,
+    quoted or not."""
+    _use_fake_claude(
+        monkeypatch,
+        stamp=r'parcial — docs/tickets/3359-analysis.md · '
+              r'falta revisar C:\repos\legacy\notas.md')
+    tid = client.post("/tickets", json={"ado_id": 3311, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["artifact_state"] == "parcial"
+    assert run["artifact_path"] == "docs/tickets/3359-analysis.md"
+    assert run["artifact_note"] == r"falta revisar C:\repos\legacy\notas.md"
+
+
+def test_split_reserve_survives_separator_without_trailing_space():
+    """The separator constant is ` · ` (with a trailing space); `stamp_in` used to
+    lose that trailing space in exactly the escaped-quote case above once the capture
+    got cut short. `split_reserve` on its own should tolerate the bare `·` too, not
+    just as a side effect of the regex fix upstream."""
+    import app
+    path, note = app.split_reserve("parcial", "docs/tickets/3359-analysis.md ·")
+    assert path == "docs/tickets/3359-analysis.md"
+
+
 def test_implement_with_second_repo_dirty_does_not_leave_the_first_on_another_branch(
     client, monkeypatch, tmp_path
 ):

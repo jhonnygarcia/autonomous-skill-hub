@@ -53,6 +53,13 @@ if os.environ.get("FAKE_SKILL_LEAK") == "1":
     print('{"type":"tool_result","text":' + json.dumps(body, ensure_ascii=False) + '}')
 stamp = os.environ.get("FAKE_HUELLA")
 if stamp:
-    # Simulates the skills' mandatory closing stamp.
-    print('{"type":"assistant","text":"resumen del cierre. HUELLA: ' + stamp + '"}')
+    # Simulates the skills' mandatory closing stamp. json.dumps (ensure_ascii=False,
+    # same as the skill-leak block above) is what actually escapes a quote or backslash
+    # the agent wrote in its caveat into `\"` / `\\`, exactly like the real (Node) CLI
+    # does when it serializes the stream-json line — so a test that sets FAKE_HUELLA to
+    # a stamp with a quoted caveat exercises the same escaped shape STAMP_RE has to
+    # parse in a real run, instead of the literal unescaped quote the old hand-built
+    # string produced (which no real log ever contains).
+    text = "resumen del cierre. HUELLA: " + stamp
+    print('{"type":"assistant","text":' + json.dumps(text, ensure_ascii=False) + '}')
 print('{"type":"result","subtype":"success"}')

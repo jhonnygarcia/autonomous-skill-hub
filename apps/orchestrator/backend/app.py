@@ -330,12 +330,37 @@ def now() -> str:
 # `claude -p --output-format stream-json` isn't parsed as JSON here: the stamp travels
 # nested inside `message.content[].text`, followed by `"`, `stop_reason`, `usage`,
 # `session_id`, etc. on the same line. That's why the rest of the stamp stops at the
-# first character that can't be part of its text — the quote or backslash that closes
-# the JSON field — instead of greedily swallowing the rest of the line with `.+`. In a
-# plain log without JSON (the legacy ones with `PLAN:`) there are no quotes or
-# backslashes, so the behavior doesn't change: the capture reaches end of line just
-# like before.
-STAMP_RE = re.compile(r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)\s*[—-]\s*([^"\\]+)')
+# character that can't be part of its text — the quote that closes the JSON field —
+# instead of greedily swallowing the rest of the line with `.+`.
+#
+# A quote the AGENT wrote (a caveat citing a document name, "doc 09") is not that
+# closing quote: the CLI escapes it to `\"` before it ever reaches this log, so a
+# capture that stopped at any backslash (the old `[^"\\]+`) stopped dead at THAT
+# backslash instead — corrupting `artifact_path` and losing the caveat entirely (real
+# run 8 of ticket 3359). The fix lets exactly the two escape pairs the CLI's own JSON
+# encoder produces through as single "characters" the capture keeps consuming: `\"`
+# (an agent-written quote) and `\\` (an agent-written backslash, e.g. a Windows path
+# in the caveat). Any OTHER backslash sequence — chiefly `\n`, the JSON encoding of a
+# real newline — still stops the capture cold, same as before: neither alternative
+# below matches a bare backslash followed by anything other than `"` or `\`, so the
+# whole alternation fails there and the regex engine has nowhere left to extend the
+# match. That's what keeps this from running away over a plain-text log line ending
+# in a literal `\n`, and it's also what makes the fix work unchanged on legacy
+# `PLAN:` logs: those have no backslashes at all, so the capture still just reaches
+# end of line. `_unescape_stamp` below turns the two allowed pairs back into their
+# literal characters before the stamp is stored.
+STAMP_RE = re.compile(
+    r'(?:HUELLA|PLAN): (ok|parcial|nada|validado|sin-validar|no-escrito)'
+    r'\s*[—-]\s*((?:\\"|\\\\|[^"\\])*)')
+
+
+def _unescape_stamp(text: str) -> str:
+    """Undo the two escape pairs `STAMP_RE` lets the capture run through unmolested,
+    turning the JSON-escaped log text back into what the agent actually wrote. Only
+    `\\"` and `\\\\` are unescaped because they're the only two the regex admits —
+    anything else (`\\n` above all) already terminated the capture, so there is
+    nothing else here to undo."""
+    return re.sub(r'\\(["\\])', r'\1', text)
 # The session id moved into `ENGINES[...]["session_re"]`: it was never a contract with
 # the skills like `STAMP_RE` is — it's each CLI's own shape, and Codex spells it
 # `thread_id`. `STAMP_RE` stayed here, and stayed one, because it IS the contract: it
@@ -389,10 +414,25 @@ def split_reserve(state: str, rest: str) -> tuple[str, str | None]:
     """From a `parcial` stamp with a reserve, split the path (for `artifact_path`,
     which has to stay a clean path: it's the viewer's allowlist) from the reserve (for
     `artifact_note`). A `parcial` without ` · ` has no reserve and `rest` in full is the
-    path, same as before this change."""
-    if state == "parcial" and RESERVE_SEP in rest:
+    path, same as before this change.
+
+    Tries the full separator (with both spaces) first, then falls back to the bare
+    middle dot alone: a `rest` that arrives already stripped of its trailing space —
+    which is what `stamp_in` used to hand this function before `STAMP_RE` was fixed to
+    stop swallowing the trailing content — would otherwise glue the `·` onto the path
+    instead of splitting on it. The bare-dot fallback only fires when the full
+    separator isn't there at all, so a normal reserve still goes through the first
+    branch unchanged."""
+    if state != "parcial":
+        return rest, None
+    if RESERVE_SEP in rest:
         path, note = rest.split(RESERVE_SEP, 1)
         return path.strip(), note.strip()
+    bare = RESERVE_SEP.strip()  # "·", no surrounding spaces
+    if bare in rest:
+        path, note = rest.split(bare, 1)
+        note = note.strip()
+        return path.strip(), (note or None)
     return rest, None
 
 
@@ -404,7 +444,7 @@ def stamp_in(text: str) -> tuple[str, str] | None:
     if not hits:
         return None
     state, rest = hits[-1]
-    return LEGACY_STATES.get(state, state), rest.strip()
+    return LEGACY_STATES.get(state, state), _unescape_stamp(rest).strip()
 
 
 def ticket_roots(ticket: dict | sqlite3.Row) -> list[Path]:
