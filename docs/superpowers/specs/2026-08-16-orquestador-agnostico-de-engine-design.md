@@ -156,6 +156,35 @@ llegar ahí hay que responder el `BLOQUEA` — que es una decisión de producto 
 no algo que se invente para probar un CLI. El mecanismo funcionando es justamente lo que
 impide terminar de probarlo.
 
+### La etapa 3, verificada por el orquestador de verdad (2026-08-17)
+
+No con fakes: `ORCH_CODEX_CMD` apuntando al binario real y una corrida completa por
+`POST /tickets/{id}/run`, sobre una solicitud `R-` en `ProvidenceTMSTenant`.
+
+    engine   : codex
+    status   : success
+    estado   : parcial
+    huella   : parcial -> docs/tickets/R-1-analysis.md
+    session  : 01a00fd1-f5e6-7433-9c7b-38b5f0f69ee6
+    continuar: True
+    motivo   : wiki unavailable and configured code-graph project not indexed
+
+El análisis salió con sus 12 secciones, el sello `v0.11.0`, 6 `DECIDIR` y 1 `BLOQUEA`,
+y el journal acumuló **las tres corridas** —dos que pararon por falta de
+`.claude/ticket-agent.json` y la buena— con duración y la línea de reserva, escritas por
+`append_journal`, con `## Hallazgos` de la skill debajo. O sea: el `JOURNAL_CLAIM` viaja
+dentro del pack y se obedece, y `split_reserve` parsea el ` · ` de un `parcial` que
+escribió Codex.
+
+Dos cosas se rompieron y solo aparecieron aquí, no en los tests:
+
+1. **Con el prompt por stdin el log guardaba la línea de argv y nada más** — registraba
+   que algo se lanzó, no qué se pidió. El runner ahora escribe el prompt bajo su propio
+   encabezado. El test que debía atraparlo pasaba porque el fake devolvía el prompt como
+   eco: un fake demasiado servicial es un test que no afirma nada.
+2. **`survey` armaba sus hijos con Claude fijo**, así que elegir otro engine ahí se
+   habría guardado y luego ignorado. Ahora se rechaza con el motivo escrito.
+
 ## Lo verificado por CLI (2026-08-16)
 
 Modo no-interactivo, que es el único que importa aquí:

@@ -253,6 +253,14 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
     picks its blast radius, and today that's a fact to know rather than a knob
     to set.
 
+    **Verified end to end on 2026-08-17**, with `ORCH_CODEX_CMD` pointing at the
+    real binary and a run launched through `POST /tickets/{id}/run`: `engine:
+    codex`, `status: success`, `HUELLA: parcial — docs/tickets/R-1-analysis.md`,
+    session captured from `thread_id`, and a journal holding all three attempts
+    with their durations and the reserve line. That last part matters more than
+    it looks: `JOURNAL_CLAIM` travels inside the pack and is obeyed, and
+    `split_reserve` parses a ` · ` written by Codex.
+
     Also found by running it for real end to end: with the prompt on stdin the
     log held only the argv line, so it recorded that something was launched
     and not what was asked. The runner now writes the prompt into the log
