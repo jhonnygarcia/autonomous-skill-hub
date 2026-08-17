@@ -1758,6 +1758,16 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # The entrada is what the phase is about to read, human edits included (the
         # ticked DECIDIR boxes live nowhere else). Taken AFTER the request projection
         # so it matches the disk the agent sees. Notes wait for the journal line.
+        #
+        # Two of the three early returns above this point (repo not prepared, no
+        # surveys) close before this line and archive nothing. The `survey` phase's
+        # no-brief return below closes AFTER it: that run keeps an entrada/ and a
+        # run.json — it never gets a salida/, since it errors before anything is
+        # declared. This is accepted, not an oversight: the spec only promises no
+        # salida/ from an early return, and an entrada/ that records a failed attempt
+        # is harmless (Task 5's restore requires artifact_state in ok/parcial, so
+        # nothing can ever be restored from it) — reordering the guards to make this
+        # invariant cosmetic-clean would be a bigger change than the problem.
         archive_notes = archive_run(ticket, run_id, phase, "entrada",
                                     entrada_rels(ticket), started)
         prev = last_session(ticket["id"], phase, engine) if resume else None
@@ -1805,7 +1815,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     log.write(f"[orchestrator] {NO_BRIEF_REASON}: {brief_path}\n")
                 set_run(run_id, status="error", finished_at=now(),
                         artifact_state="nada", artifact_path=NO_BRIEF_REASON)
-                append_journal(ticket, phase, "nada", NO_BRIEF_REASON)
+                append_journal(ticket, phase, "nada", NO_BRIEF_REASON, extra=archive_notes)
                 set_ticket(ticket["id"])
                 return
             brief = brief_path.read_text(encoding="utf-8", errors="replace")

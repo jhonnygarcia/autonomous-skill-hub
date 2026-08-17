@@ -2935,3 +2935,20 @@ def test_entrada_includes_the_change_tree_a_previous_run_declared(client, monkey
     client.post(f"/tickets/{tid}/run", json={"phase": "analyze"})   # any later phase will do
     latest = Path(client.get(f"/tickets/{tid}").json()["runs"][0]["archive_path"])
     assert (latest / "entrada" / "openspec" / "changes" / "3323-xpo" / "tasks.md").exists()
+
+
+def test_survey_without_a_brief_still_archives_the_entrada(client, monkeypatch, tmp_path):
+    """The no-brief early return closes AFTER the entrada snapshot (unlike the
+    repo-not-prepared and no-surveys returns, which close before it) — accepted, not
+    an oversight: it records that the attempt happened, and Task 5's restore can never
+    pick it up since it never gets a salida/."""
+    _archive_on(client, tmp_path)
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 44, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    assert run["status"] == "error"
+    folder = Path(run["archive_path"])
+    assert (folder / "entrada").is_dir()
+    assert (folder / "run.json").exists()
+    assert not (folder / "salida").exists()
