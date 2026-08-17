@@ -2635,3 +2635,19 @@ def test_every_phase_has_a_skill_that_exists_on_disk():
     for phase in app.PHASE_COMMANDS:
         body = app.skill_body(phase)
         assert len(body) > 500 and not body.startswith("---")
+
+
+def test_the_fan_out_phase_refuses_another_engine(client):
+    """`survey` is Claude's and says so instead of ignoring the setting.
+
+    Each child of the fan-out exists to be a session ROOTED in the other repo, seeing
+    ITS rules, ITS hooks and ITS `.mcp.json` — that rooting is what the multi-repo
+    design buys and it's Claude Code's mechanism. A Settings screen that accepted
+    `codex` here and then launched Claude anyway would be lying in the one place the
+    human goes to check."""
+    r = client.put("/modelos", json={"survey": {"engine": "codex"}})
+    assert r.status_code == 400 and ".mcp.json" in r.json()["detail"]
+    assert client.get("/modelos").json()["survey"]["engine"] == "claude"
+    # Every other phase takes it.
+    assert client.put("/modelos", json={"survey": {"engine": "claude"},
+                                        "design": {"engine": "codex"}}).status_code == 200

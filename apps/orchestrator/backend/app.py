@@ -185,6 +185,12 @@ ENGINES = {
     },
 }
 DEFAULT_ENGINE = "claude"
+# The fan-out is Claude's, and not by omission. A survey child exists to be a session
+# ROOTED in the other repo, seeing ITS `CLAUDE.md`, ITS hooks and ITS `.mcp.json` — that
+# rooting is what the whole multi-repo design buys, and it's Claude Code's mechanism.
+# Rather than let Settings offer an engine the fan-out would then ignore, `PUT /modelos`
+# rejects it: a configuration silently disregarded is worse than one refused.
+SINGLE_ENGINE_PHASES = {"survey": "claude"}
 # Subscription, never an API key: with these gone the only credential a child has left
 # is the machine's `login` session. One entry per provider the runner can launch — the
 # rule is the project's, not Anthropic's, so it grows with `ENGINES`.
@@ -821,6 +827,12 @@ def put_models(body: dict[str, PhaseConfig]):
         if cfg.engine not in ENGINES:
             raise HTTPException(
                 400, f"Engine inválido: '{cfg.engine}' (usa {', '.join(ENGINES)})")
+        forced = SINGLE_ENGINE_PHASES.get(phase)
+        if forced and cfg.engine != forced:
+            raise HTTPException(
+                400, f"La fase '{phase}' solo corre en {ENGINES[forced]['label']}: cada "
+                     "hijo del abanico es una sesión enraizada en el otro repo, con sus "
+                     "reglas, sus hooks y su .mcp.json, y ese montaje es de ese CLI")
         if cfg.model and not MODEL_RE.match(cfg.model):
             raise HTTPException(400, f"Modelo inválido: '{cfg.model}'")
         # Against THAT engine's list, not the union: `max` is legal in Claude and dies

@@ -242,6 +242,12 @@ el plugin pasa a ser *una* de sus empaquetaduras.
    pidió. El runner ahora escribe el prompt en el log bajo su propio encabezado. El test
    que debía atrapar eso pasaba porque el fake devolvía el prompt como eco — un fake
    demasiado servicial es un test que no afirma nada.
+3b. **`survey` se queda en Claude, y lo dice.** El abanico monta cada hijo enraizado
+   en su repo para que vea SUS reglas, SUS hooks y SU `.mcp.json`, y ese montaje es de
+   Claude Code. `PUT /modelos` rechaza otro engine para esa fase con el motivo escrito,
+   y la UI ni lo ofrece: una configuración ignorada en silencio es peor que una
+   rechazada. Portar el abanico a otro engine es trabajo de la etapa 4, no un descuido.
+
 4. Engines sin MCP en fase 1, **solo para tickets `R-`**: una solicitud no necesita
    Azure, su entrada es `docs/tickets/<id>-request.md` que el runner ya proyecta.
 5. Copilot al final o nunca.

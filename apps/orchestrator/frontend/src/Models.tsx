@@ -4,6 +4,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { PHASE_LABEL } from "@/status"
 
+// The fan-out is Claude's: each child is a session rooted in the other repo, with ITS
+// rules, hooks and `.mcp.json`, and that mounting is Claude Code's. The backend rejects
+// anything else for this phase — offering it here and letting the save fail would be
+// making the human discover the rule by hitting it.
+const SINGLE_ENGINE_PHASES: Record<string, string> = { survey: "claude" }
+
 // The aliases each CLI resolves to its family's latest model. A full id
 // (`claude-opus-5`, `gpt-5.6-sol`) also works and the backend accepts it; aliases go
 // here because they're the ones that don't go stale.
@@ -86,12 +92,13 @@ export function Models() {
               // engine it doesn't know about yet (a stale tab against a newer backend)
               // gets no options rather than someone else's.
               const efforts = engines.find(e => e.id === f.engine)?.efforts ?? []
+              const forced = SINGLE_ENGINE_PHASES[phase]
               return (
                 <div key={phase} className="flex items-center gap-2">
                   <span className="w-24 text-sm font-medium">{name}</span>
                   <div className="w-36">
                     <Selector label={`Engine de ${name}`} value={f.engine} empty={null}
-                              options={engines.map(e => e.id)}
+                              options={forced ? [forced] : engines.map(e => e.id)}
                               onChange={v => set(phase, "engine", v)} />
                   </div>
                   <div className="w-40">
