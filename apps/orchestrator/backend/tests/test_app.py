@@ -3180,6 +3180,36 @@ def test_close_archives_the_declared_file_from_the_extra_repo(client, monkeypatc
         encoding="utf-8") == "solo en el mount"
 
 
+def test_an_extra_repo_deliverable_is_archived_but_not_one_click_restorable(
+        client, monkeypatch, tmp_path):
+    """Item 3 made the archive resolve the declared path against the primary repo AND
+    the extras — so an extra-repo deliverable now really lands in `salida/`. But
+    `restore_run` still computes `dest = Path(t["repo_path"]) / rel` (the PRIMARY repo
+    only), and its containment check passes because `rel` is relative. Left alone,
+    that would restore this run's file into the WRONG repo — the same cross-repo
+    mix-up Decision D's archive-side fix exists to prevent, just moved to the restore
+    side. `restorable` must stay false for a non-primary hit, and `/restaurar` itself
+    must refuse it too, not just the UI button."""
+    _archive_on(client, tmp_path)
+    (tmp_path / "backend-repo" / "docs" / "tickets").mkdir(parents=True)
+    (tmp_path / "backend-repo" / "docs" / "tickets" / "3323-analysis.md").write_text(
+        "solo en el mount", encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/3323-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 3323, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    run = client.get(f"/tickets/{tid}").json()["runs"][0]
+    folder = Path(run["archive_path"])
+    # The archive still keeps the file — Decision D's value stands on its own.
+    assert (folder / "salida" / "docs" / "tickets" / "3323-analysis.md").exists()
+    assert not run["restorable"]
+
+    primary_target = tmp_path / "repo" / "docs" / "tickets" / "3323-analysis.md"
+    assert not primary_target.exists()
+    r = client.post(f"/tickets/{tid}/restaurar", json={"run_id": run["id"]})
+    assert r.status_code == 404
+    assert not primary_target.exists()   # nothing landed in the wrong repo
+
+
 def test_close_archives_from_the_root_artifact_on_disk_would_pick(client, monkeypatch, tmp_path):
     """When the SAME relative path exists in both the primary repo and an extra, the
     archive must pick the same root `artifact_on_disk` picks (primary first) — not an

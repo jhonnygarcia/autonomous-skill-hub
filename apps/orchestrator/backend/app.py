@@ -417,6 +417,22 @@ def ticket_roots(ticket: dict | sqlite3.Row) -> list[Path]:
     return roots
 
 
+def declared_root(ticket: dict | sqlite3.Row, path: str) -> Path | None:
+    """The first of `ticket_roots(ticket)` that actually holds `path`, in that order —
+    the same order `copy_into_any` tries them, so the root this returns is the same one
+    a copy of `path` would actually come from. Exposed on its own, separately from
+    `artifact_on_disk`'s plain bool and from `archive_run`'s return value (a list of
+    journal notes, not per-file provenance), because a caller sometimes needs to know
+    WHICH root produced the hit, not just whether one did — see `restorable` below."""
+    for r in ticket_roots(ticket):
+        try:
+            if (r / path).exists():
+                return r
+        except (ValueError, OSError):
+            continue          # an absurd path is not an existing one
+    return None
+
+
 def artifact_on_disk(ticket: dict | sqlite3.Row, path: str) -> bool:
     """Is the thing a stamp declared actually there?
 
@@ -435,13 +451,7 @@ def artifact_on_disk(ticket: dict | sqlite3.Row, path: str) -> bool:
     a phase can leave its deliverable in a mounted repo. **A directory counts**: Phase
     2's deliverable is `openspec/changes/<id>-<slug>/`, not a file.
     """
-    for r in ticket_roots(ticket):
-        try:
-            if (r / path).exists():
-                return True
-        except (ValueError, OSError):
-            continue          # an absurd path is not an existing one
-    return False
+    return declared_root(ticket, path) is not None
 
 
 def read_stamp(log_path: Path) -> tuple[str, str] | None:
@@ -2015,8 +2025,23 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     # `is_relative_to` check is what catches that: only a candidate
                     # that actually landed INSIDE `salida/` counts.
                     candidate = (salida_root / path).resolve()
-                    restorable = candidate.is_relative_to(salida_root) and candidate.exists()
-                    set_run(run_id, restorable=int(restorable))
+                    copied = candidate.is_relative_to(salida_root) and candidate.exists()
+                    # A copy from an EXTRA repo is real (Decision D, and the archive
+                    # keeps it either way) but not one-click restorable: `restore_run`'s
+                    # `dest` and its containment check are shaped for the primary repo
+                    # only (`Path(t["repo_path"]) / rel`), so restoring a path that was
+                    # actually archived from a mounted repo would silently write that
+                    # repo's content into the primary one — the same cross-repo
+                    # mix-up Decision D's archive-side fix exists to prevent, just moved
+                    # to the restore side. Teaching `restore_run` a second root
+                    # (recording which one produced the hit, and widening its `dest`
+                    # and containment check to match) is a fair thing to want later; for
+                    # now this only withholds the one-click button, it doesn't stop the
+                    # archive from keeping the file.
+                    primary = Path(ticket["repo_path"]).resolve()
+                    hit_root = declared_root(ticket, path)
+                    from_primary = hit_root is not None and hit_root.resolve() == primary
+                    set_run(run_id, restorable=int(copied and from_primary))
             except Exception:
                 pass  # ponytail: a lost flag, not a lost run — same policy as archive_run
         # run.json is rewritten at close for EVERY outcome, `nada` included: the entrada
@@ -2111,6 +2136,18 @@ def restore_run(tid: int, body: RestoreIn):
             (tid,)).fetchone()
     if not r or not r["archive_path"] or r["artifact_state"] not in ("ok", "parcial"):
         raise HTTPException(404, "Esa corrida no dejó snapshot que restaurar")
+    # `restorable` is the SAME flag the UI's buttons key off — NULL (nobody checked,
+    # every row before the column existed) and 0 (checked, and it wasn't) both deny
+    # here too. This is what actually stops a direct `POST /restaurar` call, not just
+    # the UI's button, for a run whose salida came from an extra repo: `dest` below is
+    # shaped for the PRIMARY repo only, so writing an extra repo's content through it
+    # would be the same cross-repo mix-up Decision D's archive-side fix exists to
+    # prevent, just moved to the restore side.
+    if not r["restorable"]:
+        raise HTTPException(
+            404, "Esa corrida archivó su entregable desde un repo montado, no el "
+                 "principal: no se puede restaurar en un click. Cópialo a mano desde "
+                 f"{Path(r['archive_path']) / 'salida' / r['artifact_path']}")
     if active:
         raise HTTPException(409, "Este ticket tiene una corrida activa; restaura cuando termine")
     rel = r["artifact_path"]

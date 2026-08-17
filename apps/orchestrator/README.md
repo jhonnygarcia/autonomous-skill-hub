@@ -94,11 +94,16 @@ than walking the whole tree first — that's what keeps a `docs`-wide artifact f
 archiving (and re-scanning) the whole folder on every run. A copy that fails is also
 just a journal note: it never turns a successful run into an error.
 
-Not every run with an `archive_path` can actually be restored: a fan-out `survey`
-archives its request and journal, but its declared "path" is a scratch folder outside
-every repo, so its `salida/` never holds anything to put back. Each run also carries
-a `restorable` flag, checked once at close, and only a run with `restorable` set
-offers a Restore button.
+Not every run with an `archive_path` can actually be restored in one click. A
+fan-out `survey` archives its request and journal, but its declared "path" is a
+scratch folder outside every repo, so its `salida/` never holds anything to put back.
+And a deliverable that lives in a mounted repo, not the primary one, IS archived —
+that's still a real backup — but restoring writes into `repo_path` only, so putting
+it back through the one-click button would silently drop another repo's file into
+the wrong repo. Each run carries a `restorable` flag, checked once at close against
+which root the deliverable actually came from, and only a run with `restorable` set
+offers a Restore button — `POST /tickets/{tid}/restaurar` itself refuses a non-
+restorable run too, not just the button.
 
 **Restoring is never automatic.** The archive is a record — nothing reads it to decide
 anything, and a run started after the archive folder was deleted still produces its

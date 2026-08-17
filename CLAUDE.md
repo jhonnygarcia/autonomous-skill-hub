@@ -317,15 +317,28 @@ close of that ticket pay for the whole `docs/` tree, under the global lock, only
 copy nothing. A failed copy is a journal line, never an error run. `runs.archive_path`
 is the folder; NULL means nothing archived — but it is **not** the same thing as
 `runs.restorable`, a second nullable column set at close from a single `exists()`
-check on `<archive_path>/salida/<artifact_path>`. The two disagree exactly for a
-fan-out `survey`: its HUELLA is an absolute scratch path outside every repo, so
-`archive_path` still gets set (the folder exists, request/journal got copied into it)
-while `restorable` stays 0 — nothing a restore could put back. Both the Timeline's and
-the run history's Restore button key off `restorable`, never off `archive_path` alone,
-and treat NULL (every row before the column, same convention as `artifact_exists`) as
-not-restorable. **A record, never an input**: a test guards that deleting the archive
-— and leaving it deleted, not recreating an empty directory before the next run — the
-next run still produces its own deliverable and its own stamp. The one door back is
+check on `<archive_path>/salida/<artifact_path>`. The two disagree in two cases, both
+real archives with no one-click way back. A fan-out `survey`: its HUELLA is an
+absolute scratch path outside every repo, so `archive_path` still gets set (the
+folder exists, request/journal got copied into it) while `restorable` stays 0 —
+nothing a restore could put back. And a deliverable that lives in an EXTRA repo, not
+the primary one: `declared_root(ticket, path)` (the same primary-then-extras order
+`ticket_roots`/`copy_into_any` use) reports WHICH root a hit came from, and
+`restorable` is set only when that root is the primary `repo_path` — `restore_run`'s
+`dest` and its containment check are shaped for the primary repo alone
+(`Path(t["repo_path"]) / rel`), so restoring a path archived from a mounted repo would
+silently write that repo's content into the primary one, the same cross-repo mix-up
+Decision D's archive-side fix exists to prevent, just moved to the restore side.
+`restore_run` itself checks `restorable`, not just the two UI buttons — a direct
+`POST /restaurar` on such a run 404s too. The archive still keeps the file either way
+(that value stands on its own); recording the root and widening `restore_run` to a
+second root is real design work and stays undone on purpose, deferred rather than
+folded into this fix. Both the Timeline's and the run history's Restore button key off
+`restorable`, never off `archive_path` alone, and treat NULL (every row before the
+column, same convention as `artifact_exists`) as not-restorable. **A record, never an
+input**: a test guards this by deleting the archive and leaving it deleted — never
+recreating an empty directory before the next run — and confirming that next run
+still produces its own deliverable and its own stamp regardless. The one door back is
 `POST /tickets/{tid}/restaurar {run_id, overwrite}`: it copies that run's `salida/`
 to the repo, refuses while a run is active, needs `overwrite` for an existing file,
 and **never overwrites a tree** — `implement` ticks `tasks.md` inside the tree `design`
