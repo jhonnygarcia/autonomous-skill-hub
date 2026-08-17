@@ -2764,3 +2764,20 @@ def test_runs_older_than_the_column_are_not_called_liars(client, monkeypatch):
     f = t["fases"][0]
     assert f["estado"] == "ok" and "entregable" not in f
     assert t["ticket"]["status"] == "analyzed"
+
+
+def test_archive_dir_setting_roundtrip_and_validation(client, tmp_path):
+    """`archive_dir` lives in the DB and nowhere else; empty means off. A directory that
+    doesn't exist is refused at save time, not discovered when the first run closes."""
+    assert client.get("/archivo").json() == {"dir": ""}
+    d = tmp_path / "archivo"
+    d.mkdir()
+    r = client.put("/archivo", json={"dir": d.as_posix()})
+    assert r.status_code == 200 and r.json() == {"dir": d.as_posix()}
+    assert client.get("/archivo").json() == {"dir": d.as_posix()}
+    bad = client.put("/archivo", json={"dir": (tmp_path / "no-existe").as_posix()})
+    assert bad.status_code == 400 and "no-existe" in bad.json()["detail"]
+    # a bad save leaves the previous value alone
+    assert client.get("/archivo").json() == {"dir": d.as_posix()}
+    # empty switches it off
+    assert client.put("/archivo", json={"dir": ""}).json() == {"dir": ""}

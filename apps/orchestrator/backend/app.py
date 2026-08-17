@@ -237,6 +237,20 @@ def phase_configs() -> dict[str, dict]:
             for f in PHASE_COMMANDS}
 
 
+def setting(key: str) -> str:
+    """One row per knob, read at the moment it's needed (like `model_for`), never
+    cached at startup: on Windows the backend isn't hot-reloaded."""
+    with db() as c:
+        r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else ""
+
+
+def set_setting(key: str, value: str) -> None:
+    with db() as c:
+        c.execute("INSERT INTO settings(key, value) VALUES(?, ?) "
+                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+
 def repos_text(phase: str, extras: list[dict], noun: str, primary: str = "") -> str:
     """The prompt block that introduces the ticket's extra repos to the agent.
 
@@ -719,6 +733,10 @@ def init_db() -> None:
               effort TEXT NOT NULL DEFAULT '',
               engine TEXT NOT NULL DEFAULT 'claude'
             );
+            CREATE TABLE IF NOT EXISTS settings(
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
             """
         )
         # DBs created before extra repos existed. SQLite has no
@@ -835,6 +853,35 @@ class RunIn(BaseModel):
 def ticket_row(tid: int) -> sqlite3.Row | None:
     with db() as c:
         return c.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+
+
+class ArchiveIn(BaseModel):
+    dir: str = ""
+
+
+@app.get("/archivo")
+def get_archive():
+    return {"dir": setting("archive_dir")}
+
+
+@app.put("/archivo")
+def put_archive(body: ArchiveIn):
+    """Empty switches the archive off. Anything else must be a directory that exists
+    and can be written NOW: the alternative is finding out at the close of a run,
+    where a failure is only a journal line."""
+    d = body.dir.strip()
+    if d:
+        p = Path(d)
+        if not p.is_dir():
+            raise HTTPException(400, f"No es un directorio: {d}")
+        try:
+            probe = p / ".orch-probe"
+            probe.write_text("", encoding="utf-8")
+            probe.unlink()
+        except OSError:
+            raise HTTPException(400, f"No se puede escribir en: {d}")
+    set_setting("archive_dir", d)
+    return {"dir": d}
 
 
 class PhaseConfig(BaseModel):
