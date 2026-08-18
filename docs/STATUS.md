@@ -1,8 +1,8 @@
 # Project status — Autonomous Skill Hub
 
 > Living document. Update it when closing each milestone or making a decision.
-> Last updated: 2026-08-14 (**la solicitud sin ticket y el journal**, plugin
-> **v0.10.0**, 217 tests backend)
+> Last updated: 2026-08-18 (**decisiones respondibles desde la UI y preview del
+> markdown**, 265 tests backend)
 
 ## Purpose
 
@@ -307,6 +307,15 @@ taking up a slot in the timeline. Five remain: `analyze`, `design`, `implement`,
       a live chat with the agent mid-run: `claude -p` has no TTY, the seam is
       between phases by design, and a bidirectional protocol would be
       per-engine.
+      **Hecho el 2026-08-18 (parcial)** — the `DECIDIR`/`BLOQUEA` piece: `GET`/`POST
+      /tickets/{tid}/decisiones` parse and answer each item (identified by a hash
+      of its own text, not a line number — see the design spec), and
+      `Timeline.tsx` shows them as answerable cards instead of a bare counter.
+      Alongside it, the artifact viewer gained a rendered markdown view (a
+      hand-written parser to React elements, no `dangerouslySetInnerHTML`) with a
+      raw toggle. The composer and the turns-as-history rendering are still
+      missing — see
+      `docs/superpowers/specs/2026-08-18-decisiones-respondibles-y-preview-design.md`.
     - **Hecho el 2026-08-17** — **The runner supplies what the target repo is
       missing.** A user registered a project in the UI with the correct org
       and project and launched a phase, and it failed: the target repo on

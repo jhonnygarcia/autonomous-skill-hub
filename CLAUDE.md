@@ -560,6 +560,39 @@ ticket (or falls under a directory that was declared, at any depth), falls insid
 main repo or one of the ticket's extras, is a regular file, and is truncated to 512 KB
 without splitting a multibyte character.
 
+**`GET`/`POST /tickets/{tid}/decisiones`** are what makes a `## Decisiones para ti`
+item answerable from the UI instead of an editor. Both go through
+`declared_file_or_none` — the same door as the artifact viewer — and both 409 while the
+ticket has a queued or running run, exactly like `restaurar`: a phase may be reading or
+rewriting that same file. `GET` returns `puntos`, one entry per `DECIDIR`/`BLOQUEA`
+item under the section, each with `id`, `tipo`, `pregunta` (the item's first physical
+line), `cuerpo` (its indented continuation lines, dedented), `propuesta` (the bold text
+after `Propuesta:`, or `null`), and `respondido`.
+
+**An item's `id` is a hash of its own exact text, not a line number.** `_decision_items`
+(app.py) finds each item's boundary as "up to the next item's start" and hashes that
+whole raw slice (`sha256(core)[:16]`) — not just the first line, which the task's own
+first draft allowed but which several items in a real analysis collide on (two
+questions starting "¿Qué pasa con..."). Hashing the FULL item means an edit ANYWHERE
+inside it — question, body, even whitespace — changes the id: `POST /decisiones`
+re-parses the file at request time and refuses with 409 if the id it was handed isn't
+found, which is what catches a human editing the file by hand between the GET and the
+POST, and also what makes re-answering an already-answered item refuse instead of
+silently overwriting it (its id changed the moment it was first answered).
+
+**The answer lands as an indented `**Respuesta:**` line, same convention as
+`Propuesta:`.** `_write_answer` ticks the box (`- [ ]` → `- [x]`) and appends
+`      **Respuesta:** <text>` — six spaces, the same continuation width the skill
+templates already write under a `DECIDIR`/`BLOQUEA` item — right after the item's own
+body, so the next phase reads it as one more line of the item's prose, not a foreign
+insertion. It's a splice at the item's own recorded offsets: every byte outside that
+one item is copied through unchanged, which a test asserts directly. Accepting a
+proposal writes the proposal's own text verbatim as the answer (the same string `GET`
+already returned as `propuesta`), so "accept" and "answer" close through the exact same
+code path. Recorded in the journal like `restaurar` is, for the same reason: a file
+that changes with nobody saying so is what makes the next session unable to
+reconstruct what happened.
+
 **The engine, the model and the effort are chosen per phase**, from Settings in the UI
 (`Models.tsx` → `GET/PUT /modelos`, plus `GET /engines` for the selector's options).
 They live in the `phase_config` table and nowhere else: an empty model or effort means
