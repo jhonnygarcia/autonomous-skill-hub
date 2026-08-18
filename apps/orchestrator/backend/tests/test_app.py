@@ -3779,10 +3779,17 @@ DECISIONS_DOC = (
 def _decisions_declared(client, monkeypatch, tmp_path, doc=DECISIONS_DOC, key=3359):
     """One good `analyze` run that declares a `-analysis.md` holding `doc`. Returns
     `(tid, ruta, path_on_disk)` — `ruta` is what the endpoints take, `path_on_disk`
-    what the test reads back to check bytes."""
+    what the test reads back to check bytes.
+
+    Written via `write_bytes`, NOT `write_text`: `Path.write_text()` translates every
+    `\n` in `doc` to `os.linesep` on write, which on Windows would silently turn an
+    LF fixture into CRLF before the test even starts — exactly the kind of hidden
+    translation the newline-preservation tests below exist to catch, so the fixture
+    itself has to be exempt from it.
+    """
     p = tmp_path / "repo" / "docs" / "tickets" / f"{key}-analysis.md"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(doc, encoding="utf-8")
+    p.write_bytes(doc.encode("utf-8"))
     _use_fake_claude(monkeypatch, stamp=f"ok — docs/tickets/{key}-analysis.md")
     tid = client.post("/tickets", json={"ado_id": key, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
@@ -3799,14 +3806,97 @@ def test_decisiones_lists_parsed_items(client, monkeypatch, tmp_path):
     assert r.status_code == 200
     bloquea, decidir = r.json()["puntos"]
     assert bloquea["tipo"] == "BLOQUEA" and bloquea["respondido"] is False
-    assert bloquea["pregunta"] == "¿Este ticket incluye cerrar la brecha, o"
+    # The question runs to its natural end ("?"), not just the first physical line —
+    # the source wraps it onto a second, indented line.
+    assert bloquea["pregunta"] == "¿Este ticket incluye cerrar la brecha, o asume que ya está a la par?"
     assert "cualquiera de las dos" in bloquea["cuerpo"]
+    assert "asume que ya está a la par" not in bloquea["cuerpo"]   # moved into pregunta, not duplicated
     assert bloquea["propuesta"] is None
     assert decidir["tipo"] == "DECIDIR" and decidir["respondido"] is False
     assert decidir["pregunta"] == "¿Qué pasa con las URLs?"
     assert decidir["propuesta"] == "repuntar las rutas legacy y borrar solo la implementación"
     assert bloquea["id"] != decidir["id"]
     assert all(len(x["id"]) == 16 for x in [bloquea, decidir])
+
+
+# The six real items, copied verbatim from docs/tickets/3359-analysis.md:227-276 (the
+# example the task pointed at) — not a shape imagined for a test, the actual wrapping,
+# quoting and nested markup a real analysis produces. Three of the six wrap the
+# question onto a second physical line (BLOQUEA #1, DECIDIR "BatchRatingService",
+# DECIDIR "frontend").
+REAL_3359_DECISIONS_DOC = (
+    "# Analysis of ticket 3359\n\n"
+    "## Decisiones para ti\n\n"
+    "- [ ] **BLOQUEA** — ¿Este ticket incluye cerrar la brecha de paridad de V2, o\n"
+    "      asume que V2 ya está a la par?\n"
+    "      Hoy V2 es una rebanada vertical declarada: un solo carrier API, cuatro\n"
+    "      reglas, sin class rating y **sin markup**\n"
+    "      (`ProvidenceTMS/PTMS.API/Controllers/QuoteController.cs:59-60`). Borrar V1\n"
+    "      en ese estado quita markup y carriers de la cotización en producción. No\n"
+    "      hay default defensible: asumir \"sí incluye\" convierte 6 horas estimadas en\n"
+    "      semanas de trabajo no planificado; asumir \"no incluye\" produce un borrado\n"
+    "      que rompe facturación. Solo tú sabes cuál era la intención al escribirlo.\n"
+    "\n"
+    "- [ ] **BLOQUEA** — ¿Dónde está \"doc 09\"?\n"
+    "      El código lo cita cuatro veces como la especificación del corte V1→V2\n"
+    "      (`QuoteController.cs:57, 61, 73, 78`), incluida la cláusula \"doc 09 §4.2\".\n"
+    "      No está en este repo. Planificar el borrado de V1 sin leerlo es adivinar\n"
+    "      qué contrato se prometió cumplir; no hay default posible porque el\n"
+    "      documento define exactamente el alcance que este ticket ejecuta.\n"
+    "\n"
+    "- [ ] **DECIDIR** — ¿Qué pasa con las URLs tras eliminar V1?\n"
+    "      Propuesta: **repuntar las rutas legacy a los handlers V2 y borrar solo la\n"
+    "      implementación** — `Rate-Quotes` (`QuoteController.cs:48`) y\n"
+    "      `Rate-Quotes/{quoteDetailId}` (línea 88) pasan a `IRatingEngine`, y los\n"
+    "      sufijos `-V2` (líneas 63, 80) se retiran una vez migrados. Mantiene el\n"
+    "      contrato de URL para el frontend, el Swagger público y los consumidores\n"
+    "      api-key, y deja el borrado confinado a `PTMS.Application`/`PTMS.Mediator`.\n"
+    "      Si no respondes, sigo con la propuesta.\n"
+    "\n"
+    "- [ ] **DECIDIR** — ¿`BatchRatingService` y `RatingFunctions` entran en \"legacy\n"
+    "      rating v1\"?\n"
+    "      Propuesta: **fuera de alcance**. `BatchRatingService.cs:33` y\n"
+    "      `TMSProvidenceBatchRatingHandler.cs:14` no llaman a\n"
+    "      `IRateQuoteService`/`IApiRateQuoteService`; son una vía de rateo por lotes\n"
+    "      independiente, sobre el patrón `IServiceResolver`. Migrarlos es un ticket\n"
+    "      propio. Si no respondes, sigo con la propuesta.\n"
+    "\n"
+    "- [ ] **DECIDIR** — ¿La parte de frontend (repo `ProvidenceTMS`, `ClientApp/`)\n"
+    "      entra en este ticket o en uno hermano?\n"
+    "      Propuesta: **ticket hermano en `ProvidenceTMS`**, ejecutado *antes* del\n"
+    "      borrado aquí. Este repo es backend; el cutover del cliente tiene su propio\n"
+    "      build, su propia PR y su propio riesgo de release. Si no respondes, planifico\n"
+    "      3359 solo como el trabajo de este repo y dejo el corte del cliente anotado\n"
+    "      como dependencia externa. Si no respondes, sigo con la propuesta.\n"
+    "\n"
+    "- [ ] **DECIDIR** — ¿`ApiCarriersV2` se toca?\n"
+    "      Propuesta: **no**. Es la capa de transporte por carrier\n"
+    "      (`PTMS.Application/{ServiceClients,Services}/ApiCarriersV2/`), consumida por\n"
+    "      ambos stacks de rateo y sin dualidad V1/V2 de rutas; \"ratingV2\" en este\n"
+    "      ticket es el motor `IRatingEngine`, no ella. Si no respondes, sigo con la\n"
+    "      propuesta.\n"
+)
+
+
+def test_decisiones_parses_all_six_real_items_with_full_questions(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path, doc=REAL_3359_DECISIONS_DOC)
+    puntos = _puntos(client, tid, ruta)
+    assert len(puntos) == 6
+    assert [x["tipo"] for x in puntos] == \
+        ["BLOQUEA", "BLOQUEA", "DECIDIR", "DECIDIR", "DECIDIR", "DECIDIR"]
+    preguntas = [x["pregunta"] for x in puntos]
+    # Every question reads as a complete sentence — ends in "?", nothing cut mid-word.
+    assert all(q.endswith("?") for q in preguntas)
+    assert preguntas[0] == "¿Este ticket incluye cerrar la brecha de paridad de V2, o asume que V2 ya está a la par?"
+    assert preguntas[3] == '¿`BatchRatingService` y `RatingFunctions` entran en "legacy rating v1"?'
+    assert preguntas[4] == "¿La parte de frontend (repo `ProvidenceTMS`, `ClientApp/`) entra en este ticket o en uno hermano?"
+    # The four DECIDIR items all carry a proposal; neither BLOQUEA does.
+    assert [x["propuesta"] is not None for x in puntos] == [False, False, True, True, True, True]
+    assert puntos[2]["propuesta"] == "repuntar las rutas legacy a los handlers V2 y borrar solo la implementación"
+    assert puntos[3]["propuesta"] == "fuera de alcance"
+    assert puntos[4]["propuesta"] == "ticket hermano en `ProvidenceTMS`"
+    assert puntos[5]["propuesta"] == "no"
+    assert len({x["id"] for x in puntos}) == 6   # all distinct
 
 
 def test_decisiones_empty_list_when_the_file_has_no_decisions_section(client, monkeypatch, tmp_path):
@@ -3855,13 +3945,61 @@ def test_responder_decision_writes_a_custom_answer(client, monkeypatch, tmp_path
 
 
 def test_responder_decision_touches_only_that_items_bytes(client, monkeypatch, tmp_path):
+    """Bytes, not decoded text: `Path.read_text()` uses universal newlines and folds
+    `\r\n` back to `\n` on the way in, so a before/after comparison built on it can't
+    see a CRLF/LF corruption even when the write introduced one — which is exactly
+    what happened here before this was fixed (measured on the real 3359 file:
+    16288 bytes/276 LF before, 16593 bytes/277 CRLF after, answering ONE item).
+    `read_bytes()` is the only comparison that can actually observe that.
+    """
     tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
-    before = p.read_text(encoding="utf-8")
+    before = p.read_bytes()
     bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
     client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
-    after = p.read_text(encoding="utf-8")
-    prefix_end = before.index("- [ ] **BLOQUEA**")
-    suffix_start = before.index("- [ ] **DECIDIR**")   # next item on: must be untouched
+    after = p.read_bytes()
+    prefix_end = before.index(b"- [ ] **BLOQUEA**")
+    suffix_start = before.index(b"- [ ] **DECIDIR**")   # next item on: must be untouched
+    added = len(after) - len(before)
+    assert after[:prefix_end] == before[:prefix_end]
+    assert after[suffix_start + added:] == before[suffix_start:]
+
+
+def test_responder_decision_preserves_lf_line_endings(client, monkeypatch, tmp_path):
+    """The fixture is written LF-only (see `_decisions_declared`). Answering one item
+    must not convert the other 276-odd untouched line endings to CRLF — the bug this
+    guards against turned an entire 16 KB LF file into CRLF from a single answer."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    before = p.read_bytes()
+    assert b"\r" not in before
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    after = p.read_bytes()
+    assert b"\r" not in after   # no CRLF introduced anywhere, including the new line
+    assert b"**Respuesta:** listo" in after
+    assert after.count(b"\n") == before.count(b"\n") + 1   # exactly one new line added
+
+
+def test_responder_decision_preserves_crlf_line_endings(client, monkeypatch, tmp_path):
+    """The mirror of the LF test: a file that was ALREADY CRLF before this endpoint
+    ever touched it must stay CRLF — not because CRLF is preferred, but because
+    answering a decision must never be the thing that silently rewrites a file's
+    line-ending convention, whichever one it already had."""
+    crlf_doc = DECISIONS_DOC.replace("\n", "\r\n")
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path, doc=crlf_doc)
+    before = p.read_bytes()
+    assert before.count(b"\r\n") == before.count(b"\n")   # every LF is part of a CRLF pair
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    after = p.read_bytes()
+    # Still exclusively CRLF: no bare "\n" anywhere, including inside the NEW line
+    # this endpoint itself inserted.
+    assert after.count(b"\r\n") == after.count(b"\n")
+    assert b"**Respuesta:** listo" in after
+    # And the untouched region (before the answered item, after the next one) is
+    # byte-identical to the original CRLF source — not merely "still CRLF", the SAME
+    # bytes.
+    prefix_end = before.index(b"- [ ] **BLOQUEA**")
+    suffix_start = before.index(b"- [ ] **DECIDIR**")
     added = len(after) - len(before)
     assert after[:prefix_end] == before[:prefix_end]
     assert after[suffix_start + added:] == before[suffix_start:]
@@ -3882,6 +4020,24 @@ def test_responder_decision_refuses_when_already_answered(client, monkeypatch, t
                      json={"ruta": ruta, "id": answered["id"], "respuesta": "otra vez"})
     assert r.status_code == 409
     assert "respondido" in r.json()["detail"]
+
+
+def test_responder_decision_stale_id_after_answering_reports_already_answered(client, monkeypatch, tmp_path):
+    """The realistic double-submit: a slow request or a double click resends the SAME
+    (now stale) id the panel had before it answered this item. That id no longer
+    matches anything in the file exactly (the checkbox and the appended answer changed
+    its hash) — but it's recognizable as "this item, before it was answered", and the
+    human should be told THAT, not "someone edited the file", which is what a generic
+    not-found used to say and is simply false here."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    stale_id = bloquea["id"]
+    r1 = client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": stale_id, "respuesta": "listo"})
+    assert r1.status_code == 200
+    r2 = client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": stale_id, "respuesta": "otra vez"})
+    assert r2.status_code == 409
+    assert "respondido" in r2.json()["detail"]
+    assert "cambió" not in r2.json()["detail"]
 
 
 def test_responder_decision_refuses_when_the_file_changed_underneath(client, monkeypatch, tmp_path):
@@ -3926,6 +4082,30 @@ def test_responder_decision_400_for_a_path_no_run_declared(client, monkeypatch, 
     r = client.post(f"/tickets/{tid}/decisiones",
                      json={"ruta": "docs/tickets/otra.md", "id": "x", "respuesta": "y"})
     assert r.status_code == 400
+
+
+def test_journal_append_preserves_an_existing_crlf_convention(client, monkeypatch, tmp_path):
+    """`append_journal` reads the whole journal and writes it back on every call — the
+    same class of bug `_write_answer` had if it doesn't take care. A journal that's
+    already CRLF (checked out on another machine, or just how an earlier run left it)
+    must not end up with a bare-LF line mixed into an otherwise-CRLF document the next
+    time something appends to it."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    journal_path = tmp_path / "repo" / "docs" / "tickets" / "3359-journal.md"
+    journal_path.write_bytes(journal_path.read_bytes().replace(b"\n", b"\r\n"))
+    before = journal_path.read_bytes()
+    decidir = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "DECIDIR")
+    client.post(f"/tickets/{tid}/decisiones",
+                json={"ruta": ruta, "id": decidir["id"], "aceptar_propuesta": True})
+    after = journal_path.read_bytes()
+    assert after.count(b"\r\n") == after.count(b"\n")   # still exclusively CRLF, new line included
+    mark = b"## Hallazgos"
+    i = before.index(mark)
+    added = len(after) - len(before)
+    assert after[:i] == before[:i]
+    assert after[i + added:] == before[i:]
 
 
 def test_responder_decision_journals_it(client, monkeypatch, tmp_path):

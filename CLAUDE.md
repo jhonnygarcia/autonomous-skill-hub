@@ -565,9 +565,26 @@ item answerable from the UI instead of an editor. Both go through
 `declared_file_or_none` — the same door as the artifact viewer — and both 409 while the
 ticket has a queued or running run, exactly like `restaurar`: a phase may be reading or
 rewriting that same file. `GET` returns `puntos`, one entry per `DECIDIR`/`BLOQUEA`
-item under the section, each with `id`, `tipo`, `pregunta` (the item's first physical
-line), `cuerpo` (its indented continuation lines, dedented), `propuesta` (the bold text
-after `Propuesta:`, or `null`), and `respondido`.
+item under the section, each with `id`, `tipo`, `pregunta` (the question through its
+own natural end — the first line ending in `?`, or a blank line, whichever comes
+first, NOT just the first physical line: a real analysis wraps a question across two
+lines as often as not), `cuerpo` (everything after that, dedented), `propuesta` (the
+bold text after `Propuesta:`, or `null`), and `respondido`.
+
+**Both endpoints read and write the file WITHOUT newline translation.**
+`Path.read_text()`/`Path.write_text()` silently translate `\r\n` ↔ `\n` — measured on
+the real 3359 analysis, answering ONE decision through the naive versions turned all
+276 LF line endings into CRLF and grew the file by 305 bytes, which reads as a
+whole-file diff to anyone with it in git. `read_text_preserving_newlines` /
+`write_text_preserving_newlines` (app.py, opened with `newline=""`) are the fix, and
+every caller that rewrites an EXISTING file's content — `append_journal`,
+`journal_note`, both decisions endpoints — goes through them. A function that only
+ever WRITES FRESH content (`ensure_ticket_agent_config`, which refuses to touch a file
+that already exists; the request-file projection, fully regenerated from the DB on
+every launch) has nothing to preserve and stays on the plain `Path` calls. New content
+these functions insert (a journal line, a `**Respuesta:**` line) has no convention of
+its own, so it borrows the file's dominant one (`_dominant_eol`: CRLF if the file uses
+it anywhere, LF otherwise) rather than hardcoding `\n`.
 
 **An item's `id` is a hash of its own exact text, not a line number.** `_decision_items`
 (app.py) finds each item's boundary as "up to the next item's start" and hashes that
@@ -578,7 +595,13 @@ inside it — question, body, even whitespace — changes the id: `POST /decisio
 re-parses the file at request time and refuses with 409 if the id it was handed isn't
 found, which is what catches a human editing the file by hand between the GET and the
 POST, and also what makes re-answering an already-answered item refuse instead of
-silently overwriting it (its id changed the moment it was first answered).
+silently overwriting it (its id changed the moment it was first answered). A submitted
+id that no longer matches anything exactly gets ONE more check before the generic "the
+file changed" refusal: `_pre_answer_id` undoes exactly what `_write_answer` does (the
+checkbox flip, the appended `**Respuesta:**` block) to every already-answered item and
+re-hashes it — if that recovers the submitted id, the real story is a stale resubmit
+(a slow request, a double click) against an item that's already answered, and the
+refusal says that instead of blaming an edit that never happened.
 
 **The answer lands as an indented `**Respuesta:**` line, same convention as
 `Propuesta:`.** `_write_answer` ticks the box (`- [ ]` → `- [x]`) and appends

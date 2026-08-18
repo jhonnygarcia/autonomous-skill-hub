@@ -1182,6 +1182,39 @@ def seconds(start: str | None, end: str | None) -> int | None:
     return int((datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds())
 
 
+def read_text_preserving_newlines(p: Path) -> str:
+    """Reads WITHOUT universal-newline translation: a `\r\n` in the file stays `\r\n`
+    in the returned string, a bare `\n` stays `\n`. `Path.read_text()` silently
+    translates every line ending to `\n` on read — which hides the file's real
+    convention from anything that reads it and later writes it back, exactly the bug
+    `write_text_preserving_newlines` below exists to avoid. Any caller that re-writes
+    what it reads (the journal, the decisions endpoints) must use this, not
+    `Path.read_text()`."""
+    with open(p, encoding="utf-8", errors="replace", newline="") as fh:
+        return fh.read()
+
+
+def write_text_preserving_newlines(p: Path, text: str) -> None:
+    """Writes WITHOUT newline translation: whatever `\n`/`\r\n` characters are already
+    IN `text` land on disk byte-for-byte. `Path.write_text()` translates every `\n` to
+    `os.linesep` on write — on Windows that turns an LF file into CRLF the moment
+    anything rewrites it, even if only one line actually changed (measured on a real
+    analysis: answering one decision turned 276 LF endings into 277 CRLF ones and grew
+    the file by 305 bytes). Pair with `read_text_preserving_newlines` so the text
+    handed here already carries the file's own original endings, untouched, in the
+    parts nothing meant to change."""
+    with open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
+def _dominant_eol(text: str) -> str:
+    """`\r\n` if `text` uses it anywhere, `\n` otherwise. NEW content appended or
+    inserted into an existing document (a fresh journal line, an answer line) has no
+    convention of its own to preserve — this is what it borrows, so an append to a
+    CRLF file doesn't leave one lone LF line inside an otherwise-CRLF document."""
+    return "\r\n" if "\r\n" in text else "\n"
+
+
 def append_journal(ticket: dict, phase: str, state: str, detail: str,
                    note: str | None = None, duration_s: int | None = None,
                    branch: str | None = None, resumed_from: str | None = None,
@@ -1196,8 +1229,9 @@ def append_journal(ticket: dict, phase: str, state: str, detail: str,
     """
     p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
     try:
-        text = p.read_text(encoding="utf-8", errors="replace") if p.exists() else \
+        text = read_text_preserving_newlines(p) if p.exists() else \
             JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
+        eol = _dominant_eol(text)
         mins, secs = divmod(duration_s or 0, 60)
         line = (f"{now()[:10]} · {phase} · {state} · {detail}"
                 + (f" · {mins}m{secs:02d}s" if duration_s is not None else "")
@@ -1206,11 +1240,13 @@ def append_journal(ticket: dict, phase: str, state: str, detail: str,
                 + "\n"
                 + (f"   · reserva: {note}\n" if note else "")
                 + "".join(f"   · {x}\n" for x in (extra or [])))
+        if eol != "\n":
+            line = line.replace("\n", eol)
         mark = "## Hallazgos"
         i = text.find(mark)
         text = text + line if i < 0 else text[:i] + line + text[i:]
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text, encoding="utf-8")
+        write_text_preserving_newlines(p, text)
     except OSError:
         pass  # ponytail: a record that can't be written is a lost line, not a lost run
 
@@ -1227,13 +1263,15 @@ def journal_note(ticket: dict, text: str) -> None:
     `· reserva:`. Inserted right before `## Hallazgos`, like the run lines."""
     p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
     try:
-        body = p.read_text(encoding="utf-8", errors="replace") if p.exists() else \
+        body = read_text_preserving_newlines(p) if p.exists() else \
             JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
         line = f"   · {text}\n"
+        if _dominant_eol(body) != "\n":
+            line = line.replace("\n", "\r\n")
         i = body.find("## Hallazgos")
         body = body + line if i < 0 else body[:i] + line + body[i:]
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body, encoding="utf-8")
+        write_text_preserving_newlines(p, body)
     except OSError:
         pass  # ponytail: same policy as append_journal — a lost note, not a lost run
 
@@ -1595,6 +1633,12 @@ def _decision_items(text: str) -> list[dict]:
     means an edit ANYWHERE inside it — question, body, even whitespace — changes the
     id, so `responder_decision` can detect "this exact item is gone" and refuse instead
     of silently ticking a box next to text that isn't what the human read.
+
+    `text` must carry its ORIGINAL line endings (read via `read_text_preserving_newlines`,
+    never `Path.read_text()`, which silently folds `\r\n` to `\n`): `core`'s bytes are
+    what `responder_decision` hashes AND what `_write_answer` splices back into the
+    file verbatim, so a `\r\n` document parsed here has to still look like a `\r\n`
+    document, or the id computed on `GET` would never match the id recomputed on `POST`.
     """
     heading = re.search(r"^## Decisiones para ti\s*$", text, re.MULTILINE)
     if not heading:
@@ -1610,15 +1654,32 @@ def _decision_items(text: str) -> list[dict]:
         item_start = m.start()
         item_stop = starts[i + 1].start() if i + 1 < len(starts) else len(section)
         raw = section[item_start:item_stop]
-        core = raw.rstrip("\n")
+        core = raw.rstrip("\r\n")   # the blank-line separator, LF or CRLF alike
         marker_end = m.end() - item_start
-        first_nl = core.find("\n")
-        first_line = core if first_nl < 0 else core[:first_nl]
-        pregunta = first_line[marker_end:].strip()
-        rest = "" if first_nl < 0 else core[first_nl + 1:]
+
+        # "Logical" physical lines, CR-stripped — used ONLY to derive the display
+        # fields below (`pregunta`/`cuerpo`/`propuesta`). `core` itself keeps its
+        # original bytes, `\r` included: that's what the id hashes and what
+        # `_write_answer` splices back in.
+        phys = [ln.rstrip("\r") for ln in core.split("\n")]
+        phys[0] = phys[0][marker_end:]
+
+        # The question runs to its own natural end, not just the first physical
+        # line: a real analysis wraps one as often as not
+        # (docs/tickets/3359-analysis.md:229-230, 255-256, 263-264 — three of six
+        # items in that file). "Natural end" is the first line that ends in "?", or
+        # a blank line, whichever comes first; short of either, the item's own last
+        # line, so nothing is ever lost, just merged into the question.
+        q_end = len(phys) - 1
+        for li, ln in enumerate(phys):
+            if ln.strip() == "" or ln.rstrip().endswith("?"):
+                q_end = li
+                break
+        pregunta = " ".join(p.strip() for p in phys[:q_end + 1]).strip()
+
         cuerpo = "\n".join(
             (ln[len(DECISION_INDENT):] if ln[:len(DECISION_INDENT)] == DECISION_INDENT else ln.lstrip())
-            for ln in rest.split("\n")
+            for ln in phys[q_end + 1:]
         )
         prop = PROPOSAL_RE.search(core)
         propuesta = re.sub(r"\s+", " ", prop.group(1)).strip() if prop else None
@@ -1642,16 +1703,59 @@ def _write_answer(text: str, item: dict, answer: str) -> str:
     after its body — the convention documented in CLAUDE.md next to `DECIDIR`/`BLOQUEA`.
     Every byte outside `item`'s own core is copied through unchanged: this is a
     string-splice at `item`'s recorded offsets, never a rewrite of the whole document.
+
+    The line ending for the NEW line this inserts matches the file's own dominant
+    convention (`_dominant_eol`) — new content has no convention of its own to keep,
+    so it borrows the surrounding document's. `text` must already carry the file's
+    original endings (see `read_text_preserving_newlines`): the caller is responsible
+    for not rewriting `\r\n` to `\n` before this ever sees it, or the splice below
+    would silently convert the whole file the moment it's written back out.
     """
     start, core_len = item["_abs_start"], item["_core_len"]
     core = text[start:start + core_len]
     new_core = "- [x]" + core[5:]   # "- [ ]" and "- [x]" are both 5 characters wide
+    eol = _dominant_eol(text)
     lines = answer.splitlines() or [""]
-    answer_block = "\n".join(
+    answer_block = eol.join(
         f"{DECISION_INDENT}**Respuesta:** {ln}" if i == 0 else f"{DECISION_INDENT}{ln}"
         for i, ln in enumerate(lines)
     )
-    return text[:start] + new_core + "\n" + answer_block + text[start + core_len:]
+    return text[:start] + new_core + eol + answer_block + text[start + core_len:]
+
+
+# What `_write_answer` always appends, as a regex: a line starting with the same
+# indent as every other continuation line, followed by the literal "**Respuesta:**"
+# marker, through to the end of the item. Used only by `_pre_answer_id` to undo it.
+ANSWER_BLOCK_RE = re.compile(
+    r"^" + re.escape(DECISION_INDENT) + r"\*\*Respuesta:\*\*.*\Z", re.MULTILINE | re.DOTALL
+)
+
+
+def _pre_answer_id(core: str) -> str | None:
+    """The id this item hashed to BEFORE it was answered, or `None` if `core` isn't
+    shaped like something `_write_answer` produced.
+
+    Exists for exactly one 409 message: a stale id — the one the UI had before it
+    answered this same item, possibly resent by a slow retry or a double click —
+    would otherwise fall through to "the file changed", which reads as "someone else
+    edited it" when what actually happened is "you already answered this". Undoing
+    the checkbox flip and stripping the appended `**Respuesta:**` block recovers the
+    exact bytes the id was originally computed from, so a stale id can still be
+    recognized as belonging to THIS item even though it no longer matches it exactly.
+    A `core` that isn't already-answered, or whose tail isn't shaped like our own
+    appended block (a human answered by hand, in some other format), returns `None` —
+    that's a real edit, not a resubmit, and stays "file changed".
+    """
+    if not core.startswith("- [x]"):
+        return None
+    m = ANSWER_BLOCK_RE.search(core)
+    if not m:
+        return None
+    pre = core[:m.start()].rstrip("\r\n")
+    if not pre.startswith("- [x]"):
+        return None
+    pre = "- [ ]" + pre[5:]
+    return hashlib.sha256(pre.encode("utf-8")).hexdigest()[:16]
 
 
 def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) -> list[dict]:
@@ -2651,7 +2755,7 @@ def decisiones(tid: int, ruta: str):
     if not p:
         raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
     try:
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = read_text_preserving_newlines(p)
     except OSError as exc:
         raise HTTPException(404, f"No se pudo leer {ruta}: {exc}")
     puntos = [{k: v for k, v in it.items() if not k.startswith("_")} for it in _decision_items(text)]
@@ -2690,11 +2794,22 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
     if not body.aceptar_propuesta and not (body.respuesta and body.respuesta.strip()):
         raise HTTPException(400, "Escribe una respuesta o acepta la propuesta")
     try:
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = read_text_preserving_newlines(p)
     except OSError as exc:
         raise HTTPException(404, f"No se pudo leer {body.ruta}: {exc}")
-    item = next((it for it in _decision_items(text) if it["id"] == body.id), None)
+    items = _decision_items(text)
+    item = next((it for it in items if it["id"] == body.id), None)
     if not item:
+        # The submitted id doesn't match anything in the CURRENT file — but if it's
+        # the id an already-answered item had BEFORE it was answered (a slow retry, a
+        # double click), that's not "someone edited the file", it's "you already
+        # answered this": check every already-answered item's pre-answer id before
+        # settling on the generic message.
+        for it in items:
+            if it["respondido"]:
+                core = text[it["_abs_start"]: it["_abs_start"] + it["_core_len"]]
+                if _pre_answer_id(core) == body.id:
+                    raise HTTPException(409, "Ese punto ya fue respondido")
         raise HTTPException(
             409, "El archivo cambió desde que se cargaron las decisiones: vuelve a "
                  "consultarlas e inténtalo de nuevo")
@@ -2708,7 +2823,7 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
         answer = body.respuesta.strip()
     new_text = _write_answer(text, item, answer)
     try:
-        p.write_text(new_text, encoding="utf-8")
+        write_text_preserving_newlines(p, new_text)
     except OSError as exc:
         raise HTTPException(409, f"No se pudo escribir {body.ruta}: {exc}")
     append_journal(dict(t), "decision", "ok", body.ruta,
