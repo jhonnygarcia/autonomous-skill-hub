@@ -3750,3 +3750,188 @@ def test_ticket_response_never_includes_the_token(client, tmp_path):
     assert "ado_pat" not in detail["ticket"]
     listed = next(t for t in client.get("/tickets").json() if t["id"] == tid)
     assert "ado_pat" not in listed
+
+
+# --- Feature 1: answerable decisions -----------------------------------------------
+# The real shape (docs/tickets/3359-analysis.md:227-278, 3 repos over): a BLOQUEA item
+# with no proposal and a DECIDIR item whose proposal is bold text after "Propuesta:",
+# both with the question wrapping onto a second physical line and a multi-line body,
+# all indented 6 spaces — the width of "- [ ] "/"- [x] ", which is what the skill
+# templates (ticket-comprehension/SKILL.md) actually write.
+DECISIONS_DOC = (
+    "# Ticket 3359\n\n"
+    "## Missing information\nNone\n\n"
+    "## Decisiones para ti\n\n"
+    "- [ ] **BLOQUEA** — ¿Este ticket incluye cerrar la brecha, o\n"
+    "      asume que ya está a la par?\n"
+    "      Hoy no hay default defensible porque cualquiera de las dos\n"
+    "      lecturas rompe algo distinto.\n"
+    "\n"
+    "- [ ] **DECIDIR** — ¿Qué pasa con las URLs?\n"
+    "      Propuesta: **repuntar las rutas legacy y borrar solo la\n"
+    "      implementación**. Si no respondes, sigo con la propuesta.\n"
+    "\n"
+    "## Hallazgos\n"
+    "Nada\n"
+)
+
+
+def _decisions_declared(client, monkeypatch, tmp_path, doc=DECISIONS_DOC, key=3359):
+    """One good `analyze` run that declares a `-analysis.md` holding `doc`. Returns
+    `(tid, ruta, path_on_disk)` — `ruta` is what the endpoints take, `path_on_disk`
+    what the test reads back to check bytes."""
+    p = tmp_path / "repo" / "docs" / "tickets" / f"{key}-analysis.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(doc, encoding="utf-8")
+    _use_fake_claude(monkeypatch, stamp=f"ok — docs/tickets/{key}-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": key, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    return tid, f"docs/tickets/{key}-analysis.md", p
+
+
+def _puntos(client, tid, ruta):
+    return client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta}).json()["puntos"]
+
+
+def test_decisiones_lists_parsed_items(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    r = client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta})
+    assert r.status_code == 200
+    bloquea, decidir = r.json()["puntos"]
+    assert bloquea["tipo"] == "BLOQUEA" and bloquea["respondido"] is False
+    assert bloquea["pregunta"] == "¿Este ticket incluye cerrar la brecha, o"
+    assert "cualquiera de las dos" in bloquea["cuerpo"]
+    assert bloquea["propuesta"] is None
+    assert decidir["tipo"] == "DECIDIR" and decidir["respondido"] is False
+    assert decidir["pregunta"] == "¿Qué pasa con las URLs?"
+    assert decidir["propuesta"] == "repuntar las rutas legacy y borrar solo la implementación"
+    assert bloquea["id"] != decidir["id"]
+    assert all(len(x["id"]) == 16 for x in [bloquea, decidir])
+
+
+def test_decisiones_empty_list_when_the_file_has_no_decisions_section(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path, doc="# Ticket\nNada aquí.\n")
+    r = client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta})
+    assert r.status_code == 200 and r.json()["puntos"] == []
+
+
+def test_decisiones_400_for_a_path_no_run_declared(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    r = client.get(f"/tickets/{tid}/decisiones", params={"ruta": "docs/tickets/otra.md"})
+    assert r.status_code == 400
+
+
+def test_decisiones_get_refuses_while_a_run_is_active(client, monkeypatch, tmp_path):
+    import app as app_module
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?, 'design', 'running')", (tid,))
+    r = client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta})
+    assert r.status_code == 409 and "activa" in r.json()["detail"]
+
+
+def test_responder_decision_accepts_the_proposal(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    decidir = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "DECIDIR")
+    r = client.post(f"/tickets/{tid}/decisiones",
+                     json={"ruta": ruta, "id": decidir["id"], "aceptar_propuesta": True})
+    assert r.status_code == 200
+    assert r.json() == {"ruta": ruta, "id": decidir["id"], "respondido": True,
+                         "respuesta": decidir["propuesta"]}
+    text = p.read_text(encoding="utf-8")
+    assert "- [x] **DECIDIR** — ¿Qué pasa con las URLs?" in text
+    assert "**Respuesta:** repuntar las rutas legacy y borrar solo la implementación" in text
+
+
+def test_responder_decision_writes_a_custom_answer(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    r = client.post(f"/tickets/{tid}/decisiones",
+                     json={"ruta": ruta, "id": bloquea["id"], "respuesta": "Sí, incluye la brecha."})
+    assert r.status_code == 200
+    text = p.read_text(encoding="utf-8")
+    assert "- [x] **BLOQUEA**" in text
+    assert "**Respuesta:** Sí, incluye la brecha." in text
+
+
+def test_responder_decision_touches_only_that_items_bytes(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    before = p.read_text(encoding="utf-8")
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    after = p.read_text(encoding="utf-8")
+    prefix_end = before.index("- [ ] **BLOQUEA**")
+    suffix_start = before.index("- [ ] **DECIDIR**")   # next item on: must be untouched
+    added = len(after) - len(before)
+    assert after[:prefix_end] == before[:prefix_end]
+    assert after[suffix_start + added:] == before[suffix_start:]
+
+
+def test_responder_decision_refuses_when_already_answered(client, monkeypatch, tmp_path):
+    """The id is a content hash, so answering an item changes it — the SAME id used
+    twice already refuses as "the file changed" (tested separately below). This test
+    covers the other route to the same rule: the panel re-fetches after answering (as
+    it should, to show the new state) and gets the item's NEW id, already ticked —
+    trying to answer THAT must refuse too, explicitly, not silently overwrite it."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    answered = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    assert answered["respondido"] is True
+    r = client.post(f"/tickets/{tid}/decisiones",
+                     json={"ruta": ruta, "id": answered["id"], "respuesta": "otra vez"})
+    assert r.status_code == 409
+    assert "respondido" in r.json()["detail"]
+
+
+def test_responder_decision_refuses_when_the_file_changed_underneath(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    # the human edited the file in their own editor between the GET and the POST
+    p.write_text(p.read_text(encoding="utf-8").replace("cualquiera de las dos", "algo distinto"),
+                 encoding="utf-8")
+    r = client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    assert r.status_code == 409
+    assert "cambió" in r.json()["detail"]
+
+
+def test_responder_decision_requires_an_answer_or_acceptance(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    r = client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"]})
+    assert r.status_code == 400
+
+
+def test_responder_decision_cannot_accept_a_proposal_that_does_not_exist(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    r = client.post(f"/tickets/{tid}/decisiones",
+                     json={"ruta": ruta, "id": bloquea["id"], "aceptar_propuesta": True})
+    assert r.status_code == 400
+
+
+def test_responder_decision_refuses_while_a_run_is_active(client, monkeypatch, tmp_path):
+    import app as app_module
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    decidir = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "DECIDIR")
+    with app_module.db() as c:
+        c.execute("INSERT INTO runs(ticket_id, phase, status) VALUES(?, 'design', 'running')", (tid,))
+    r = client.post(f"/tickets/{tid}/decisiones",
+                     json={"ruta": ruta, "id": decidir["id"], "aceptar_propuesta": True})
+    assert r.status_code == 409 and "activa" in r.json()["detail"]
+
+
+def test_responder_decision_400_for_a_path_no_run_declared(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    r = client.post(f"/tickets/{tid}/decisiones",
+                     json={"ruta": "docs/tickets/otra.md", "id": "x", "respuesta": "y"})
+    assert r.status_code == 400
+
+
+def test_responder_decision_journals_it(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")
+    client.post(f"/tickets/{tid}/decisiones", json={"ruta": ruta, "id": bloquea["id"], "respuesta": "listo"})
+    journal = (tmp_path / "repo" / "docs" / "tickets" / "3359-journal.md").read_text(encoding="utf-8")
+    assert "· decision · ok · docs/tickets/3359-analysis.md" in journal
+    assert "BLOQUEA" in journal

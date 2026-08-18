@@ -1,5 +1,6 @@
 import asyncio
 import codecs
+import hashlib
 import json
 import os
 import re
@@ -1556,6 +1557,103 @@ def open_decisions(t: sqlite3.Row, rel: str) -> dict | None:
     return {"decidir": found.count("DECIDIR"), "bloquea": found.count("BLOQUEA")}
 
 
+# Matches the start of one item under "## Decisiones para ti" — checked or not, unlike
+# `DECISION_RE` above (which only cares about UNTICKED items, for the counter): the
+# answerable-decisions panel has to show already-answered items too, not just count
+# what's left.
+DECISION_ITEM_RE = re.compile(r"^- \[([ xX])\] \*\*(DECIDIR|BLOQUEA)\*\* — ", re.MULTILINE)
+
+# The proposal inside a DECIDIR item's body: "Propuesta: **<text>**", the shape
+# `ticket-comprehension/SKILL.md`'s own template writes. Not every item has one —
+# `BLOQUEA` never does — so a miss just means "no button to accept" upstream.
+PROPOSAL_RE = re.compile(r"Propuesta:\s*\*\*(.+?)\*\*", re.DOTALL)
+
+# The continuation indent the skill templates write under every item — the width of
+# "- [ ] " / "- [x] " (both 6 characters). `_decision_items` dedents by this; `_write_answer`
+# writes the new "**Respuesta:**" line at the same width, so it reads as one more
+# continuation line and not a foreign insertion.
+DECISION_INDENT = "      "
+
+
+def _decision_items(text: str) -> list[dict]:
+    """Every `DECIDIR`/`BLOQUEA` item under `## Decisiones para ti`, parsed from its
+    own exact slice of `text`.
+
+    An item's boundary is the NEXT item's start (or the end of the section/document),
+    not indentation-counting: the section's own prose (docs/tickets/3359-analysis.md,
+    read before writing this) wraps a single item across several physically-indented
+    lines, so "indented = same item" is already how items are told apart from what's
+    between them — there is no OTHER marker between two items besides a blank line,
+    which this boundary swallows for free.
+
+    Each item's `id` is `sha256(core)[:16]` where `core` is the item's exact raw text
+    (trailing blank lines stripped) — not just its first line. The task's own wording
+    allows a first-line hash, but several items in a real analysis start their question
+    the same way ("¿Qué pasa con..."), and this endpoint's whole job is telling one
+    item from a similar-looking other one without trusting a line number a human's
+    editor may have shifted between the GET and the POST. Hashing the full item also
+    means an edit ANYWHERE inside it — question, body, even whitespace — changes the
+    id, so `responder_decision` can detect "this exact item is gone" and refuse instead
+    of silently ticking a box next to text that isn't what the human read.
+    """
+    heading = re.search(r"^## Decisiones para ti\s*$", text, re.MULTILINE)
+    if not heading:
+        return []
+    section_start = heading.end()
+    next_heading = re.search(r"^## ", text[section_start:], re.MULTILINE)
+    section_end = section_start + next_heading.start() if next_heading else len(text)
+    section = text[section_start:section_end]
+
+    starts = list(DECISION_ITEM_RE.finditer(section))
+    items = []
+    for i, m in enumerate(starts):
+        item_start = m.start()
+        item_stop = starts[i + 1].start() if i + 1 < len(starts) else len(section)
+        raw = section[item_start:item_stop]
+        core = raw.rstrip("\n")
+        marker_end = m.end() - item_start
+        first_nl = core.find("\n")
+        first_line = core if first_nl < 0 else core[:first_nl]
+        pregunta = first_line[marker_end:].strip()
+        rest = "" if first_nl < 0 else core[first_nl + 1:]
+        cuerpo = "\n".join(
+            (ln[len(DECISION_INDENT):] if ln[:len(DECISION_INDENT)] == DECISION_INDENT else ln.lstrip())
+            for ln in rest.split("\n")
+        )
+        prop = PROPOSAL_RE.search(core)
+        propuesta = re.sub(r"\s+", " ", prop.group(1)).strip() if prop else None
+        items.append({
+            "id": hashlib.sha256(core.encode("utf-8")).hexdigest()[:16],
+            "tipo": m.group(2),
+            "pregunta": pregunta,
+            "cuerpo": cuerpo,
+            "propuesta": propuesta,
+            "respondido": m.group(1).lower() == "x",
+            # Internal-only: absolute offsets in the ORIGINAL `text`, for `_write_answer`
+            # to splice without touching a single byte outside the item's own core.
+            "_abs_start": section_start + item_start,
+            "_core_len": len(core),
+        })
+    return items
+
+
+def _write_answer(text: str, item: dict, answer: str) -> str:
+    """Ticks `item`'s checkbox and appends an indented `**Respuesta:**` line right
+    after its body — the convention documented in CLAUDE.md next to `DECIDIR`/`BLOQUEA`.
+    Every byte outside `item`'s own core is copied through unchanged: this is a
+    string-splice at `item`'s recorded offsets, never a rewrite of the whole document.
+    """
+    start, core_len = item["_abs_start"], item["_core_len"]
+    core = text[start:start + core_len]
+    new_core = "- [x]" + core[5:]   # "- [ ]" and "- [x]" are both 5 characters wide
+    lines = answer.splitlines() or [""]
+    answer_block = "\n".join(
+        f"{DECISION_INDENT}**Respuesta:** {ln}" if i == 0 else f"{DECISION_INDENT}{ln}"
+        for i, ln in enumerate(lines)
+    )
+    return text[:start] + new_core + "\n" + answer_block + text[start + core_len:]
+
+
 def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) -> list[dict]:
     """A phase's progress IS its most recent run. `runs` arrives ordered by id DESC."""
     out = []
@@ -2525,6 +2623,97 @@ def artifact(tid: int, ruta: str):
         cut -= 1
     text = (raw[:cut] if truncated else raw).decode("utf-8", "replace")
     return {"ruta": ruta, "texto": text, "bytes": size, "truncado": truncated}
+
+
+def _no_active_run(tid: int) -> bool:
+    """Same check `restore_run` makes before touching a declared file: a phase may be
+    reading or rewriting it, and a torn read (GET) or a lost write (POST) are both
+    worth refusing over."""
+    with db() as c:
+        return not c.execute(
+            "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued','running')", (tid,)
+        ).fetchone()
+
+
+@app.get("/tickets/{tid}/decisiones")
+def decisiones(tid: int, ruta: str):
+    """The `## Decisiones para ti` items of a declared deliverable, parsed so the panel
+    can show and answer them without anyone opening the file in an editor. Same door as
+    the artifact viewer (`declared_file_or_none`): a stamp that declared a traversal
+    must not become a second, laxer one just because this reads structure instead of
+    raw text."""
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    if not _no_active_run(tid):
+        raise HTTPException(409, "Este ticket tiene una corrida activa; consulta las decisiones cuando termine")
+    p = declared_file_or_none(t, ruta)
+    if not p:
+        raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise HTTPException(404, f"No se pudo leer {ruta}: {exc}")
+    puntos = [{k: v for k, v in it.items() if not k.startswith("_")} for it in _decision_items(text)]
+    return {"puntos": puntos}
+
+
+class DecisionAnswerIn(BaseModel):
+    ruta: str
+    id: str
+    # Mutually exclusive with `respuesta`, enforced below: accept the item's own
+    # proposal as written, or write the human's own answer. Not a third "neither"
+    # state — an item that isn't being answered isn't posted at all.
+    aceptar_propuesta: bool = False
+    respuesta: str | None = None
+
+
+@app.post("/tickets/{tid}/decisiones")
+def responder_decision(tid: int, body: DecisionAnswerIn):
+    """Ticks one `DECIDIR`/`BLOQUEA` item's box and writes the human's answer under it,
+    in place — the convention `CLAUDE.md` documents next to the markers, so the next
+    phase (which reads the whole document as prose) sees it like any other line the
+    skill itself would have written.
+
+    Locates the item by the id `GET /decisiones` handed out (a hash of its own exact
+    text, see `_decision_items`), never by position: if the human edited the file in
+    their own editor between the GET and the POST, the id won't be found and this
+    refuses instead of ticking whatever now happens to sit at the old offset."""
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    if not _no_active_run(tid):
+        raise HTTPException(409, "Este ticket tiene una corrida activa; responde cuando termine")
+    p = declared_file_or_none(t, body.ruta)
+    if not p:
+        raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
+    if not body.aceptar_propuesta and not (body.respuesta and body.respuesta.strip()):
+        raise HTTPException(400, "Escribe una respuesta o acepta la propuesta")
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise HTTPException(404, f"No se pudo leer {body.ruta}: {exc}")
+    item = next((it for it in _decision_items(text) if it["id"] == body.id), None)
+    if not item:
+        raise HTTPException(
+            409, "El archivo cambió desde que se cargaron las decisiones: vuelve a "
+                 "consultarlas e inténtalo de nuevo")
+    if item["respondido"]:
+        raise HTTPException(409, "Ese punto ya fue respondido")
+    if body.aceptar_propuesta:
+        if not item["propuesta"]:
+            raise HTTPException(400, "Este punto no trae una propuesta que aceptar")
+        answer = item["propuesta"]
+    else:
+        answer = body.respuesta.strip()
+    new_text = _write_answer(text, item, answer)
+    try:
+        p.write_text(new_text, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(409, f"No se pudo escribir {body.ruta}: {exc}")
+    append_journal(dict(t), "decision", "ok", body.ruta,
+                    extra=[f"{item['tipo']} respondida: {item['pregunta'][:80]}"])
+    return {"ruta": body.ruta, "id": body.id, "respondido": True, "respuesta": answer}
 
 
 # --- Serving the built UI, so a release is one process instead of two ------------
