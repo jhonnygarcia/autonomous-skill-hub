@@ -59,6 +59,14 @@ export type Phase = {
   continuaciones?: number
 }
 export type Artifact = { ruta: string; texto: string; bytes: number; truncado: boolean }
+// One `DECIDIR`/`BLOQUEA` item under a deliverable's `## Decisiones para ti`. `id` is a
+// hash of the item's own exact text (see `_decision_items` in app.py) — round-tripped
+// on `responderDecision` so the backend can tell "this exact item" from a look-alike,
+// and detect a human's own edit landing between the GET and the POST.
+export type Decision = {
+  id: string; tipo: "DECIDIR" | "BLOQUEA"; pregunta: string; cuerpo: string
+  propuesta: string | null; respondido: boolean
+}
 export type TicketDetail = { ticket: Ticket; fases: Phase[]; runs: Run[]; log_tail: string }
 // The runner runs one at a time across ALL projects: this is what lets us explain
 // why something can't be launched, instead of failing with a silent 409.
@@ -172,4 +180,14 @@ export const api = {
       body: JSON.stringify({ instructions: instructions || null, phase, resume }),
     }).then(r => json<Run>(r)),
   remove: (id: number) => fetch(`/api/tickets/${id}`, { method: "DELETE" }).then(r => json<void>(r)),
+  decisiones: (id: number, ruta: string) =>
+    fetch(`/api/tickets/${id}/decisiones?ruta=${encodeURIComponent(ruta)}`)
+      .then(r => json<{ puntos: Decision[] }>(r)),
+  /** Either `aceptar_propuesta: true` (the item's own proposal, verbatim) or
+   *  `respuesta` (the human's own text) — never both, the backend 400s if neither. */
+  responderDecision: (id: number, body: { ruta: string; id: string; aceptar_propuesta?: boolean; respuesta?: string }) =>
+    fetch(`/api/tickets/${id}/decisiones`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(r => json<{ ruta: string; id: string; respondido: boolean; respuesta: string }>(r)),
 }

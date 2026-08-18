@@ -2,6 +2,8 @@ import { useRef, useState } from "react"
 import { api, type ActiveRun, type Artifact, type Phase, type Run } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Decisions } from "@/Decisions"
+import { Markdown } from "@/Markdown"
 import { canRunPhase, durationText, formatSize, formatTime, PHASE_LABEL, phaseColor, phaseIcon } from "@/status"
 
 // Shared focus/hover style for the viewer's native <button>s: shadcn buttons already
@@ -37,6 +39,10 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
   const [viewer, setViewer] = useState<Artifact | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<{ ruta: string; msg: string } | null>(null)
+  // Rendered by default — raw stays one click away, never hidden. Shared across every
+  // chip like `instructions`: switching files keeps whatever view you were in, and a
+  // fresh viewer always opens rendered, the more readable default.
+  const [rendered, setRendered] = useState(true)
   // Each click on a chip bumps the sequence; a response that lands when it's no longer
   // the last one requested is discarded entirely (it neither overwrites the viewer nor
   // clears the `loading` of the click still in flight). Without this, a slow click on A
@@ -182,24 +188,14 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                 </div>
               )}
 
-              {/* Without this counter nobody reads the `Decisiones para ti` sections:
-                  finding them means opening an 8 KB document and hunting. `bloquea` is
-                  destructive-coloured because it stops the next phase; `decidir` only
-                  means the agent will proceed with its own proposal. */}
-              {f.decisiones && (
-                <p className="pb-2 text-xs">
-                  {!!f.decisiones.decidir && (
-                    <span className="text-amber-600 dark:text-amber-500">
-                      {f.decisiones.decidir} decisión{f.decisiones.decidir > 1 && "es"} para ti
-                    </span>
-                  )}
-                  {!!f.decisiones.decidir && !!f.decisiones.bloquea && " · "}
-                  {!!f.decisiones.bloquea && (
-                    <span className="text-destructive">
-                      {f.decisiones.bloquea} bloquea{f.decisiones.bloquea > 1 && "n"} la fase siguiente
-                    </span>
-                  )}
-                </p>
+              {/* Answerable in place — without this nobody reads the `Decisiones para
+                  ti` sections: finding them meant opening an 8 KB document and
+                  hunting, answering them meant editing it by hand. `f.decisiones` only
+                  ever arrives alongside a single-FILE footprint (`open_decisions` in
+                  app.py resolves through `declared_file_or_none`, which rejects a
+                  directory), so `h.ruta` is always the right `ruta` here. */}
+              {f.decisiones && h && (
+                <Decisions ticketId={ticketId} ruta={h.ruta} counts={f.decisiones} />
               )}
 
               {f.estado === "error" && f.motivo && (
@@ -348,15 +344,28 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                         · truncado a 512 KB, se muestra solo el inicio
                       </span>
                     )}
+                    {/* Toggle, never a replacement: the rendered view is a convenience
+                        over the same text, and nothing is ever hidden behind it. */}
+                    <button onClick={() => setRendered(v => !v)}
+                            aria-pressed={!rendered}
+                            className={`${CHIP} ml-auto border-border text-muted-foreground`}>
+                      {rendered ? "ver crudo" : "ver renderizado"}
+                    </button>
                     <button onClick={() => setViewer(null)}
-                            className={`${CHIP} ml-auto border-transparent text-muted-foreground`}>
+                            className={`${CHIP} border-transparent text-muted-foreground`}>
                       cerrar
                     </button>
                   </div>
-                  <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words
-                                  px-3 py-2 font-mono text-xs leading-relaxed text-foreground">
-                    {viewer.texto}
-                  </pre>
+                  {rendered ? (
+                    <div className="max-h-[32rem] overflow-auto px-3 py-2">
+                      <Markdown text={viewer.texto} />
+                    </div>
+                  ) : (
+                    <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words
+                                    px-3 py-2 font-mono text-xs leading-relaxed text-foreground">
+                      {viewer.texto}
+                    </pre>
+                  )}
                 </div>
               )}
             </div>
