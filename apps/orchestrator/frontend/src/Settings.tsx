@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Archive } from "@/Archive"
+import { Language } from "@/Language"
 import { Models } from "@/Models"
 
 /**
@@ -32,6 +33,11 @@ export function Section({ mark, title, aside, children }: {
 export function Settings() {
   return (
     <div className="space-y-6">
+      <Section mark="+" title="Idioma de los entregables"
+               aside="global · aplica a la siguiente corrida">
+        <Language />
+      </Section>
+
       <Section mark="+" title="Cómo corre cada fase"
                aside="global · aplica a la siguiente corrida">
         <Models />

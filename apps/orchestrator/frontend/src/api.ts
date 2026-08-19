@@ -162,6 +162,13 @@ export const api = {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dir }),
     }).then(r => json<{ dir: string }>(r)),
+  idioma: () => fetch("/api/idioma").then(r => json<{ idioma: string }>(r)),
+  saveIdioma: (idioma: string) =>
+    fetch("/api/idioma", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idioma }),
+    }).then(r => json<{ idioma: string }>(r)),
   /** Puts a run's declared deliverable back into the repo from its snapshot. Files
    *  need `overwrite` when the destination exists; a tree is never overwritten. */
   restore: (id: number, runId: number, overwrite = false) =>
