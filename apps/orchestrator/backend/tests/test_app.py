@@ -3638,6 +3638,27 @@ def test_preparar_still_never_overwrites_a_tuned_file(client, tmp_path):
     assert cfg_path.read_text(encoding="utf-8") == original
 
 
+def test_preparar_never_raises_even_on_locked_db(client, monkeypatch, tmp_path):
+    """The contract is never-raises, not just on OSError. A locked or unreadable DB
+    raises sqlite3.OperationalError (which is not a subclass of OSError) when `lang()`
+    reads the knob. Without catching sqlite3.Error, this would escape the function and
+    blow up the endpoint. The precedent is `entrada_rels`/`archive_run` in CLAUDE.md —
+    a sqlite3.OperationalError used to escape there too, stranding runs marked 'running'
+    forever. Same guard applies here."""
+    import sqlite3
+    import app
+
+    tid = _ticket_in_unconfigured_repo(client, tmp_path)
+    monkeypatch.setattr(app, "lang", lambda: (_ for _ in ()).throw(
+        sqlite3.OperationalError("database is locked")))
+
+    # Should not raise; should return 409 with the error, not a 500 traceback
+    r = client.post(f"/tickets/{tid}/preparar")
+    assert r.status_code == 409
+    body = r.json()
+    assert "database is locked" in body["detail"]
+
+
 def test_preflight_separates_blockers_from_warnings(client, tmp_path):
     """`config` blocks only the phases that read the work item and carries the button;
     a repo that isn't git is an aviso, because `check_clean` already stops `implement`

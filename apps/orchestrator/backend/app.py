@@ -1373,7 +1373,10 @@ def ensure_ticket_agent_config(ticket: dict) -> str:
                       indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8")
         return "created"
-    except OSError as exc:
+    except (OSError, sqlite3.Error) as exc:
+        # `lang()` reads the language knob from SQLite, so a locked or unreadable DB
+        # is a failure mode just like a full disk or ACL denial. Never raises, not just
+        # on OSError; see the docstring and `entrada_rels` in CLAUDE.md.
         return f"error: {exc}"
 
 
