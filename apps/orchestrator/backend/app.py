@@ -1732,10 +1732,40 @@ def read_title(t: sqlite3.Row, rel: str) -> str | None:
     return None
 
 
+# The deliverable-facing markers, per language. The KEYS are the canonical names —
+# the Spanish ones — because that is what the API's JSON, `runs`, and the frontend
+# speak; the VALUES are what travels inside the document, which follows the knob.
+# `HUELLA` and `SONDEAR` are deliberately absent: they are runner-facing contract
+# literals and never translate (see `STAMP_RE`).
+MARKERS = {
+    "es": {"DECIDIR": "DECIDIR", "BLOQUEA": "BLOQUEA",
+           "decisiones": "Decisiones para ti", "propuesta": "Propuesta",
+           "respuesta": "Respuesta", "corridas": "Corridas", "hallazgos": "Hallazgos"},
+    "en": {"DECIDIR": "DECIDE", "BLOQUEA": "BLOCKS",
+           "decisiones": "Decisions for you", "propuesta": "Proposal",
+           "respuesta": "Answer", "corridas": "Runs", "hallazgos": "Findings"},
+}
+# The marker as it appears in a document -> the canonical name. Everything that leaves
+# this module through the API or into `runs` goes through here first: `api.ts` types
+# `tipo` as the Spanish pair and `Decisions.tsx` compares against `"BLOQUEA"`, so a
+# `BLOCKS` arriving there fails no comparison — it silently paints a blocking item in
+# the warning colour instead of the destructive one.
+CANON_TIPO = {"DECIDIR": "DECIDIR", "DECIDE": "DECIDIR",
+              "BLOQUEA": "BLOQUEA", "BLOCKS": "BLOQUEA"}
+_ANY_TIPO = "|".join(CANON_TIPO)
+
+
+def marker_lang(marker: str) -> str:
+    """Which language a document is in, judged by one of its own markers. Used where
+    something is written INTO an existing file: an analysis written in Spanish keeps
+    being answered in Spanish, whatever the knob says today."""
+    return "en" if marker in ("DECIDE", "BLOCKS") else "es"
+
+
 # The markers a deliverable closes with, unticked. `- [x]` is an answered one and
-# doesn't count. The keywords are contract literals, matched byte for byte, and they
-# stay in Spanish like `HUELLA`.
-DECISION_RE = re.compile(r"^\s*- \[ \]\s*\*\*(DECIDIR|BLOQUEA)\*\*", re.MULTILINE)
+# doesn't count. The keywords are contract literals, matched byte for byte, in either
+# language (see `MARKERS`/`CANON_TIPO` above).
+DECISION_RE = re.compile(r"^\s*- \[ \]\s*\*\*(" + _ANY_TIPO + r")\*\*", re.MULTILINE)
 
 
 def open_decisions(t: sqlite3.Row, rel: str) -> dict | None:
@@ -1756,19 +1786,27 @@ def open_decisions(t: sqlite3.Row, rel: str) -> dict | None:
     found = DECISION_RE.findall(text)
     if not found:
         return None
-    return {"decidir": found.count("DECIDIR"), "bloquea": found.count("BLOQUEA")}
+    canon = [CANON_TIPO[f] for f in found]
+    return {"decidir": canon.count("DECIDIR"), "bloquea": canon.count("BLOQUEA")}
 
 
 # Matches the start of one item under "## Decisiones para ti" — checked or not, unlike
 # `DECISION_RE` above (which only cares about UNTICKED items, for the counter): the
 # answerable-decisions panel has to show already-answered items too, not just count
 # what's left.
-DECISION_ITEM_RE = re.compile(r"^- \[([ xX])\] \*\*(DECIDIR|BLOQUEA)\*\* — ", re.MULTILINE)
+DECISION_ITEM_RE = re.compile(r"^- \[([ xX])\] \*\*(" + _ANY_TIPO + r")\*\* — ",
+                              re.MULTILINE)
 
-# The proposal inside a DECIDIR item's body: "Propuesta: **<text>**", the shape
-# `ticket-comprehension/SKILL.md`'s own template writes. Not every item has one —
-# `BLOQUEA` never does — so a miss just means "no button to accept" upstream.
-PROPOSAL_RE = re.compile(r"Propuesta:\s*\*\*(.+?)\*\*", re.DOTALL)
+# The proposal inside a DECIDIR item's body: "Propuesta: **<text>**" (or "Proposal:"
+# in an English document), the shape `ticket-comprehension/SKILL.md`'s own template
+# writes. Not every item has one — `BLOQUEA` never does — so a miss just means "no
+# button to accept" upstream.
+PROPOSAL_RE = re.compile(r"(?:Propuesta|Proposal):\s*\*\*(.+?)\*\*", re.DOTALL)
+
+# New, replacing the inline `re.search` at `_decision_items`.
+DECISION_HEADING_RE = re.compile(
+    r"^## (?:" + "|".join(re.escape(MARKERS[c]["decisiones"]) for c in LANGS) + r")\s*$",
+    re.MULTILINE)
 
 # The continuation indent the skill templates write under every item — the width of
 # "- [ ] " / "- [x] " (both 6 characters). `_decision_items` dedents by this; `_write_answer`
@@ -1804,7 +1842,7 @@ def _decision_items(text: str) -> list[dict]:
     file verbatim, so a `\r\n` document parsed here has to still look like a `\r\n`
     document, or the id computed on `GET` would never match the id recomputed on `POST`.
     """
-    heading = re.search(r"^## Decisiones para ti\s*$", text, re.MULTILINE)
+    heading = DECISION_HEADING_RE.search(text)
     if not heading:
         return []
     section_start = heading.end()
@@ -1849,7 +1887,7 @@ def _decision_items(text: str) -> list[dict]:
         propuesta = re.sub(r"\s+", " ", prop.group(1)).strip() if prop else None
         items.append({
             "id": hashlib.sha256(core.encode("utf-8")).hexdigest()[:16],
-            "tipo": m.group(2),
+            "tipo": CANON_TIPO[m.group(2)],
             "pregunta": pregunta,
             "cuerpo": cuerpo,
             "propuesta": propuesta,
@@ -1858,6 +1896,10 @@ def _decision_items(text: str) -> list[dict]:
             # to splice without touching a single byte outside the item's own core.
             "_abs_start": section_start + item_start,
             "_core_len": len(core),
+            # Internal-only, like the two offsets above: the marker AS WRITTEN, so
+            # `_write_answer` can answer in the document's own language instead of
+            # the knob's.
+            "_marker": m.group(2),
         })
     return items
 

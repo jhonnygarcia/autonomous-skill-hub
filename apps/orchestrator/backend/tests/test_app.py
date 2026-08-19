@@ -4010,6 +4010,48 @@ def test_decisiones_parses_all_six_real_items_with_full_questions(client, monkey
     assert len({x["id"] for x in puntos}) == 6   # all distinct
 
 
+# The same six real items as REAL_3359_DECISIONS_DOC, in English. Kept as a separate
+# constant rather than a translation helper: the point of the fixture is to be a real
+# document, and a document produced by a function is a shape we imagined.
+REAL_3359_DECISIONS_DOC_EN = (
+    "# Analysis of ticket 3359\n\n"
+    "## Decisions for you\n\n"
+    "- [ ] **BLOCKS** — Does this ticket include closing the V2 parity gap, or\n"
+    "      does it assume V2 is already at parity?\n"
+    "      No defensible default exists: either assumption breaks something.\n\n"
+    "- [ ] **DECIDE** — What happens to the URLs?\n"
+    "      Proposal: **repoint the legacy routes and delete only the implementation**\n"
+    "      If you don't answer, I proceed with the proposal.\n"
+)
+
+
+def test_decisiones_parses_an_english_document(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path,
+                                       doc=REAL_3359_DECISIONS_DOC_EN)
+    bloquea, decidir = _puntos(client, tid, ruta)
+    assert bloquea["pregunta"].endswith("already at parity?")
+    assert decidir["propuesta"] == "repoint the legacy routes and delete only the implementation"
+
+
+def test_the_api_always_speaks_the_spanish_marker(client, monkeypatch, tmp_path):
+    """`Decisions.tsx` compares `p.tipo === "BLOQUEA"` and `api.ts` types it as the
+    Spanish pair. A `BLOCKS` reaching the frontend fails NO comparison: it just paints
+    the gravest signal in the mildest colour. The JSON key is a contract literal."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path,
+                                       doc=REAL_3359_DECISIONS_DOC_EN)
+    bloquea, decidir = _puntos(client, tid, ruta)
+    assert bloquea["tipo"] == "BLOQUEA"
+    assert decidir["tipo"] == "DECIDIR"
+
+
+def test_the_open_decisions_counter_counts_english_markers(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path,
+                                       doc=REAL_3359_DECISIONS_DOC_EN)
+    fases = client.get(f"/tickets/{tid}").json()["fases"]
+    fase = next(f for f in fases if f["fase"] == "analyze")
+    assert fase["decisiones"] == {"decidir": 1, "bloquea": 1}
+
+
 def test_decisiones_empty_list_when_the_file_has_no_decisions_section(client, monkeypatch, tmp_path):
     tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path, doc="# Ticket\nNada aquí.\n")
     r = client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta})
