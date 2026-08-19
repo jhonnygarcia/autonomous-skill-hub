@@ -4172,3 +4172,19 @@ def test_responder_decision_journals_it(client, monkeypatch, tmp_path):
     journal = (tmp_path / "repo" / "docs" / "tickets" / "3359-journal.md").read_text(encoding="utf-8")
     assert "· decision · ok · docs/tickets/3359-analysis.md" in journal
     assert "BLOQUEA" in journal
+
+
+def test_idioma_defaults_to_spanish(client):
+    assert client.get("/idioma").json() == {"idioma": "es"}
+
+
+def test_idioma_can_be_switched_to_english(client):
+    assert client.put("/idioma", json={"idioma": "en"}).json() == {"idioma": "en"}
+    assert client.get("/idioma").json() == {"idioma": "en"}
+
+
+def test_idioma_rejects_anything_outside_the_two(client):
+    for bad in ["fr", "EN", "", "es-AR"]:
+        assert client.put("/idioma", json={"idioma": bad}).status_code == 400
+    # and the stored value is untouched by a rejected write
+    assert client.get("/idioma").json() == {"idioma": "es"}

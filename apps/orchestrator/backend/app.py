@@ -254,6 +254,23 @@ def set_setting(key: str, value: str) -> None:
                   "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
 
+# The two languages the deliverables can be written in. There is no third "auto"
+# value: guessing the language of a technical `.md` — full of English identifiers —
+# fails exactly where it would matter.
+LANGS = ("es", "en")
+
+
+def lang() -> str:
+    """The deliverable language, read at the moment it's needed (like `setting` and
+    `model_for`), never cached at startup: on Windows the backend isn't hot-reloaded.
+
+    Anything unrecognized — including the empty string every DB had before this row
+    existed — reads as `es`, which is what those installations were already producing.
+    """
+    v = setting("idioma")
+    return v if v in LANGS else "es"
+
+
 def repos_text(phase: str, extras: list[dict], noun: str, primary: str = "") -> str:
     """The prompt block that introduces the ticket's extra repos to the agent.
 
@@ -1011,6 +1028,26 @@ def put_archive(body: ArchiveIn):
             raise HTTPException(400, f"No se puede escribir en: {d}")
     set_setting("archive_dir", d)
     return {"dir": d}
+
+
+class IdiomaIn(BaseModel):
+    idioma: str
+
+
+@app.get("/idioma")
+def get_idioma():
+    return {"idioma": lang()}
+
+
+@app.put("/idioma")
+def put_idioma(body: IdiomaIn):
+    """Governs what the agent writes and what the runner writes into a `.md` of the
+    target repo — never the API's own JSON keys, which stay Spanish contract literals
+    (see `CANON_TIPO`)."""
+    if body.idioma not in LANGS:
+        raise HTTPException(400, f"Idioma no reconocido: {body.idioma}")
+    set_setting("idioma", body.idioma)
+    return {"idioma": body.idioma}
 
 
 class PhaseConfig(BaseModel):
