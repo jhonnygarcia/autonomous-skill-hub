@@ -81,8 +81,9 @@ created if missing), and adds an optional PAT of its own, saved per project in i
      Any other value is treated as `supervised`.
    - `subagent_model` (optional): which model Phase 2b uses to launch the
      subagents for each task. See "Model and effort".
-
-     | `language` | `"es"` \| `"en"` | Idioma de los entregables. Ausente o no reconocido → `"es"`. El orquestador lo escribe al crear el archivo; una directiva en el prompt gana sobre esta clave. |
+   - `language` (optional): `"es"` or `"en"`, the language a deliverable is
+     written in. Absent or unrecognized falls back to `"es"`. A directive in the
+     prompt (the orchestrator sends one) wins over this key.
 5. Restart Claude Code so the MCP starts up with the configured organization.
 
 ## Usage

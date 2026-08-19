@@ -4402,3 +4402,22 @@ def test_appending_follows_the_journal_not_the_knob(client, monkeypatch, tmp_pat
     assert text.count("## Hallazgos") == 1
     # both run lines landed BEFORE the findings heading, which is the whole point
     assert text.index("analyze") < text.index("## Hallazgos")
+
+
+def test_flipping_the_knob_mid_ticket_keeps_the_line_wholly_in_the_journals_language(
+        client, monkeypatch, tmp_path):
+    """Finding 1: `append_journal`'s separators (`rama`/`resume`/`reserva`) were
+    already resolved from the journal's own language, but every CALLER built its
+    `detail`/`note`/`extra` strings with the knob. A journal created in Spanish, with
+    the knob later flipped to English, used to append a line whose separators stayed
+    Spanish while its content (here, the no-stamp reason) came out in English —
+    mixing both languages inside one line. The whole line must stay Spanish."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/66-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 66, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})  # creates the journal in Spanish
+    client.put("/idioma", json={"idioma": "en"})
+    _use_fake_claude(monkeypatch)  # no FAKE_HUELLA -> "nada" / no_stamp_reason()
+    client.post(f"/tickets/{tid}/run", json={})
+    text = (tmp_path / "repo" / "docs" / "tickets" / "66-journal.md").read_text(encoding="utf-8")
+    assert "no declaró huella" in text
+    assert "declared no stamp" not in text

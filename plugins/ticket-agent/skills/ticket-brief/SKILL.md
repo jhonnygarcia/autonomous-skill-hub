@@ -97,7 +97,7 @@ this structure. Presenting it in chat without writing the file is a task failure
 # Brief of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Collected:** <date> by ticket-agent v0.12.0
+**Collected:** <date> by ticket-agent v0.12.1
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)

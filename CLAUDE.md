@@ -773,9 +773,18 @@ fake that shared Claude's shape would pass while the runner mixed the two up.
   `STAMP_RE` before touching any of them.
   **Deliverable-facing** strings (the journal's own vocabulary, the reasons stored
   in `runs.artifact_path`, the archive notes) end up inside a `.md` of the TARGET
-  repo, which is neither the browser nor a prompt. They follow the language knob
-  (`settings.idioma`, `lang()`), and — this is the part that isn't obvious — when
-  something is appended to a file that ALREADY exists, the language is taken from
-  the file (`journal_lang`, `marker_lang`), never from the knob: a journal created
-  in Spanish keeps growing in Spanish, and an analysis written in Spanish is
-  answered in Spanish, whatever the knob says today.
+  repo, which is neither the browser nor a prompt. The knob (`settings.idioma`,
+  `lang()`) decides the language ONLY when the file is being CREATED — and once it
+  exists, the language is taken from the file, never from the knob: a journal
+  created in Spanish keeps growing in Spanish, and an analysis written in Spanish is
+  answered in Spanish, whatever the knob says today. `journal_lang`/`marker_lang`
+  read a file's own language from headings/markers it already carries;
+  `journal_code(ticket)` gives CALLERS of `append_journal`/`journal_note` that same
+  answer BEFORE the string reaches those functions — it reads the ticket's journal
+  itself (falling back to the knob when it doesn't exist yet) so the `detail`/
+  `note`/`extra` text a caller builds (`no_stamp_reason`, `no_brief_reason`,
+  `no_surveys_reason`, the archive notes, the fan-out's caveat, a restore's or a
+  decision's own note) agrees with the separators (`rama`, `resume`, `reserva`)
+  that `append_journal` itself resolves via `journal_lang`. Without this a knob
+  flipped mid-ticket used to produce a line whose separators were the file's
+  language and whose content was the knob's — the same file holding both.

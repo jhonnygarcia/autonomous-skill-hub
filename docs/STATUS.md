@@ -1136,9 +1136,43 @@ detalle en español, mecánico, un `MSG[clave][idioma]`). Ninguna de las dos
 cambia comportamiento; ambas se dejaron fuera de este plan porque su tamaño no
 es el de una revisión más de las ocho ya hechas.
 
-**Verificación:** 290 tests backend (288 + 2 nuevos de la tarea 8: un journal
-fresco sigue la perilla al crearse, y uno ya creado en español sigue creciendo
-en español aunque la perilla cambie a mitad de ticket).
+**Verificación:** 291 tests backend (288 + 3 nuevos de la tarea 8: un journal
+fresco sigue la perilla al crearse, uno ya creado en español sigue creciendo
+en español aunque la perilla cambie a mitad de ticket, y `JOURNAL_CLAIM`
+nombra ambos deletreos de cada heading).
+
+**Ola de fixes sobre la revisión de rama completa (2026-08-19).** El hallazgo
+más grande: `append_journal` ya resolvía sus propios separadores (`rama`,
+`resume`, `reserva`) con `journal_lang(text)`, pero cada CALLER seguía
+construyendo su `detail`/`note`/`extra` con la perilla — `no_stamp_reason`,
+`no_brief_reason`, `no_surveys_reason`, las notas de archivo de
+`copy_into`/`archive_run`, el `desde_run` del restore, el `respondida` de las
+decisiones y el texto de `journal_note`. Con la perilla en `en` sobre un
+ticket cuyo journal ya existía en español, la línea salía mezclada: `2026-08-19
+· analyze · nada · the run declared no stamp · rama ticket-agent/63`. Se
+agregó `journal_code(ticket)` — la misma respuesta que dará `journal_lang`,
+pero calculada ANTES de que el caller arme su texto — y se hizo pasar por ahí
+cada `w(...)` que termina en el journal, incluidas las tres funciones de razón
+(calculadas una sola vez y reusadas para `set_run` Y `append_journal`, así las
+dos nunca discrepan sobre la misma corrida), el `HUELLA` del fan-out
+(`N/M sondeados, falló ...`, ahora `w("sondeados", code, ...)`), la razón de
+`prepare_repos` (`w("no_se_pudo_preparar", code, ...)`), el prefijo
+`omitido —`/`skipped —` del árbol archivado (antes hardcodeado en español), y
+la línea de journal de una decisión respondida (que además pasó a usar
+`item["_marker"]` en vez de `item["tipo"]`, para no journalizar siempre el
+marcador canónico español en un documento inglés). `legacy_no_stamp_reason()`
+dejó de concatenar un prefijo español con el resultado de `no_stamp_reason()`
+(que sigue la perilla) — la frase completa quedó inlineada en español, porque
+esas cinco corridas son anteriores a la perilla misma. CLAUDE.md's fourth
+category ("deliverable-facing") se reescribió para nombrar `journal_code`
+junto a `journal_lang`/`marker_lang` y describir con precisión que TODO el
+camino de append ahora resuelve el idioma del archivo, nunca de la perilla.
+También: el bullet `language` de `.claude/ticket-agent.json` en el README del
+plugin, que era una fila de tabla markdown en español suelta dentro de una
+lista de bullets — se reescribió en inglés con la forma de `subagent_model`
+(bump a plugin v0.12.1, con sus dos stamps). Test nuevo:
+`test_flipping_the_knob_mid_ticket_keeps_the_line_wholly_in_the_journals_language`
+— **292 tests backend**, `claude plugin validate .` en verde.
 
 ## Immediate pending items
 
