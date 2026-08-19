@@ -4360,3 +4360,31 @@ def test_the_resume_prompt_carries_the_current_language(client, monkeypatch):
     cap = _spy_argv(monkeypatch)
     client.post(f"/tickets/{tid}/run", json={"resume": True})
     assert "in English" in _prompt_from(cap)
+
+
+def test_a_fresh_journal_follows_the_knob(client, monkeypatch, tmp_path):
+    """The journal is `.md` content inside the target repo — deliverable-facing, not
+    UI-facing — so a fresh one is written in whatever the knob says at creation time."""
+    client.put("/idioma", json={"idioma": "en"})
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/63-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 63, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    text = (tmp_path / "repo" / "docs" / "tickets" / "63-journal.md").read_text(encoding="utf-8")
+    assert "## Runs" in text and "## Findings" in text
+    assert "## Corridas" not in text
+
+
+def test_appending_follows_the_journal_not_the_knob(client, monkeypatch, tmp_path):
+    """A journal created in Spanish keeps growing in Spanish. Otherwise a knob flipped
+    mid-ticket leaves a file with `## Corridas` AND `## Findings`, and the run lines
+    start landing at the end of the file instead of inside the runs section."""
+    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/64-analysis.md")
+    tid = client.post("/tickets", json={"ado_id": 64, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})          # creates it in Spanish
+    client.put("/idioma", json={"idioma": "en"})
+    client.post(f"/tickets/{tid}/run", json={})          # second line, still Spanish
+    text = (tmp_path / "repo" / "docs" / "tickets" / "64-journal.md").read_text(encoding="utf-8")
+    assert "## Findings" not in text
+    assert text.count("## Hallazgos") == 1
+    # both run lines landed BEFORE the findings heading, which is the whole point
+    assert text.index("analyze") < text.index("## Hallazgos")

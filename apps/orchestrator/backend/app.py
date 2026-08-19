@@ -436,10 +436,16 @@ LEGACY_STATES = {"validado": "ok", "sin-validar": "parcial", "no-escrito": "nada
 # ask for in their closing rule.
 RESERVE_SEP = " · "
 
-NO_STAMP_REASON = "la corrida no declaró huella"
+def no_stamp_reason() -> str:
+    return w("sin_huella")
+
+
 # The 5 historical runs from before this contract came out with status=success (the
 # CLI exited 0) and no stamp: saying "failed" there would be lying about what happened.
-LEGACY_NO_STAMP_REASON = "corrida anterior a este contrato: terminó bien, pero " + NO_STAMP_REASON
+# The prefix stays Spanish-only on purpose: these rows predate the language knob itself,
+# so there is no "current language" they were ever meant to honor.
+def legacy_no_stamp_reason() -> str:
+    return "corrida anterior a este contrato: terminó bien, pero " + no_stamp_reason()
 
 
 def split_reserve(state: str, rest: str) -> tuple[str, str | None]:
@@ -649,8 +655,8 @@ CONSOLIDATE_PROMPT = (
     "{missing}"
     "The mounted repos are readable if you need to check something a survey asserts, "
     "but the surveys are the interface: don't redo them.")
-NO_SURVEYS_REASON = (
-    "no hay surveys que consolidar; corre primero la fase «survey»")
+def no_surveys_reason() -> str:
+    return w("sin_surveys")
 
 
 def last_survey_dir(ticket_id: int) -> str | None:
@@ -703,10 +709,25 @@ REQUEST_PROMPT = (
     "must not be searched for. The whole request is in `{path}`, written by the human "
     "who asked for it. Read it; it is the source, and the analysis cites it like any "
     "other document in the repo.")
-NO_BRIEF_REASON = (
-    "no existe el brief de la fase anterior; corre primero la fase «brief»")
+def no_brief_reason() -> str:
+    return w("sin_brief")
+
+
 JOURNAL_REL = "docs/tickets/{ado_id}-journal.md"
-JOURNAL_HEADER = "# Journal — {ado_id}\n\n## Corridas\n\n## Hallazgos\n"
+def journal_header(ado_id, code: str) -> str:
+    m = MARKERS[code]
+    return f"# Journal — {ado_id}\n\n## {m['corridas']}\n\n## {m['hallazgos']}\n"
+
+
+def journal_lang(text: str) -> str:
+    """A journal's own language, judged by the headings it already carries — never by
+    the knob. A file created in Spanish keeps growing in Spanish: otherwise a knob
+    flipped mid-ticket leaves `## Corridas` next to `## Findings`, and every later run
+    line lands at the end of the file instead of inside the runs section."""
+    for code in LANGS:
+        if f"## {MARKERS[code]['hallazgos']}" in text:
+            return code
+    return lang()
 # Prompt-facing. The skills know how to write their own run line — that is what makes
 # the journal exist in plugin-only sessions. Orchestrated, this phrase claims the run
 # line for the runner, whose line is richer (duration, branch, session); otherwise
@@ -1287,24 +1308,25 @@ def append_journal(ticket: dict, phase: str, state: str, detail: str,
     p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
     try:
         text = read_text_preserving_newlines(p) if p.exists() else \
-            JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
+            journal_header(ticket["ado_id"], lang())
+        code = journal_lang(text)
         eol = _dominant_eol(text)
         mins, secs = divmod(duration_s or 0, 60)
         line = (f"{now()[:10]} · {phase} · {state} · {detail}"
                 + (f" · {mins}m{secs:02d}s" if duration_s is not None else "")
-                + (f" · rama {branch}" if branch else "")
-                + (f" · ← resume de {resumed_from}" if resumed_from else "")
+                + (f" · {w('rama', code)} {branch}" if branch else "")
+                + (f" · {w('resume', code)} {resumed_from}" if resumed_from else "")
                 + "\n"
-                + (f"   · reserva: {note}\n" if note else "")
+                + (f"   · {w('reserva', code)}: {note}\n" if note else "")
                 + "".join(f"   · {x}\n" for x in (extra or [])))
         if eol != "\n":
             line = line.replace("\n", eol)
-        mark = "## Hallazgos"
+        mark = f"## {MARKERS[code]['hallazgos']}"
         i = text.find(mark)
         text = text + line if i < 0 else text[:i] + line + text[i:]
         p.parent.mkdir(parents=True, exist_ok=True)
         write_text_preserving_newlines(p, text)
-    except OSError:
+    except (OSError, sqlite3.Error):
         pass  # ponytail: a record that can't be written is a lost line, not a lost run
 
 
@@ -1321,15 +1343,16 @@ def journal_note(ticket: dict, text: str) -> None:
     p = Path(ticket["repo_path"]) / JOURNAL_REL.format(ado_id=ticket["ado_id"])
     try:
         body = read_text_preserving_newlines(p) if p.exists() else \
-            JOURNAL_HEADER.format(ado_id=ticket["ado_id"])
+            journal_header(ticket["ado_id"], lang())
         line = f"   · {text}\n"
         if _dominant_eol(body) != "\n":
             line = line.replace("\n", "\r\n")
-        i = body.find("## Hallazgos")
+        mark = f"## {MARKERS[journal_lang(body)]['hallazgos']}"
+        i = body.find(mark)
         body = body + line if i < 0 else body[:i] + line + body[i:]
         p.parent.mkdir(parents=True, exist_ok=True)
         write_text_preserving_newlines(p, body)
-    except OSError:
+    except (OSError, sqlite3.Error):
         pass  # ponytail: same policy as append_journal — a lost note, not a lost run
 
 
@@ -1526,7 +1549,7 @@ def copy_into(repo: Path, rel: str, dest: Path) -> tuple[int, str | None]:
             n += 1
             size += x.stat().st_size
             if n > ARCHIVE_TREE_MAX_FILES:
-                over = f"más de {ARCHIVE_TREE_MAX_FILES} archivos"
+                over = w("mas_de", n=ARCHIVE_TREE_MAX_FILES)
                 break
             if size > ARCHIVE_TREE_MAX_BYTES:
                 over = f"más de {ARCHIVE_TREE_MAX_BYTES // (1024 * 1024)} MB"
@@ -1608,7 +1631,7 @@ def archive_run(ticket: dict, run_id: int, phase: str, kind: str, rels: list[str
         for rel in rels:
             _, skipped = copy_into_any(roots or [Path(ticket["repo_path"])], rel, folder / kind)
             if skipped:
-                notes.append(f"archivo: {skipped}")
+                notes.append(f"{w('archivo')}: {skipped}")
         write_run_meta(folder, ticket, run_id)
         set_run(run_id, archive_path=str(folder))
     except Exception as exc:
@@ -1617,7 +1640,7 @@ def archive_run(ticket: dict, run_id: int, phase: str, kind: str, rels: list[str
         # sqlite3.Error, not an OSError subclass. A record that can't be written is a
         # lost line, not a lost run — the docstring's "never raises" is a total
         # contract, not one scoped to filesystem failures.
-        notes.append(f"archivo: no copiado — {exc}")
+        notes.append(f"{w('archivo')}: {w('no_copiado')} — {exc}")
     return notes
 
 
@@ -1760,6 +1783,36 @@ def marker_lang(marker: str) -> str:
     something is written INTO an existing file: an analysis written in Spanish keeps
     being answered in Spanish, whatever the knob says today."""
     return "en" if marker in ("DECIDE", "BLOCKS") else "es"
+
+
+# What the RUNNER writes inside a `.md` of the target repo. A fourth category, added
+# 2026-08-19: it is neither prompt-facing (no agent reads the journal — it is a record,
+# never an input) nor UI-facing (it never reaches the browser). It is deliverable-facing,
+# and it is the only category that varies at runtime.
+WORDS = {
+    "es": {"rama": "rama", "resume": "← resume de", "reserva": "reserva",
+           "archivo": "archivo", "no_copiado": "no copiado",
+           "mas_de": "más de {n} archivos", "desde_run": "desde run {n}",
+           "respondida": "respondida", "config_ui": "creaste {rel} desde la UI",
+           "sin_huella": "la corrida no declaró huella",
+           "sin_brief": "no existe el brief de la fase anterior; corre primero la fase «brief»",
+           "sin_surveys": "no hay surveys que consolidar; corre primero la fase «survey»",
+           "ningun_repo": "ningún repo pudo sondearse"},
+    "en": {"rama": "branch", "resume": "← resumed from", "reserva": "caveat",
+           "archivo": "archive", "no_copiado": "not copied",
+           "mas_de": "more than {n} files", "desde_run": "from run {n}",
+           "respondida": "answered", "config_ui": "you created {rel} from the UI",
+           "sin_huella": "the run declared no stamp",
+           "sin_brief": "the previous phase's brief does not exist; run the «brief» phase first",
+           "sin_surveys": "there are no surveys to consolidate; run the «survey» phase first",
+           "ningun_repo": "no repo could be surveyed"},
+}
+
+
+def w(key: str, code: str | None = None, **fmt) -> str:
+    """One deliverable-facing word or phrase. `code` defaults to the knob; pass it
+    explicitly when appending to a file whose own language already decided."""
+    return WORDS[code or lang()][key].format(**fmt)
 
 
 # The markers a deliverable closes with, unticked. `- [x]` is an answered one and
@@ -2014,9 +2067,9 @@ def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) ->
             if latest["artifact_path"]:
                 e["motivo"] = latest["artifact_path"]
             elif latest["status"] == "success":
-                e["motivo"] = LEGACY_NO_STAMP_REASON
+                e["motivo"] = legacy_no_stamp_reason()
             else:
-                e["motivo"] = NO_STAMP_REASON
+                e["motivo"] = no_stamp_reason()
         else:
             # Only while running, and only in the detail view: it's a disk read, and the
             # list turns the footprint off for exactly that reason. Once finished, "19 of
@@ -2209,7 +2262,7 @@ async def run_fan_out(children, env, log, log_path: Path, scratch: Path) -> bool
     # verdict is the set of them, and no single child can speak for it. It goes last so
     # `read_stamp`, which anchors on the final match, finds this one and not a child's.
     if not good:
-        log.write(f"HUELLA: nada — ningún repo pudo sondearse ({', '.join(failed)})\n")
+        log.write(f"HUELLA: nada — {w('ningun_repo')} ({', '.join(failed)})\n")
     elif failed:
         log.write(f"HUELLA: parcial — {scratch.as_posix()} · "
                   f"{len(good)}/{len(verdicts)} sondeados, falló {', '.join(failed)}\n")
@@ -2373,11 +2426,12 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         if phase == "consolidate":
             surveys = last_survey_dir(ticket["id"])
             if not surveys or not Path(surveys).is_dir():
+                reason = no_surveys_reason()
                 with open(log_path, "w", encoding="utf-8") as log:
-                    log.write(f"[orchestrator] {NO_SURVEYS_REASON}\n")
+                    log.write(f"[orchestrator] {reason}\n")
                 set_run(run_id, status="error", finished_at=now(),
-                        artifact_state="nada", artifact_path=NO_SURVEYS_REASON)
-                append_journal(ticket, phase, "nada", NO_SURVEYS_REASON)
+                        artifact_state="nada", artifact_path=reason)
+                append_journal(ticket, phase, "nada", reason)
                 set_ticket(ticket["id"])
                 return
         extras = normalize_dirs(json.loads(ticket.get("extra_dirs") or "[]"))
@@ -2469,11 +2523,12 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         if phase == "survey":
             brief_path = Path(ticket["repo_path"]) / BRIEF_REL.format(ado_id=ticket["ado_id"])
             if not brief_path.exists():
+                reason = no_brief_reason()
                 with open(log_path, "w", encoding="utf-8") as log:
-                    log.write(f"[orchestrator] {NO_BRIEF_REASON}: {brief_path}\n")
+                    log.write(f"[orchestrator] {reason}: {brief_path}\n")
                 set_run(run_id, status="error", finished_at=now(),
-                        artifact_state="nada", artifact_path=NO_BRIEF_REASON)
-                append_journal(ticket, phase, "nada", NO_BRIEF_REASON, extra=archive_notes)
+                        artifact_state="nada", artifact_path=reason)
+                append_journal(ticket, phase, "nada", reason, extra=archive_notes)
                 set_ticket(ticket["id"])
                 return
             brief = brief_path.read_text(encoding="utf-8", errors="replace")
@@ -2581,7 +2636,7 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
         # without writing anything. The skill's closing stamp is the only reliable
         # contract, and now every phase honors it.
         stamp = read_stamp(log_path) if ok else None
-        state, rest = stamp or ("nada", NO_STAMP_REASON)
+        state, rest = stamp or ("nada", no_stamp_reason())
         if state == "nada":
             ok = False
         path, note = split_reserve(state, rest)
@@ -2740,7 +2795,7 @@ def prepare_ticket_repo(tid: int):
         raise HTTPException(409, f"No se pudo crear {TICKET_AGENT_CONFIG_REL}: "
                                  + result[len("error:"):].strip())
     if result == "created":
-        journal_note(ticket, f"creaste {TICKET_AGENT_CONFIG_REL} desde la UI")
+        journal_note(ticket, w("config_ui", rel=TICKET_AGENT_CONFIG_REL))
     return preflight(ticket)
 
 
@@ -2839,7 +2894,7 @@ def restore_run(tid: int, body: RestoreIn):
     # `extra=`, not `note=`: `note` renders as `· reserva: ...`, and `reserva` is the
     # label for a `parcial` stamp's caveat — this line isn't one, it's the restore's
     # own provenance and reads as itself.
-    append_journal(dict(t), "restaurar", "ok", rel, extra=[f"desde run {r['id']}"])
+    append_journal(dict(t), "restaurar", "ok", rel, extra=[w("desde_run", n=r["id"])])
     return {"restaurado": rel, "archivos": n}
 
 
@@ -3084,7 +3139,7 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
     except OSError as exc:
         raise HTTPException(409, f"No se pudo escribir {body.ruta}: {exc}")
     append_journal(dict(t), "decision", "ok", body.ruta,
-                    extra=[f"{item['tipo']} respondida: {item['pregunta'][:80]}"])
+                    extra=[f"{item['tipo']} {w('respondida')}: {item['pregunta'][:80]}"])
     return {"ruta": body.ruta, "id": body.id, "respondido": True, "respuesta": answer}
 
 

@@ -605,6 +605,14 @@ first, NOT just the first physical line: a real analysis wraps a question across
 lines as often as not), `cuerpo` (everything after that, dedented), `propuesta` (the
 bold text after `Propuesta:`, or `null`), and `respondido`.
 
+**The markers themselves travel translated, but the API normalizes them before they
+leave this module.** A document written in English carries `DECIDE`/`BLOCKS`
+instead of `DECIDIR`/`BLOQUEA` (see `MARKERS`); `tipo` in the `GET` response is
+always the Spanish pair, via `CANON_TIPO`. The reason is `Decisions.tsx`: it
+compares against the literal string `"BLOQUEA"`, and an unnormalized `BLOCKS`
+wouldn't fail that comparison loudly — it would silently paint a blocking item in
+the warning color instead of the destructive one.
+
 **Both endpoints read and write the file WITHOUT newline translation.**
 `Path.read_text()`/`Path.write_text()` silently translate `\r\n` ↔ `\n` — measured on
 the real 3359 analysis, answering ONE decision through the naive versions turned all
@@ -753,12 +761,21 @@ fake that shared Claude's shape would pass while the runner mixed the two up.
 - Designs go in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`.
 - **Code, comments, and process docs in English; Spanish only in UI text.**
   Planning documents (`docs/superpowers/plans/`, `docs/superpowers/specs/`) are
-  exempt from this rule and can stay in Spanish. Three categories decide it:
+  exempt from this rule and can stay in Spanish. Four categories decide it:
   **prompt-facing** strings (`PHASE_NOUN`, `repos_text`, `adjustment_text`)
   are read by the agent, so they're English and track the skills.
-  **UI-facing** strings (`HTTPException` details, `NO_STAMP_REASON` and the other
-  `motivo` text) are read by you in the browser, so they stay Spanish.
+  **UI-facing** strings (`HTTPException` details and the rest of the `motivo` text
+  that never travels into a deliverable) are read by you in the browser, so they
+  stay Spanish.
   **Contract literals** (the `HUELLA` stamp and its values, the `/modelos` and
   `/artefacto?ruta=` route paths, JSON keys like `fases`) are matched byte-for-byte
   somewhere, so they don't get translated in either direction — read
   `STAMP_RE` before touching any of them.
+  **Deliverable-facing** strings (the journal's own vocabulary, the reasons stored
+  in `runs.artifact_path`, the archive notes) end up inside a `.md` of the TARGET
+  repo, which is neither the browser nor a prompt. They follow the language knob
+  (`settings.idioma`, `lang()`), and — this is the part that isn't obvious — when
+  something is appended to a file that ALREADY exists, the language is taken from
+  the file (`journal_lang`, `marker_lang`), never from the knob: a journal created
+  in Spanish keeps growing in Spanish, and an analysis written in Spanish is
+  answered in Spanish, whatever the knob says today.

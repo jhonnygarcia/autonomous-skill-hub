@@ -1067,6 +1067,79 @@ real: los dos proyectos Providence salen `BLOQUEADO` por el config faltante, con
 de `az`) y sin aviso de git (el repo sí lo es). **Sin verificar todavía:** el panel en el
 navegador y el botón apretado de verdad.
 
+## Decimocuarta sesión — 2026-08-19: una perilla global de idioma para los entregables
+
+Nació de una pregunta simple con una respuesta incómoda: **¿en qué idioma escribe
+el agente el análisis, el plan y el journal?** Hoy, lo que sea que hable el work
+item, sin que nadie lo haya decidido. La respuesta fue una **perilla global**
+(`settings.idioma`, `GET`/`PUT /idioma`, exactamente `"es"` y `"en"`, sin un
+tercer valor «auto» — adivinar el idioma de un `.md` técnico lleno de
+identificadores en inglés falla justo donde importa), plantada en ocho tareas
+secuenciales sobre `app.py` y el plugin, cada una revisada antes de la
+siguiente.
+
+**El hallazgo que cambió el alcance: OpenSpec impone inglés, y no es parejo.**
+Verificado contra el paquete instalado (`@fission-ai/openspec@1.9.0`): el
+validador exige en **ERROR** — corrida a `parcial` si falta — que `proposal.md`
+tenga `## Why`/`## What Changes`, que `specs/**/spec.md` tenga
+`## Purpose`/`## Requirements` y las cuatro cabeceras `ADDED|MODIFIED|REMOVED|
+RENAMED Requirements`, que cada delta tenga `### Requirement: <texto>` y al
+menos un `#### Scenario:` como header de nivel 4. El `SHALL`/`MUST` dentro del
+texto del requirement es sólo **guidance**, no error, mientras la skill no
+corra con `--strict` (y no lo hace, a propósito: subir la vara volvería rojas
+corridas que hoy pasan). De ahí el reparto que quedó documentado en
+`change-planning/SKILL.md`: `specs/<capability>/spec.md` es **inglés siempre,
+en los dos modos** — su esqueleto entero pertenece al parser de un CLI de
+terceros, no es negociable —; `proposal.md` sigue la perilla en el cuerpo pero
+sus dos títulos obligatorios se quedan en inglés; `tasks.md` sigue la perilla,
+pero `Mirror:`/`Reuse:`/`Test:`/`Check:` no, porque son el contrato entre dos
+skills que están escritas en inglés; `design.md` sigue la perilla entero,
+`## Decisiones para ti` incluido, porque OpenSpec no lo mira.
+
+**La cuarta categoría de texto.** `CLAUDE.md` distinguía tres — prompt-facing,
+UI-facing, contract literals — y le faltaba una: **deliverable-facing**. Es el
+texto que el RUNNER MISMO escribe dentro de un `.md` del repo destino (el
+journal, las razones que se guardan en `runs.artifact_path`, las notas del
+archivo): no lo lee el navegador, no lo lee ningún agente, así que no es ni
+UI-facing ni prompt-facing, y sigue la perilla igual que las otras — con una
+salvedad que no es obvia. Cuando algo se AGREGA a un archivo que ya existe, el
+idioma se toma del archivo (`journal_lang`, ya existente como `marker_lang`
+desde la tarea 6), nunca de la perilla: un journal creado en español sigue
+creciendo en español aunque la perilla cambie a mitad de ticket — si no,
+`## Corridas` y `## Findings` conviven en el mismo archivo y cada línea nueva
+aterriza al final del archivo en vez de dentro de la sección de corridas,
+porque el punto de inserción se busca por ese heading.
+
+**Lo que tocó la última tarea, la más grande de las ocho.** Trece sitios de
+código en `app.py`: una tabla `WORDS`/`w(key, code=None, **fmt)` junto a
+`MARKERS`; `NO_STAMP_REASON`, `NO_SURVEYS_REASON` y `NO_BRIEF_REASON` pasaron de
+constantes de módulo a funciones (`no_stamp_reason()`, etc.), porque ahora se
+evalúan en el momento en que se necesitan, no al importar el módulo —
+`LEGACY_NO_STAMP_REASON` también, por dependencia; `JOURNAL_HEADER` pasó a
+`journal_header(ado_id, code)`; `append_journal` y `journal_note` ahora
+calculan `journal_lang(text)` sobre el archivo antes de decidir en qué idioma
+insertar la línea nueva y con qué heading buscar el punto de inserción; y las
+frases sueltas (`más de N archivos`, `archivo: no copiado`, `ningún repo pudo
+sondearse`, `creaste ... desde la UI`, `desde run N`, `<tipo> respondida`)
+pasaron por `w()`. Dos propiedades no se tocaron: `append_journal` y
+`journal_note` siguen sin poder tirar abajo la corrida — su `except` se
+ensanchó de `OSError` a `(OSError, sqlite3.Error)`, porque `lang()` lee SQLite y
+la tarea 5 ya había pisado esa misma piedra con `ensure_ticket_agent_config`; y
+las dos funciones siguen preservando el fin de línea del archivo
+(`read_text_preserving_newlines`/`write_text_preserving_newlines`).
+
+**Lo que queda pendiente, en su propio plan:** la fase 4 (i18n de la UI —
+~287 líneas en 18 archivos, concentradas en `Models.tsx`, `Timeline.tsx` y
+`ProjectForm.tsx`, sin dependencia nueva: un `strings.ts` con dos
+`Record<string,string>` y `t(k)`) y la fase 5 (los 49 `HTTPException` con
+detalle en español, mecánico, un `MSG[clave][idioma]`). Ninguna de las dos
+cambia comportamiento; ambas se dejaron fuera de este plan porque su tamaño no
+es el de una revisión más de las ocho ya hechas.
+
+**Verificación:** 290 tests backend (288 + 2 nuevos de la tarea 8: un journal
+fresco sigue la perilla al crearse, y uno ya creado en español sigue creciendo
+en español aunque la perilla cambie a mitad de ticket).
+
 ## Immediate pending items
 
 - [ ] **A first real run of a vague request through the fan-out route.** Every check
