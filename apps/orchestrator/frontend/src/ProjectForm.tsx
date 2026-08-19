@@ -78,12 +78,13 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
   const dirty = JSON.stringify(form) !== snapshot.current || !!tokenInput.trim() || clearToken
   const patch = (fn: (rs: Repo[]) => Repo[]) => setForm(f => ({ ...f, repos: fn(f.repos) }))
 
+  // No cleanup clearing the flag on unmount, and that's load-bearing. `App` guards
+  // navigation from a `hashchange` listener, and React's own listener (behind
+  // `useSyncExternalStore` in `router.ts`) is registered first: it re-renders, this
+  // form unmounts, and an unmount-clear would report `false` a beat before the guard
+  // reads it — which is exactly the bug it looked like it was preventing. `App` clears
+  // the flag itself on every way out of the form, so nothing stale survives.
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
-  // Clears the flag when the form goes away, so a stale `true` can't make the next
-  // navigation prompt about changes that no longer exist. Its own effect and not a
-  // cleanup on the one above: that one re-runs on every `dirty` change, and clearing
-  // there would blink the flag off and on.
-  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
   /** On blur, not debounced while typing: a path gets pasted whole, and validating
    *  mid-word produces a run of reds that mean nothing. */
@@ -129,13 +130,8 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
 
   return (
     <div className="space-y-4">
-      <button onClick={leave}
-              className="rounded text-sm text-muted-foreground hover:text-foreground
-                         hover:underline focus-visible:outline-none focus-visible:ring-2
-                         focus-visible:ring-ring/50">
-        ← Proyectos {original ? `/ ${original}` : "/ nuevo"}
-      </button>
-
+      {/* The breadcrumb in `TopBar` is the way back now, and it goes through the same
+          guard. A second `←` here was two answers to one question. */}
       <div className="flex items-center gap-2">
         <h2 className="text-xl font-semibold">
           {original ? "Editar proyecto" : "Nuevo proyecto"}
@@ -151,8 +147,7 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
                         bg-destructive/10 px-3 py-2 text-sm text-destructive">
           <span className="flex-1">{actionError}</span>
           <button onClick={() => setActionError("")} aria-label="Descartar el error"
-                  className="rounded px-1 focus-visible:outline-none focus-visible:ring-2
-                             focus-visible:ring-ring/50">✕</button>
+                  className="rounded px-1 focus-visible:outline-1 focus-visible:outline-ring">✕</button>
         </div>
       )}
 
@@ -220,7 +215,7 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
                            onChange={() => patch(rs => rs.map((x, j) => ({ ...x, primary: j === i })))} />
                     {r.primary ? <strong>principal</strong> : <span className="text-muted-foreground">principal</span>}
                   </label>
-                  {exists === true && <span className="text-xs text-emerald-600 dark:text-emerald-500">✓ existe</span>}
+                  {exists === true && <span className="text-xs text-foreground">✓ existe</span>}
                   {exists === false && <span className="text-xs text-destructive">✗ no existe</span>}
                   <Button size="sm" variant="ghost" className="ml-auto"
                           disabled={form.repos.length === 1}

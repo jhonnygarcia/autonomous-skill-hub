@@ -1316,6 +1316,106 @@ def ensure_ticket_agent_config(ticket: dict) -> str:
         return f"error: {exc}"
 
 
+AZ_TIMEOUT = 20
+
+
+def az_cmd() -> list[str]:
+    """The Azure CLI's argv: the `ORCH_AZ_CMD` override (JSON, what the tests
+    substitute — same convention as `ORCH_<ENGINE>_CMD`) or whatever the PATH resolves.
+    Empty when there's no `az` at all, which is itself an answer: no session either."""
+    raw = os.environ.get("ORCH_AZ_CMD")
+    if raw:
+        return json.loads(raw)
+    exe = shutil.which("az")
+    return [exe] if exe else []
+
+
+def az_logged_in() -> bool:
+    """Is there an `az login` session? The plugin's `.mcp.json` defaults to
+    `--authentication azcli`, so without one the MCP fails to connect — and the skill
+    reports that as "MCP not connected", which reads as a wrong `ADO_ORG` and sends you
+    to the wrong file. Checked before launching so it's the runner that says it.
+
+    A session is NOT proof of access to the ticket's org: that would be
+    `az devops project list --org ...`, seconds and a network round trip on every
+    launch. This catches the failure that actually happens (no session at all) and
+    doesn't pretend to catch the other one.
+    """
+    cmd = az_cmd()
+    if not cmd:
+        return False
+    try:
+        return subprocess.run([*cmd, "account", "show"], capture_output=True,
+                              timeout=AZ_TIMEOUT).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        # A broken `az` and an absent one are the same answer here: not logged in.
+        return False
+
+
+# The phases a check blocks, when it doesn't block all of them. Only `PHASE_MCP` phases
+# read the work item, so only they need a credential and the org/project config —
+# `survey` and `consolidate` run without either, on purpose (see `PHASE_MCP`).
+MCP_PHASES = sorted(PHASE_MCP & PHASE_COMMANDS.keys())
+
+
+def _check(que: str, msg: str, reparable: bool = False,
+           fases: list[str] | None = None) -> dict:
+    return {"que": que, "msg": msg, "reparable": reparable, "fases": fases}
+
+
+def preflight(ticket: dict) -> dict:
+    """What has to be true before a run is worth launching, checked in one place.
+
+    Every one of these used to be discovered the expensive way: the run starts, spends
+    minutes, and dies inside the CLI with a message about something else. `entregable`
+    already taught that exiting 0 proves nothing; this is the same lesson moved to the
+    other end of the run.
+
+    **Phase-independent on purpose.** Each entry carries the `fases` it blocks (`None` =
+    all of them), so the UI pays for ONE call per ticket instead of one per phase — the
+    credential check spawns `az`, and six of those on opening a ticket is a tax on
+    looking. `preflight_blockers` is what turns it back into a per-phase answer.
+
+    Not here: the clean-tree guard. `check_clean` already owns it for `implement`, with
+    a 409 and a message about commits — a second copy would drift from it, and it's the
+    one check whose failure is normal rather than a misconfiguration.
+    """
+    bloqueos, avisos = [], []
+    repo = Path(ticket["repo_path"])
+    if not repo.is_dir():
+        bloqueos.append(_check(
+            "repo", f"El repo principal ya no está en disco: {repo}. "
+                    "Corrígelo en el proyecto o vuelve a crear el ticket."))
+    faltan = [e["path"] for e in normalize_dirs(json.loads(ticket["extra_dirs"] or "[]"))
+              if not Path(e["path"]).is_dir()]
+    if faltan:
+        bloqueos.append(_check(
+            "extras", "Repos montados que ya no están en disco: " + ", ".join(faltan)))
+    if repo.is_dir() and not (repo / TICKET_AGENT_CONFIG_REL).exists():
+        # The one blocker with a button behind it: `organization` and `project` are
+        # already columns on the ticket, so the UI has everything it needs to write it.
+        bloqueos.append(_check(
+            "config", f"Falta {TICKET_AGENT_CONFIG_REL} en {repo}: sin él la skill no "
+                      "sabe contra qué proyecto de Azure DevOps consultar.",
+            reparable=True, fases=MCP_PHASES))
+    if not (ticket["ado_pat"] or "").strip() and not az_logged_in():
+        bloqueos.append(_check(
+            "credencial", "Sin credencial de Azure DevOps: corre `az login` en una "
+                          "terminal, o guarda un PAT en el proyecto.", fases=MCP_PHASES))
+    if repo.is_dir() and not (repo / ".git").exists():
+        # An aviso and not a blocker: only `implement` needs git, and `check_clean`
+        # already stops it there with its own 409. Saying it out loud anyway, because
+        # discovering it at the last phase is discovering it at the worst moment.
+        avisos.append(_check(
+            "git", f"{repo} no es un repo git: la fase implement no podrá crear su rama."))
+    return {"ok": not bloqueos, "bloqueos": bloqueos, "avisos": avisos}
+
+
+def preflight_blockers(pf: dict, phase: str) -> list[dict]:
+    """The blockers that apply to THIS phase. `fases: None` means every phase."""
+    return [b for b in pf["bloqueos"] if b["fases"] is None or phase in b["fases"]]
+
+
 def _seg(value) -> str:
     """A path segment out of an org, a project or a key: anything not [\\w.-] → `_`."""
     return re.sub(r"[^\w.-]", "_", str(value)) or "_"
@@ -2175,17 +2275,14 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             req = Path(ticket["repo_path"]) / REQUEST_FILE_REL.format(ado_id=ticket["ado_id"])
             req.parent.mkdir(parents=True, exist_ok=True)
             req.write_text(ticket["request"], encoding="utf-8")
-        if phase in PHASE_MCP:
-            # Recorded right away, not folded into the close-of-run line, since the
-            # run itself may still end in error. `ensure_ticket_agent_config` never
-            # raises: a config file that can't be written must not strand the run.
-            cfg_result = ensure_ticket_agent_config(ticket)
-            if cfg_result == "created":
-                journal_note(ticket, "el runner creó .claude/ticket-agent.json "
-                                     "(organization, project) porque no existía")
-            elif cfg_result.startswith("error: "):
-                journal_note(ticket, "no se pudo crear .claude/ticket-agent.json: "
-                                     + cfg_result.removeprefix("error: "))
+        # `.claude/ticket-agent.json` is NOT written here anymore (2026-08-18). The
+        # runner used to create it silently on every launch of a `PHASE_MCP` phase; now
+        # `preflight` refuses the launch while it's missing and `POST /preparar` is the
+        # one door that writes it, with the human pressing the button and a journal line
+        # naming them. Two doors into someone's repo was one too many, and the silent
+        # one was the door that could fail (`.claude` as a file, an ACL, a full disk)
+        # inside a BackgroundTask where nobody was listening.
+        #
         # The entrada is what the phase is about to read, human edits included (the
         # ticked DECIDIR boxes live nowhere else). Taken AFTER the request projection
         # so it matches the disk the agent sees. Notes wait for the journal line.
@@ -2466,6 +2563,12 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
         ).fetchone()
     if active:
         raise HTTPException(409, "Este ticket ya tiene una corrida activa")
+    # The authoritative gate. The panel in the UI is the early one — it can be stale by
+    # the time you click, and nothing forces a caller through it at all.
+    blocked = preflight_blockers(preflight(dict(t)), body.phase)
+    if blocked:
+        raise HTTPException(400, "No se puede lanzar: "
+                            + "; ".join(b["msg"] for b in blocked))
     if body.phase == "implement":
         # The guard, here: it's the one that returns the immediate 409 without spending
         # a subprocess or leaving a run queued, and the design calls for that property.
@@ -2485,6 +2588,38 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
                         body.resume)
     with db() as c:
         return dict(c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone())
+
+
+@app.get("/tickets/{tid}/preflight")
+def ticket_preflight(tid: int):
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    return preflight(dict(t))
+
+
+@app.post("/tickets/{tid}/preparar")
+def prepare_ticket_repo(tid: int):
+    """The button behind the one repairable blocker. Writes `.claude/ticket-agent.json`
+    with the `organization` and `project` the ticket already carries, and answers with
+    the fresh preflight so the panel doesn't have to ask twice.
+
+    Journalled, like `restaurar` and the decisions endpoint: a file that appears in your
+    repo with nobody saying so is what makes the next session unable to reconstruct what
+    happened. `ensure_ticket_agent_config` never overwrites and never raises — an error
+    comes back as a string, and here it becomes a 409 instead of dying silently.
+    """
+    t = ticket_row(tid)
+    if not t:
+        raise HTTPException(404)
+    ticket = dict(t)
+    result = ensure_ticket_agent_config(ticket)
+    if result.startswith("error:"):
+        raise HTTPException(409, f"No se pudo crear {TICKET_AGENT_CONFIG_REL}: "
+                                 + result[len("error:"):].strip())
+    if result == "created":
+        journal_note(ticket, f"creaste {TICKET_AGENT_CONFIG_REL} desde la UI")
+    return preflight(ticket)
 
 
 class RestoreIn(BaseModel):

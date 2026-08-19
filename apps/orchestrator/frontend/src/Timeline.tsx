@@ -1,5 +1,5 @@
-import { useRef, useState } from "react"
-import { api, type ActiveRun, type Artifact, type Phase, type Run } from "@/api"
+import { useEffect, useRef, useState } from "react"
+import { api, type ActiveRun, type Artifact, type Phase, type Preflight, type Run } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Decisions } from "@/Decisions"
@@ -12,7 +12,7 @@ import { canRunPhase, durationText, formatSize, formatTime, PHASE_LABEL, phaseCo
 const CHIP =
   "rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors " +
   "hover:bg-accent hover:text-accent-foreground " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+  "focus-visible:outline-1 focus-visible:outline-ring"
 
 /**
  * The ticket's phase timeline: one row per phase in PHASES, with its action and the
@@ -48,6 +48,28 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
   // clears the `loading` of the click still in flight). Without this, a slow click on A
   // followed by a fast one on B leaves B shown and then A overwrites it once it resolves late.
   const requestId = useRef(0)
+  // What the repo and the machine are missing before anything can be launched. Asked
+  // once per ticket: the credential check spawns `az`, so one call per phase would tax
+  // merely opening a ticket. `null` while it's in flight or if the request failed —
+  // neither is a reason to block the buttons, since `POST /run` checks again anyway.
+  const [pf, setPf] = useState<Preflight | null>(null)
+  const [preparing, setPreparing] = useState(false)
+  const [pfError, setPfError] = useState("")
+  useEffect(() => { api.preflight(ticketId).then(setPf).catch(() => setPf(null)) }, [ticketId])
+
+  // The blockers that apply to THIS phase — same filter as `preflight_blockers` in
+  // app.py, which is the authoritative one.
+  const pfBlock = (fase: string) =>
+    (pf?.bloqueos ?? []).filter(b => b.fases === null || b.fases.includes(fase))
+  const repairable = (pf?.bloqueos ?? []).some(b => b.reparable)
+
+  const prepare = () => {
+    setPreparing(true); setPfError("")
+    api.preparar(ticketId)
+      .then(setPf)
+      .catch(e => setPfError(String(e)))
+      .finally(() => setPreparing(false))
+  }
 
   const viewArtifact = (ruta: string) => {
     if (viewer?.ruta === ruta) return setViewer(null)     // second click: close
@@ -60,9 +82,44 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
   }
 
   return (
+    <>
+      {/* Above the timeline and not inside a phase row: these are conditions of the
+          repo and the machine, not of a phase, and half of them can't be fixed from
+          here at all. Saying it before you click is the whole feature — every one of
+          these used to be discovered minutes into a run, as a CLI error about
+          something else. */}
+      {pf && (pf.bloqueos.length > 0 || pf.avisos.length > 0) && (
+        <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
+          pf.bloqueos.length ? "border-destructive/40 bg-destructive/5" : "border-border bg-muted/40"}`}>
+          {pf.bloqueos.map(b => (
+            <p key={b.que} className="text-destructive">
+              ✖ {b.msg}
+              {b.fases && <span className="text-muted-foreground">
+                {" "}(bloquea: {b.fases.map(x => PHASE_LABEL[x] ?? x).join(", ")})
+              </span>}
+            </p>
+          ))}
+          {pf.avisos.map(a => (
+            <p key={a.que} className="text-warning-active">⚠ {a.msg}</p>
+          ))}
+          {repairable && (
+            <Button size="sm" variant="outline" className="mt-2" disabled={preparing}
+                    onClick={prepare}>
+              {preparing ? "Preparando…" : "Preparar repo"}
+            </Button>
+          )}
+          {pfError && <p className="mt-1 text-destructive">{pfError}</p>}
+        </div>
+      )}
+
     <ol className="space-y-0">
       {phases.map((f, i) => {
+        // Two variables and not one: `blocked` disables the buttons and fills their
+        // tooltip, `reason` is the line printed under the row. A preflight blocker is
+        // NOT printed per row — it's the same sentence for all six phases and the
+        // banner above already says it once.
         const reason = canRunPhase(phases, i, activeRun, ticketId)
+        const blocked = pfBlock(f.fase)[0]?.msg || reason
         const h = f.huella
         // `runs` arrives sorted by id DESC, same as `phases_for` in the backend: the
         // first one matching this phase is its most recent run, the same one that
@@ -128,12 +185,12 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
               className={`absolute left-0 top-1.5 flex h-6 w-6 items-center justify-center
                           rounded-full border text-[11px] font-semibold shadow-sm transition-colors
                           ${phaseColor(badge)}
-                          ${isRunning ? "animate-pulse ring-2 ring-blue-500/30 ring-offset-2 ring-offset-background" : ""}`}
+                          ${isRunning ? "animate-pulse" : ""}`}
             >
               {phaseIcon(badge)}
             </span>
 
-            <div className={`-mx-2 rounded-lg px-2 transition-colors ${isRunning ? "bg-blue-500/5" : ""}`}>
+            <div className={`-mx-2 rounded-lg px-2 transition-colors ${isRunning ? "bg-info/5" : ""}`}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
                 <span className={`text-sm font-semibold tracking-tight ${f.disponible ? "text-foreground" : "text-muted-foreground"}`}>
                   {PHASE_LABEL[f.fase] ?? f.fase}
@@ -142,7 +199,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                   <span className="text-xs text-muted-foreground">{metaParts.join(" · ")}</span>
                 )}
                 {!!f.fallidas && (
-                  <span className="text-xs font-medium text-amber-600 dark:text-amber-500">
+                  <span className="text-xs font-medium text-warning-active">
                     ⚠ {f.fallidas} falló
                   </span>
                 )}
@@ -150,12 +207,12 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                 {f.disponible && (
                   <div className="ml-auto flex gap-1">
                     <Button size="sm" variant={f.estado === "pendiente" ? "default" : "outline"}
-                            disabled={!!reason} title={reason || undefined}
+                            disabled={!!blocked} title={blocked || undefined}
                             onClick={() => onRun(f.fase)}>
                       {f.corridas ? "Re-correr" : "Correr"}
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={!!reason}
-                            title={reason || "Correr con instrucciones de ajuste"}
+                    <Button size="sm" variant="ghost" disabled={!!blocked}
+                            title={blocked || "Correr con instrucciones de ajuste"}
                             aria-label={`Ajustar y correr ${PHASE_LABEL[f.fase] ?? f.fase}`}
                             aria-expanded={openPhase === f.fase}
                             aria-controls={`ajuste-${f.fase}`}
@@ -179,7 +236,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
               {f.progreso && (
                 <div className="flex items-center gap-2 pb-2 text-xs">
                   <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-blue-500 transition-all"
+                    <div className="h-full rounded-full bg-info transition-all"
                          style={{ width: `${Math.round(100 * f.progreso.hechas / f.progreso.total)}%` }} />
                   </div>
                   <span className="text-muted-foreground">
@@ -207,7 +264,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                   footprint, in the same amber this state already uses — doesn't
                   replace the artifact row. */}
               {f.estado === "parcial" && f.motivo && (
-                <p className="pb-2 text-xs text-amber-600 dark:text-amber-500">{f.motivo}</p>
+                <p className="pb-2 text-xs text-warning-active">{f.motivo}</p>
               )}
 
               {/* The branch `implement` prepared, treated the same as the artifact path
@@ -256,7 +313,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                       </div>
                     </>
                   ) : (
-                    <span className="flex flex-wrap items-center gap-2 text-amber-600 dark:text-amber-500">
+                    <span className="flex flex-wrap items-center gap-2 text-warning-active">
                       <span>
                         Artefacto declarado en{" "}
                         <span className="font-mono">{h.ruta}</span>, no se encontró en disco
@@ -340,7 +397,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                     <span className="font-mono text-foreground">{viewer.ruta}</span>
                     <span className="text-muted-foreground">· {formatSize(viewer.bytes)}</span>
                     {viewer.truncado && (
-                      <span className="text-amber-600 dark:text-amber-500">
+                      <span className="text-warning-active">
                         · truncado a 512 KB, se muestra solo el inicio
                       </span>
                     )}
@@ -373,5 +430,6 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
         )
       })}
     </ol>
+    </>
   )
 }

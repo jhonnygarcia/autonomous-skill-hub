@@ -2105,6 +2105,16 @@ def test_implement_with_second_repo_dirty_does_not_leave_the_first_on_another_br
     assert current == original
 
 
+def _configure_repo(repo: Path) -> Path:
+    """What `POST /preparar` would leave behind. Any test that builds its own repo and
+    then launches a run needs it: without it the preflight blocks the launch, which is
+    the whole point of the preflight and not what those tests are about."""
+    (repo / ".claude").mkdir(exist_ok=True)
+    (repo / ".claude" / "ticket-agent.json").write_text(
+        '{"organization": "O", "project": "P"}\n', encoding="utf-8")
+    return repo
+
+
 def test_implement_with_a_single_repo_prepares_the_branch(client, monkeypatch, tmp_path):
     """The path with no extra repos (empty `extra_dirs`) was never exercised from the
     endpoint: every earlier `implement` test uses the `Demo` project, which always
@@ -2113,6 +2123,7 @@ def test_implement_with_a_single_repo_prepares_the_branch(client, monkeypatch, t
     single_repo = tmp_path / "solo-repo"
     single_repo.mkdir()
     _git_init(single_repo)
+    _configure_repo(single_repo)
     client.post("/projects", json={
         "name": "Solo", "org": "O", "project": "P",
         "repos": [{"path": single_repo.as_posix(), "primary": True}],
@@ -3371,13 +3382,9 @@ def test_tree_cap_stops_walking_as_soon_as_it_is_crossed(client, monkeypatch, tm
 
     _archive_on(client, tmp_path)
     monkeypatch.setattr("app.ARCHIVE_TREE_MAX_FILES", 3)
-    # Pre-created so `ensure_ticket_agent_config` finds it already there and does
-    # nothing: this test pins the archive cap's own stat budget, and letting an
-    # unrelated feature's write share the budget is how budgets stop meaning anything.
-    cfg_dir = tmp_path / "repo" / ".claude"
-    cfg_dir.mkdir()
-    (cfg_dir / "ticket-agent.json").write_text(
-        '{"organization": "DemoOrg", "project": "Demo"}', encoding="utf-8")
+    # The config file comes pre-created from the fixture (the preflight demands it),
+    # so nothing else writes into the repo while this test counts stats: it pins the
+    # archive cap's own budget, and a shared budget is how budgets stop meaning anything.
     docs = tmp_path / "repo" / "docs"
     docs.mkdir()
     for i in range(60):
@@ -3529,75 +3536,124 @@ def test_empty_org_is_rejected_at_save_time(client):
     assert r.status_code == 400 and "organización" in r.json()["detail"]
 
 
-def test_ticket_agent_config_is_created_when_missing(client, monkeypatch, tmp_path):
+def _no_az(monkeypatch):
+    """A machine with no `az login` session: the CLI answers non-zero."""
+    monkeypatch.setenv("ORCH_AZ_CMD", json.dumps([sys.executable, "-c", "raise SystemExit(1)"]))
+
+
+def test_missing_config_blocks_the_run_until_you_prepare_it(client, monkeypatch, tmp_path):
+    """The preflight in one test: the run doesn't start, the button writes the file,
+    then it starts. Until 2026-08-18 the runner wrote it silently on every launch —
+    now `POST /preparar` is the only door into the repo, and it's the human's press."""
     _use_fake_claude(monkeypatch)
-    tid = client.post("/tickets", json={"ado_id": 52, "project": "Demo"}).json()["id"]
-    client.post(f"/tickets/{tid}/run", json={})
     cfg_path = tmp_path / "repo" / ".claude" / "ticket-agent.json"
+    cfg_path.unlink()
+    tid = client.post("/tickets", json={"ado_id": 52, "project": "Demo"}).json()["id"]
+
+    blocked = client.post(f"/tickets/{tid}/run", json={})
+    assert blocked.status_code == 400 and "ticket-agent.json" in blocked.json()["detail"]
+    assert client.get(f"/tickets/{tid}").json()["runs"] == []   # nothing queued either
+
+    prepared = client.post(f"/tickets/{tid}/preparar")
+    assert prepared.status_code == 200 and prepared.json()["ok"] is True
     assert json.loads(cfg_path.read_text(encoding="utf-8")) == {
         "organization": "DemoOrg", "project": "Demo"}
+    assert client.post(f"/tickets/{tid}/run", json={}).status_code == 202
 
 
-def test_existing_ticket_agent_config_is_left_untouched(client, monkeypatch, tmp_path):
+def test_existing_ticket_agent_config_is_left_untouched(client, tmp_path):
     """A human may have tuned it, or added keys the orchestrator has no source for
     (`autonomy`, `subagent_model`, or something invented entirely) — the file is left
     byte-for-byte alone, whatever it holds."""
-    _use_fake_claude(monkeypatch)
     cfg_path = tmp_path / "repo" / ".claude" / "ticket-agent.json"
-    cfg_path.parent.mkdir(parents=True)
     original = ('{"organization": "Otra", "project": "OtroProyecto", '
                 '"autonomy": "autonomous", "capricho": true}')
     cfg_path.write_text(original, encoding="utf-8")
     tid = client.post("/tickets", json={"ado_id": 53, "project": "Demo"}).json()["id"]
-    client.post(f"/tickets/{tid}/run", json={})
+    assert client.post(f"/tickets/{tid}/preparar").status_code == 200
     assert cfg_path.read_text(encoding="utf-8") == original
 
 
-def test_journal_records_the_config_file_creation(client, monkeypatch, tmp_path):
-    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/54-analysis.md")
+def test_preparar_is_recorded_in_the_journal_once(client, tmp_path):
+    """A file that appears in your repo with nobody saying so is what makes the next
+    session unable to reconstruct what happened — same reason `restaurar` journals
+    itself. The second press finds it there and says nothing new."""
+    (tmp_path / "repo" / ".claude" / "ticket-agent.json").unlink()
     tid = client.post("/tickets", json={"ado_id": 54, "project": "Demo"}).json()["id"]
-    client.post(f"/tickets/{tid}/run", json={})
+    client.post(f"/tickets/{tid}/preparar")
+    client.post(f"/tickets/{tid}/preparar")
     journal = (tmp_path / "repo" / "docs" / "tickets" / "54-journal.md").read_text(
         encoding="utf-8")
-    assert "creó .claude/ticket-agent.json" in journal
+    assert journal.count("creaste .claude/ticket-agent.json desde la UI") == 1
 
 
-def test_config_creation_only_journaled_once(client, monkeypatch, tmp_path):
-    """The second run finds the file already there and says nothing new about it."""
-    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/55-analysis.md")
-    tid = client.post("/tickets", json={"ado_id": 55, "project": "Demo"}).json()["id"]
-    client.post(f"/tickets/{tid}/run", json={})
-    _use_fake_claude(monkeypatch,
-                     stamp="parcial — openspec/changes/55-x · falta algo")
-    client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    journal = (tmp_path / "repo" / "docs" / "tickets" / "55-journal.md").read_text(
-        encoding="utf-8")
-    assert journal.count("creó .claude/ticket-agent.json") == 1
-
-
-def test_config_write_failure_does_not_strand_the_run(client, monkeypatch, tmp_path):
+def test_preparar_reports_a_write_failure_instead_of_stranding_a_run(client, tmp_path):
     """`.claude` existing as a FILE (not a directory) makes `mkdir` raise `OSError`
-    inside `ensure_ticket_agent_config`. Before the fix this sat between
+    inside `ensure_ticket_agent_config`. That write used to sit between
     `set_run(status="running")` and every guarded region of `execute_run`: the
-    exception reached nobody inside the `BackgroundTask`, the run row was never
-    closed, and every later `POST /run`/`POST /restaurar` on the ticket 409'd
-    forever — exactly the failure mode `archive_run`'s own call site documents as
-    forbidden. The run must still close, with a journal line, and the ticket must
-    still be launchable afterward."""
+    exception reached nobody inside the `BackgroundTask`, the run row was never closed,
+    and every later `POST /run`/`POST /restaurar` on the ticket 409'd forever. Now the
+    write happens before any run exists — the failure is a 409 you can read, and the
+    phase stays blocked instead of half-launched."""
+    shutil.rmtree(tmp_path / "repo" / ".claude")
     (tmp_path / "repo" / ".claude").write_text("no soy un directorio", encoding="utf-8")
-    _use_fake_claude(monkeypatch, stamp="ok — docs/tickets/56-analysis.md")
     tid = client.post("/tickets", json={"ado_id": 56, "project": "Demo"}).json()["id"]
-    r = client.post(f"/tickets/{tid}/run", json={})
-    assert r.status_code == 202
-    detail = client.get(f"/tickets/{tid}").json()
-    run = detail["runs"][0]
-    assert run["status"] in ("success", "error") and run["finished_at"] is not None
-    journal = (tmp_path / "repo" / "docs" / "tickets" / "56-journal.md").read_text(
-        encoding="utf-8")
-    assert "no se pudo crear .claude/ticket-agent.json" in journal
-    # The ticket isn't stuck: a second run is still launchable, not a 409.
-    r2 = client.post(f"/tickets/{tid}/run", json={"phase": "design"})
-    assert r2.status_code == 202
+
+    r = client.post(f"/tickets/{tid}/preparar")
+    assert r.status_code == 409 and "ticket-agent.json" in r.json()["detail"]
+    assert client.post(f"/tickets/{tid}/run", json={}).status_code == 400
+    assert client.get(f"/tickets/{tid}").json()["runs"] == []
+
+
+def test_preflight_separates_blockers_from_warnings(client, tmp_path):
+    """`config` blocks only the phases that read the work item and carries the button;
+    a repo that isn't git is an aviso, because `check_clean` already stops `implement`
+    on its own and no other phase needs git at all."""
+    (tmp_path / "repo" / ".claude" / "ticket-agent.json").unlink()
+    tid = client.post("/tickets", json={"ado_id": 57, "project": "Demo"}).json()["id"]
+    pf = client.get(f"/tickets/{tid}/preflight").json()
+    assert pf["ok"] is False
+    [config] = [b for b in pf["bloqueos"] if b["que"] == "config"]
+    assert config["reparable"] is True
+    assert config["fases"] == ["analyze", "brief", "design", "implement"]
+    assert [a["que"] for a in pf["avisos"]] == ["git"]
+
+
+def test_no_az_session_blocks_only_the_phases_that_need_the_work_item(
+        client, monkeypatch, tmp_path):
+    """`survey` and `consolidate` run with no credential on purpose (`PHASE_MCP`), so a
+    machine without `az login` must not stop them."""
+    _no_az(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 58, "project": "Demo"}).json()["id"]
+    pf = client.get(f"/tickets/{tid}/preflight").json()
+    [cred] = [b for b in pf["bloqueos"] if b["que"] == "credencial"]
+    assert cred["reparable"] is False and "consolidate" not in cred["fases"]
+    blocked = client.post(f"/tickets/{tid}/run", json={})
+    assert blocked.status_code == 400 and "az login" in blocked.json()["detail"]
+
+
+def test_a_project_with_a_pat_needs_no_az_session(client, monkeypatch, tmp_path):
+    """`ADO_AUTH=envvar` reads the token instead of the `az login` session, so gating a
+    project that carries one on a session it never uses would be a lie."""
+    _no_az(monkeypatch)
+    client.put("/projects/Demo", json={
+        "name": "Demo", "org": "DemoOrg", "project": "Demo",
+        "repos": _repos(client), "ado_pat": "un-token",
+    })
+    tid = client.post("/tickets", json={"ado_id": 59, "project": "Demo"}).json()["id"]
+    assert client.get(f"/tickets/{tid}/preflight").json()["ok"] is True
+
+
+def test_a_repo_that_vanished_blocks_every_phase(client, monkeypatch, tmp_path):
+    """The paths are validated when the project is saved; nothing revalidates them
+    afterwards, and a repo gets moved or renamed. Discovered at launch instead of
+    inside the CLI, minutes later, with a message about something else."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 60, "project": "Demo"}).json()["id"]
+    shutil.rmtree(tmp_path / "repo")
+    r = client.post(f"/tickets/{tid}/run", json={"phase": "consolidate"})
+    assert r.status_code == 400 and "no está en disco" in r.json()["detail"]
+    assert client.get(f"/tickets/{tid}").json()["runs"] == []
 
 
 def test_survey_children_never_see_ado_org_or_the_token(client, monkeypatch, tmp_path):
@@ -3647,6 +3703,7 @@ def test_422_never_echoes_the_token(client, tmp_path):
 
 def _new_project_with_token(client, tmp_path, name="ConToken", token="secreto-123"):
     (tmp_path / f"{name}-repo").mkdir()
+    _configure_repo(tmp_path / f"{name}-repo")
     return client.post("/projects", json={
         "name": name, "org": "O", "project": "P", "ado_pat": token,
         "repos": [{"path": (tmp_path / f"{name}-repo").as_posix(), "primary": True}],

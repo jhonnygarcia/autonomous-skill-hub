@@ -1,13 +1,17 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
 
+/* The shadcn components already ship `dark:` variants; this is what makes the class
+   on <html> drive them. The class itself is set before first paint by the inline
+   script in index.html, and toggled from the TopBar. */
 @custom-variant dark (&:is(.dark *));
 
+/* OpenCode design system — see ../DESIGN.md.
+   Everything is monospaced on purpose: the single-font decision IS the identity. */
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -25,6 +29,11 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-info: var(--info);
+    --color-warning-active: var(--warning-active);
+    --color-destructive-active: var(--destructive-active);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -39,82 +48,143 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
+    /* The TUI surface: dark in BOTH themes. `--primary` used to double as it, which
+       worked while cream was the only canvas — in dark mode primary inverts to cream
+       and the hero turned into a white slab. */
+    --color-tui: var(--tui);
+    --color-tui-foreground: var(--tui-foreground);
+    /* The radius vocabulary is two values: 4px interactive, 0 containers.
+       The ladder is flattened so no component can exceed 4px. */
+    --radius-sm: var(--radius);
+    --radius-md: var(--radius);
     --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    --radius-xl: var(--radius);
+    --radius-2xl: var(--radius);
+    --radius-3xl: var(--radius);
+    --radius-4xl: var(--radius);
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --radius: 4px;
+    color-scheme: light;
+
+    /* canvas / ink */
+    --background: #fdfcfc;
+    --foreground: #201d1d;
+    --card: #fdfcfc;
+    --card-foreground: #201d1d;
+    --popover: #fdfcfc;
+    --popover-foreground: #201d1d;
+
+    /* the brand's only "color" is near-black */
+    --primary: #201d1d;
+    --primary-foreground: #fdfcfc;
+    --secondary: #f1eeee;
+    --secondary-foreground: #201d1d;
+
+    /* surface-soft / mute */
+    --muted: #f8f7f7;
+    --muted-foreground: #646262;
+
+    /* shadcn's --accent is a hover surface, not the brand accent.
+       Apple Blue (#007aff) stays reserved for the in-product TUI. */
+    --accent: #f1eeee;
+    --accent-foreground: #201d1d;
+
+    /* The Apple HIG semantic ramp the system ships. It belongs to in-product
+       state, never to chrome or CTAs — those stay ink on cream. */
+    --destructive: #ff3b30;
+    --warning: #ff9f0a;
+    --success: #30d158;
+    --info: #007aff;
+    /* The ramp's own deepenings. The system spells them as pressed states; they double
+       as the only readable text tint for those hues on cream — #ff9f0a as type sits at
+       ~2:1, which is unreadable, while #995f06 clears AA. */
+    --warning-active: #995f06;
+    --destructive-active: #a50011;
+
+    /* hairline; focus is a solid ink rule, no halo */
+    --border: rgba(15, 0, 0, 0.12);
+    --input: rgba(15, 0, 0, 0.12);
+    --ring: #201d1d;
+
+    /* the 5-tier neutral ladder: ash -> charcoal */
+    --chart-1: #9a9898;
+    --chart-2: #6e6e73;
+    --chart-3: #646262;
+    --chart-4: #424245;
+    --chart-5: #302c2c;
+
+    --sidebar: #fdfcfc;
+    --sidebar-foreground: #201d1d;
+    --sidebar-primary: #201d1d;
+    --sidebar-primary-foreground: #fdfcfc;
+    --sidebar-accent: #f1eeee;
+    --sidebar-accent-foreground: #201d1d;
+    --sidebar-border: rgba(15, 0, 0, 0.12);
+    --sidebar-ring: #201d1d;
+
+    --tui: #201d1d;
+    --tui-foreground: #fdfcfc;
 }
 
+/* Dark mode invents no palette: it's the system's own dark vocabulary from DESIGN.md —
+   surface-dark (#201d1d), surface-dark-elevated (#302c2c), on-dark (#fdfcfc),
+   on-dark-mute (#9a9898) — swapped into the same tokens. Cream becomes ink and back. */
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    color-scheme: dark;
+
+    --background: #201d1d;
+    --foreground: #fdfcfc;
+    --card: #201d1d;
+    --card-foreground: #fdfcfc;
+    --popover: #201d1d;
+    --popover-foreground: #fdfcfc;
+
+    --primary: #fdfcfc;
+    --primary-foreground: #201d1d;
+    --secondary: #302c2c;
+    --secondary-foreground: #fdfcfc;
+
+    --muted: #2a2626;
+    --muted-foreground: #9a9898;
+
+    --accent: #302c2c;
+    --accent-foreground: #fdfcfc;
+
+    /* The Apple ramp's dark-mode values. `-active` stops being a deepening here: the
+       base hues are already readable on near-black, which is what the cream variants
+       existed to work around. */
+    --destructive: #ff453a;
+    --warning: #ff9f0a;
+    --success: #32d74b;
+    --info: #0a84ff;
+    --warning-active: #ff9f0a;
+    --destructive-active: #ff453a;
+
+    --border: rgba(253, 252, 252, 0.14);
+    --input: #302c2c;
+    --ring: #fdfcfc;
+
+    /* the same 5-tier ladder, walked the other way: weight is lightness on dark */
+    --chart-1: #6e6e73;
+    --chart-2: #8a8a8f;
+    --chart-3: #9a9898;
+    --chart-4: #c7c5c5;
+    --chart-5: #ececec;
+
+    --sidebar: #201d1d;
+    --sidebar-foreground: #fdfcfc;
+    --sidebar-primary: #fdfcfc;
+    --sidebar-primary-foreground: #201d1d;
+    --sidebar-accent: #302c2c;
+    --sidebar-accent-foreground: #fdfcfc;
+    --sidebar-border: rgba(253, 252, 252, 0.14);
+    --sidebar-ring: #fdfcfc;
+
+    /* one notch lighter than the canvas, so the hero still reads as a surface */
+    --tui: #302c2c;
+    --tui-foreground: #fdfcfc;
 }
 
 @layer base {
@@ -123,7 +193,6 @@
     }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "cv11", "ss01";
     }
   html {
     @apply font-sans;

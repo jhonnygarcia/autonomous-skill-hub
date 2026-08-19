@@ -58,6 +58,12 @@ export type Phase = {
    *  it. Says how much context has piled up in the session now in play. */
   continuaciones?: number
 }
+// One thing the preflight checked. `fases: null` means it blocks every phase; a list
+// means only those (the credential and the config are only needed by the phases that
+// read the work item). `reparable` marks the one the "Preparar repo" button can fix —
+// everything else needs you to go do something outside the app.
+export type Check = { que: string; msg: string; reparable: boolean; fases: string[] | null }
+export type Preflight = { ok: boolean; bloqueos: Check[]; avisos: Check[] }
 export type Artifact = { ruta: string; texto: string; bytes: number; truncado: boolean }
 // One `DECIDIR`/`BLOQUEA` item under a deliverable's `## Decisiones para ti`. `id` is a
 // hash of the item's own exact text (see `_decision_items` in app.py) — round-tripped
@@ -166,6 +172,14 @@ export const api = {
   tickets: () => fetch("/api/tickets").then(r => json<Ticket[]>(r)),
   activeRun: () => fetch("/api/runs/active").then(r => json<ActiveRun | null>(r)),
   detail: (id: number) => fetch(`/api/tickets/${id}`).then(r => json<TicketDetail>(r)),
+  /** What has to be true before launching anything. One call per ticket, not per
+   *  phase: the credential check spawns `az`, and each entry says which phases it
+   *  blocks. `POST /run` checks the same thing again — this one is the early warning. */
+  preflight: (id: number) => fetch(`/api/tickets/${id}/preflight`).then(r => json<Preflight>(r)),
+  /** Writes `.claude/ticket-agent.json` in the primary repo. Answers with the fresh
+   *  preflight, so pressing the button and re-checking is one round trip. */
+  preparar: (id: number) =>
+    fetch(`/api/tickets/${id}/preparar`, { method: "POST" }).then(r => json<Preflight>(r)),
   artifact: (id: number, ruta: string) =>
     fetch(`/api/tickets/${id}/artefacto?ruta=${encodeURIComponent(ruta)}`)
       .then(r => json<Artifact>(r)),

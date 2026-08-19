@@ -442,28 +442,62 @@ purpose) from ever seeing either:
   eliminate. Symmetrically, `check_org` rejects an empty `org` at `POST`/`PUT
   /projects` time, so the UI can't hand the runner an empty value to export in the
   first place.
-- **Creates `.claude/ticket-agent.json`** in the primary repo when it's missing
-  (`ensure_ticket_agent_config`, next to `journal_note` — it uses the same
-  never-strand-the-run discipline), writing only `organization` and `project`: the
-  two keys the orchestrator has an actual source for. It never overwrites an
-  existing file, whatever it contains — a human may have tuned it, or added
-  `autonomy` or `subagent_model`, keys the orchestrator has no value for and won't
-  invent. It returns `"created"`, `"exists"`, or `"error: <reason>"` and **never
-  raises**: the write used to sit between `set_run(status="running")` and every
-  guarded region of `execute_run`, so a `.claude` that's a file instead of a
+- **`.claude/ticket-agent.json` used to be created here too, silently, on every
+  launch. It isn't anymore (2026-08-18)** — see the preflight below. The writer
+  (`ensure_ticket_agent_config`, next to `journal_note`) survives unchanged as
+  `POST /preparar`'s implementation: it writes only `organization` and `project`, the
+  two keys the orchestrator has an actual source for; it never overwrites an existing
+  file, whatever it contains — a human may have tuned it, or added `autonomy` or
+  `subagent_model`, keys the orchestrator has no value for and won't invent; and it
+  returns `"created"`, `"exists"`, or `"error: <reason>"` and **never raises**. That
+  last property was load-bearing while the call sat between `set_run(status="running")`
+  and every guarded region of `execute_run`: a `.claude` that's a file instead of a
   directory, an ACL denial, or a full disk raised `OSError` straight into a
-  `BackgroundTask` — reaching nobody, leaving the run row `running` forever, and
-  409ing `POST /run`/`POST /restaurar` on that ticket permanently (recoverable only
-  by editing the DB by hand). Same failure mode `archive_run`'s own call site
-  documents as forbidden, fixed the same way: caught, and turned into a journal
-  line either way — `"created"` gets "the runner created it", an error gets what
-  went wrong — because a file that appears (or fails to appear) by itself with
-  nobody saying so is worse than silence either direction.
+  `BackgroundTask` — reaching nobody, leaving the run row `running` forever, and 409ing
+  `POST /run`/`POST /restaurar` on that ticket permanently. Moving the write in front of
+  the run retires that whole failure mode instead of catching it: no run exists yet when
+  it fails, and the error is a 409 the human reads.
 
 What `app.py` reads `org`/`project` for beyond this is still just display and the
 "another project's ticket is running" message — registering a repo in the
 orchestrator still isn't the same as configuring it, it's just less likely to be
 missing now.
+
+**`preflight` is what has to be true before a run is worth launching.** One function
+(next to `ensure_ticket_agent_config`), one shape — `{ok, bloqueos, avisos}`, each entry
+`{que, msg, reparable, fases}` — and two callers: `GET /tickets/{tid}/preflight`, which
+the Timeline asks once when you open a ticket, and `POST /run`, which asks again and
+**400s before inserting the run row**. The panel can be stale by the time you click, and
+nothing forces a caller through it at all; the 400 is the gate, the panel is the warning.
+
+It checks four things: the primary repo is still on disk, the ticket's extras still are,
+`.claude/ticket-agent.json` exists, and there's a credential — `ado_pat` set, or
+`az account show` exiting 0. Three properties decide its shape:
+
+- **Phase-independent, with each entry naming the `fases` it blocks** (`null` = all of
+  them). The credential and the config are only needed by `PHASE_MCP`, so a machine with
+  no `az login` still runs `survey` and `consolidate`. One call per ticket instead of one
+  per phase matters because the credential check **spawns `az`**: six of those on merely
+  opening a ticket is a tax on looking. `preflight_blockers(pf, phase)` turns it back
+  into a per-phase answer, and the frontend repeats that same filter.
+- **`az account show` proves a session, not access to the ticket's org.** That would be
+  `az devops project list --org ...` — seconds and a network round trip on every launch.
+  This catches the failure that actually happens (no session at all) and doesn't pretend
+  to catch the other one. `ORCH_AZ_CMD` (JSON argv, same convention as
+  `ORCH_<ENGINE>_CMD`) is how the tests substitute it; no `az` on the PATH reads as not
+  logged in, which is the same answer.
+- **Exactly one blocker is `reparable`**, and it's the config file — the orchestrator has
+  `organization` and `project` as columns, so `POST /tickets/{tid}/preparar` can write it
+  and answer with the fresh preflight in one round trip. It journals itself (`creaste
+  .claude/ticket-agent.json desde la UI`) for the same reason `restaurar` does. Everything
+  else needs you to leave the app: `az login`, or fix the path in the project.
+
+What it deliberately does NOT check: the clean tree (`check_clean` owns that for
+`implement`, with a 409 about commits — a second copy would drift), and `npx`/Node (absent,
+nothing runs at all, and you'd know long before the preflight). A repo that isn't git is an
+**aviso**, not a blocker: only `implement` needs git and `check_clean` already stops it
+there — but it's said out loud anyway, because discovering it at the last phase is
+discovering it at the worst moment.
 
 **The phase decides the command, the tools, and the final state.** Four tables next to
 `PHASES` in `app.py`: `PHASE_COMMANDS` (what's launched), `PHASE_ALLOWED_TOOLS` (which

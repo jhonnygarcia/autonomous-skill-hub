@@ -6,10 +6,10 @@ import { Input } from "@/components/ui/input"
 import { blockReason, PHASE_LABEL, ticketStatus } from "@/status"
 
 const DOT: Record<string, string> = {
-  ok: "bg-emerald-500",
-  parcial: "bg-amber-500",
-  error: "bg-red-500",
-  corriendo: "bg-blue-500 animate-pulse",
+  ok: "bg-success",
+  parcial: "bg-warning",
+  error: "bg-destructive",
+  corriendo: "bg-info animate-pulse",
   pendiente: "bg-muted-foreground/25",
 }
 
@@ -130,7 +130,7 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
             <textarea id="request-text" rows={4} value={request}
                       onChange={e => setRequest(e.target.value)}
                       placeholder={"Qué necesitas, dónde vive hoy (pantalla, módulo, repo), por qué, y cómo sabrás que quedó bien."}
-                      className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+                      className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:outline-1 focus-visible:outline-ring" />
             <div className="mt-2 flex items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
                 La primera línea será el título en la lista.
@@ -149,8 +149,7 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
             <div key={t.id} className="px-3 py-2 transition-colors hover:bg-muted/40">
               <div className="flex items-center gap-2">
                 <button className="rounded text-sm font-medium hover:underline
-                                   focus-visible:outline-none focus-visible:ring-2
-                                   focus-visible:ring-ring/50"
+                                   focus-visible:outline-1 focus-visible:outline-ring"
                         onClick={() => onOpen(t.id)}>
                   #{t.ado_id}
                 </button>

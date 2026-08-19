@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,14 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_LOGS", str(tmp_path / "logs"))
     (tmp_path / "repo").mkdir()
     (tmp_path / "backend-repo").mkdir()
+    # A machine that passes `preflight`: logged into `az` and with the primary repo
+    # already configured. Both are what a real working setup looks like, and without
+    # them every test that launches a run would be testing the gate instead of the
+    # runner. The tests about the gate itself undo one of these on purpose.
+    monkeypatch.setenv("ORCH_AZ_CMD", json.dumps([sys.executable, "-c", ""]))
+    (tmp_path / "repo" / ".claude").mkdir()
+    (tmp_path / "repo" / ".claude" / "ticket-agent.json").write_text(
+        '{"organization": "DemoOrg", "project": "Demo"}\n', encoding="utf-8")
     sys.path.insert(0, str(BACKEND))
     if "app" in sys.modules:
         del sys.modules["app"]

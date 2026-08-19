@@ -1,17 +1,22 @@
 import type { ActiveRun, Phase, Ticket } from "@/api"
 
+// The Apple HIG semantic ramp, four colours for six states. Type stays ink at every
+// state and the colour lives in the border and a 12% fill: the ramp is a signal, not a
+// palette, and ink-on-tint is the only combination that clears contrast for all of them.
+// The three landed states share `success` on purpose — the label beside the chip already
+// says which one, and a second hue encoding the same fact is a hue that can disagree.
 const COLOR: Record<string, string> = {
   registrado: "border-border bg-muted text-muted-foreground",
-  corriendo: "border-blue-500/60 bg-blue-500/10 text-blue-700 dark:text-blue-500",
-  analizado: "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-500",
-  planificado: "border-violet-500/60 bg-violet-500/10 text-violet-700 dark:text-violet-500",
-  implementado: "border-sky-500/60 bg-sky-500/10 text-sky-700 dark:text-sky-500",
-  error: "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-500",
-  // The fan-out's two intermediate states. Amber, not green: they're steps toward the
+  corriendo: "border-info/60 bg-info/12 text-foreground",
+  analizado: "border-success/60 bg-success/12 text-foreground",
+  planificado: "border-success/60 bg-success/12 text-foreground",
+  implementado: "border-success/60 bg-success/12 text-foreground",
+  error: "border-destructive/60 bg-destructive/12 text-foreground",
+  // The fan-out's two intermediate states. Warning, not success: they're steps toward the
   // analysis, not the analysis — a ticket sitting on `sondeado` still has no analysis
   // to plan from, and painting it in the "done" colour would say otherwise.
-  briefeado: "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-500",
-  sondeado: "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-500",
+  briefeado: "border-warning/60 bg-warning/12 text-foreground",
+  sondeado: "border-warning/60 bg-warning/12 text-foreground",
 }
 const LABEL: Record<string, string> = {
   queued: "registrado", running: "corriendo", analyzed: "analizado",
@@ -103,11 +108,11 @@ export function phaseIcon(status?: string): string {
 }
 
 export function phaseColor(status?: string): string {
-  return status === "ok" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-500"
-    : status === "parcial" ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-500"
-    : status === "error" ? "border-red-500/60 bg-red-500/10 text-red-700 dark:text-red-500"
-    : status === "corriendo" ? "border-blue-500/60 bg-blue-500/10 text-blue-700 dark:text-blue-500"
-    : "border-border bg-muted text-muted-foreground"
+  return status === "ok" ? COLOR.analizado
+    : status === "parcial" ? COLOR.briefeado
+    : status === "error" ? COLOR.error
+    : status === "corriendo" ? COLOR.corriendo
+    : COLOR.registrado
 }
 
 /**

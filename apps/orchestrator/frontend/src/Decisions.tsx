@@ -59,10 +59,10 @@ export function Decisions({ ticketId, ruta, counts }: {
     <div className="pb-2">
       <button onClick={toggle}
               className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded">
+                         focus-visible:outline-1 focus-visible:outline-ring rounded">
         {open ? "▾" : "▸"}{" "}
         {!!counts.decidir && (
-          <span className="text-amber-600 dark:text-amber-500">
+          <span className="text-warning-active">
             {counts.decidir} decisión{counts.decidir > 1 && "es"} para ti
           </span>
         )}
@@ -84,10 +84,10 @@ export function Decisions({ ticketId, ruta, counts }: {
                  className={`rounded-md border p-2 text-xs ${
                    p.respondido ? "border-border bg-muted/30"
                      : p.tipo === "BLOQUEA" ? "border-destructive/40 bg-destructive/5"
-                     : "border-amber-500/40 bg-amber-500/5"}`}>
+                     : "border-warning/40 bg-warning/5"}`}>
               <div className="flex items-center gap-2">
                 <span className={`font-semibold ${
-                  p.tipo === "BLOQUEA" ? "text-destructive" : "text-amber-700 dark:text-amber-500"}`}>
+                  p.tipo === "BLOQUEA" ? "text-destructive" : "text-warning-active"}`}>
                   {p.tipo === "BLOQUEA" ? "Bloquea la fase siguiente" : "Decide — con propuesta"}
                 </span>
                 {p.respondido && <span className="text-muted-foreground">· respondido</span>}

@@ -1,8 +1,8 @@
 # Project status — Autonomous Skill Hub
 
 > Living document. Update it when closing each milestone or making a decision.
-> Last updated: 2026-08-18 (**decisiones respondibles desde la UI y preview del
-> markdown**, 265 tests backend)
+> Last updated: 2026-08-18 (**preflight de configuración y credencial antes de
+> lanzar**, 273 tests backend)
 
 ## Purpose
 
@@ -932,6 +932,140 @@ base de siempre (dos warnings).
 **Nada de esto corrió contra un ticket real todavía.** Toda la verificación es
 mecánica — los 221 tests, el build, el lint — nadie encendió el archivo contra
 `ProvidenceTMSTenant` y restauró un análisis real.
+
+## Duodécima sesión — 2026-08-18: rutas, home y la pantalla de Ajustes
+
+Frontend solamente. **Cero cambios de backend**, y esa era la restricción: el mock que
+disparó el trabajo dibujaba Ajustes bajo un encabezado de «proyecto activo», y
+`phase_config`/`settings` guardan una sola fila cada una — así que las dos secciones se
+rotularon **global** en vez de inventarles un alcance que la API no tiene.
+
+**Qué se construyó.** `router.ts` (~60 líneas, hash a mano, sin dependencia nueva):
+`#/`, `#/p/<nombre>`, `#/t/<id>`, `#/ajustes`, `#/proyecto[/<nombre>]`, y un hash
+desconocido cae en Home. Un `Home.tsx` tipo TUI con el wordmark en bloques y una fila
+por proyecto con su conteo de tickets. Un `Settings.tsx` que da el marco — filete de
+1px y cabecera `[x]`/`[+]`, el lenguaje del DESIGN.md — a `Models` y `Archive`, que
+perdieron su `Card`. Y un `TopBar.tsx` con breadcrumb que **reemplaza al `Sidebar`**:
+sus dos trabajos (cambiar de proyecto, abrir Ajustes) los hacen ahora Home y una ruta,
+así que la columna se borró en vez de duplicarlos en cada pantalla. De paso, los dos
+`←` que quedaban duplicados con el breadcrumb (`TicketDetail`, `ProjectForm`) se
+fueron con ella.
+
+**Los proyectos viven en Home, y en ningún otro lado.** La primera versión los listaba
+también en Ajustes (heredado del `Projects.tsx` que ya existía) y ponía
+`+ Nuevo proyecto` en la barra superior, o sea en todas las pantallas. Dos listas de lo
+mismo se contradicen en cuanto divergen, y un botón de crear proyecto te seguía hasta
+el timeline de un ticket, que es donde menos falta hace. Así que `Projects.tsx` se
+borró y sus filas —con `[/] Editar` y `[-] Borrar`— son ahora las de Home; Ajustes
+quedó con lo global y nada más; y la ruta del formulario dejó de ser
+`#/ajustes/proyecto/...` para ser `#/proyecto/...`, porque una URL que dice «ajustes»
+para una pantalla que ya no cuelga de ahí es una URL que miente.
+
+**Lo que costó, y no era el ruteo.** El guard de «cambios sin guardar» falló dos veces
+seguidas por lo mismo: **el orden de registro de los listeners de `hashchange`**. El de
+React (detrás de `useSyncExternalStore`) se registra cuando comprometen los efectos de
+`App` y re-renderiza sincrónicamente — desmonta el formulario y se lleva lo tecleado —
+así que un guard montado en un `useEffect` corre *después* y termina preguntando por
+cambios que él mismo acaba de destruir. Peor: el `useEffect` de limpieza que
+`ProjectForm` tenía para poner `dirty` en `false` al desmontarse hacía exactamente lo
+que parecía prevenir. La versión que funciona registra el listener **a nivel de módulo**
+en `router.ts`, antes de que React monte nada, y revierte con `location.replace` para no
+dejar una entrada de historial por cada salida rechazada. Verificado en el navegador con
+el botón *atrás*: el diálogo sale, la URL vuelve, y lo tecleado sigue ahí.
+
+Un defecto viejo que salió a la luz al usar el diálogo por primera vez: el `<dialog>`
+nativo se anclaba arriba a la izquierda porque el preflight de Tailwind pisa el
+`margin:auto` que le da el UA stylesheet a `showModal()`. Un `m-auto`.
+
+**La pantalla de Ajustes explicaba el diseño, no el uso.** El público es alguien que no
+programa, y la tabla de fases decía cosas como «cada fase deja su entregable en un
+archivo, así que la siguiente no necesita saber quién lo escribió» y «no hace falta
+reiniciar el backend» — notas del autor para el autor. Peor: **las seis filas se leían
+como seis pasos en fila**, cuando Análisis por un lado y Brief → Sondeo →
+Consolidación por el otro son dos *rutas* al mismo archivo. Ahora la tabla lleva
+cabeceras de etapa (`1 · Entender el ticket`, `2 · Planear`, `3 · Escribir el código`)
+que lo dicen, y cada fila lleva **qué hace esa fase y qué entrega**, en la fila misma:
+no en un tooltip, porque este repo ya aprendió con `RepoTable` que lo que solo se ve al
+pasar el mouse no se descubre. Las cabeceras `ENGINE`/`EFFORT` pasaron a `MOTOR` y
+`ESFUERZO` (los *valores* siguen siendo los literales que viajan al CLI), y los
+prefijos `[S]` de los botones se cayeron: prometían un Ctrl+S que nunca existió — venían
+del mock, donde sí había un renglón de atajo.
+
+**Y de ahí, `Info.tsx`.** Con las seis explicaciones abiertas la pantalla pasó de tabla
+que se ojea a página que se scrollea, así que el texto se movió detrás de un `[i]`
+visible en cada fila. Eso **no** contradice la regla de `RepoTable`: aquella es sobre el
+*afordance*, y aquí el botón está siempre a la vista — lo que se difiere es la lectura,
+no el aviso de que hay algo que leer. Clic y no hover, para que funcione igual con el
+dedo y con el teclado. Por debajo es el **`popover` nativo**: sin estado en React, con
+cierre por Escape y por clic fuera regalados por la plataforma, y en el *top layer*, que
+es lo único que no lo recorta el `overflow-x-auto` de su propia tabla — un `div`
+posicionado sí lo estaría. Lo que **sigue abierto** es la nota de etapa: es justo lo que
+impide leer las seis filas como seis pasos, y un malentendido que hay que hacer clic
+para corregir es un malentendido.
+
+**Verificación:** `npm run build` y `npm run lint` en su línea base (dos warnings de
+shadcn), y las seis rutas abiertas a mano en Chrome, incluido un nombre de proyecto con
+espacios y paréntesis. `parseRoute` quedó como función pura y **sin test**: el frontend
+no tiene runner y montar uno para un switch de ocho líneas es la dependencia que este
+trabajo evitó en todo lo demás.
+
+## Decimotercera sesión — 2026-08-18: el preflight, y una puerta menos al repo
+
+Nació de una pregunta, no de un mock: *«¿qué pasa si el repo donde quiero trabajar no
+tiene los archivos de configuración?»*. La respuesta honesta era incómoda: de lo que
+falta, **lo único que el repo necesitaba ya se creaba solo** (el runner escribía
+`.claude/ticket-agent.json` en cada lanzamiento desde el 17), y lo que de verdad quema
+una corrida no vive en el repo — sin sesión de `az` ni PAT, la fase 1 arranca, gasta
+minutos y muere con «MCP not connected», que se lee como una org mal puesta y te manda
+al archivo equivocado.
+
+**Qué se construyó.** `preflight(ticket)` en `app.py`: una forma
+(`{ok, bloqueos, avisos}`, cada entrada `{que, msg, reparable, fases}`) y dos llamadores
+— `GET /tickets/{tid}/preflight`, que el Timeline pide **una vez por ticket**, y
+`POST /run`, que vuelve a preguntar y **400ea antes de insertar la fila en `runs`**. El
+panel puede estar viejo cuando aprietas, y nada obliga a un llamador a pasar por él: el
+400 es el guard, el panel es el aviso. Revisa cuatro cosas: el repo primario sigue en
+disco, los extras también, existe `.claude/ticket-agent.json`, y hay credencial
+(`ado_pat`, o `az account show` saliendo 0).
+
+**El único bloqueo reparable es el archivo de configuración**, y detrás lleva un botón:
+`POST /tickets/{tid}/preparar` lo escribe con el `organization`/`project` que el ticket
+ya carga y responde con el preflight nuevo. Lo demás te saca de la app a propósito —
+`az login`, o corregir la ruta del proyecto — y decirlo es más útil que fingir un botón.
+
+**La decisión que no estaba en el diseño y salió al implementar: el runner dejó de
+escribir el archivo.** Con el preflight bloqueando, esa escritura era inalcanzable desde
+`POST /run` (misma condición, mismo `PHASE_MCP`), o sea código muerto que igual podía
+fallar. Se borró. Y con eso se retira entera la falla que su `try/except` existía para
+contener: `.claude` siendo un archivo ya no revienta dentro de un `BackgroundTask` con
+la corrida marcada `running` para siempre — revienta como 409 de `/preparar`, antes de
+que exista corrida alguna. Tres tests cambiaron de forma por esto y ninguno se perdió.
+
+**Tres detalles que decidieron la forma:**
+
+- **Sin fase en el endpoint.** Cada entrada dice qué `fases` bloquea (`null` = todas),
+  porque el chequeo de credencial **lanza `az`** y seis de esos al abrir un ticket es un
+  impuesto por mirar. `preflight_blockers(pf, phase)` lo vuelve una respuesta por fase, y
+  el frontend repite ese mismo filtro.
+- **`az account show` prueba sesión, no acceso a la org del ticket.** Eso sería
+  `az devops project list --org ...`: segundos y red en cada lanzamiento. Se atrapa el
+  fallo que de verdad pasa y no se finge atrapar el otro. `ORCH_AZ_CMD` (argv en JSON,
+  misma convención que `ORCH_<ENGINE>_CMD`) es como lo sustituyen los tests.
+- **Que el repo no sea git es un aviso, no un bloqueo.** Solo `implement` necesita git y
+  `check_clean` ya lo para ahí con su propio 409; duplicarlo era invitarlo a divergir.
+  Pero se dice igual, porque enterarte en la última fase es enterarte en el peor momento.
+
+**Lo que se dejó fuera:** cancelar una corrida en vuelo. No existe endpoint ni manera de
+matar el subproceso, y con el guard antes de lanzar no hace falta — una corrida que no
+arranca no hay que pararla. Queda como feature aparte si algún día una se cuelga de
+verdad.
+
+**Verificación:** 273 tests backend (267 + 6 nuevos; 5 de los viejos reescritos),
+`npm run build` y `npm run lint` en su línea base, y `preflight` corrido contra la DB
+real: los dos proyectos Providence salen `BLOQUEADO` por el config faltante, con
+`fases: ['analyze','brief','design','implement']`, sin bloqueo de credencial (hay sesión
+de `az`) y sin aviso de git (el repo sí lo es). **Sin verificar todavía:** el panel en el
+navegador y el botón apretado de verdad.
 
 ## Immediate pending items
 

@@ -1,65 +1,59 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api, type ActiveRun, type Project, type Ticket, type TicketDetail as Detail } from "@/api"
-import { Archive } from "@/Archive"
 import { ConfirmDialog } from "@/ConfirmDialog"
-import { Models } from "@/Models"
+import { Home } from "@/Home"
 import { ProjectForm } from "@/ProjectForm"
 import { ProjectHeader } from "@/ProjectHeader"
-import { Projects } from "@/Projects"
-import { Sidebar } from "@/Sidebar"
+import { Settings } from "@/Settings"
 import { TicketDetail } from "@/TicketDetail"
 import { TicketList } from "@/TicketList"
-
-// Four views switched by hand. No router: it's a single-user local app and
-// `react-router` would be a dependency for nothing.
-type View =
-  | { kind: "project" }
-  | { kind: "ticket"; id: number }
-  | { kind: "settings" }
-  // `name: null` = creating. The form used to be a block expanded inside the settings
-  // card, which is why `+ Nuevo` had to jump to another view and open it via a prop.
-  | { kind: "projectForm"; name: string | null }
+import { TopBar, type Crumb } from "@/TopBar"
+import { go, parseRoute, setGuard, useRoute } from "@/router"
 
 export default function App() {
+  const route = useRoute()
   const [projects, setProjects] = useState<Project[]>([])
-  const [current, setCurrent] = useState<string | null>(null)
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
-  const [view, setView] = useState<View>({ kind: "project" })
   // User-initiated actions and the project load land here. What does NOT is the 3-second
   // poll: it retries on its own, and a banner for a transient blip is noise that trains
   // you to ignore the banner. Loading the projects is different — it runs on mount and
   // after saving, and failing silently there leaves an empty app with no explanation.
   const [error, setError] = useState("")
 
-  // The project form reports whether it has unsaved changes, and a navigation requested
-  // while it does is held here until the user confirms. The form guards its own Cancelar
-  // and Escape; without this the sidebar routes around that guard and discards what was
-  // typed — same situation, three ways out, and only two of them used to ask.
-  const [formDirty, setFormDirty] = useState(false)
-  const [pendingNav, setPendingNav] = useState<(() => void) | null>(null)
+  // The project form reports whether it has unsaved changes, and the router's guard
+  // holds every route change back until they're resolved — the top bar, the breadcrumb
+  // and the browser's own back button alike, which is why this stopped being a wrapper
+  // around the sidebar's click handlers. Moving WITHIN the form (create → edit) is
+  // allowed: there's nothing to lose that the form isn't already holding.
+  const dirty = useRef(false)
+  const [pendingHash, setPendingHash] = useState<string | null>(null)
 
-  const navigate = (go: () => void) => {
-    if (view.kind === "projectForm" && formDirty) setPendingNav(() => go)
-    else go()
+  useEffect(() => {
+    setGuard(next => {
+      if (!dirty.current || parseRoute(next).kind === "projectForm") return true
+      setPendingHash(next)
+      return false
+    })
+    return () => setGuard(null)
+  }, [])
+
+  const leaveForm = () => {
+    dirty.current = false
+    const to = pendingHash
+    setPendingHash(null)
+    if (to !== null) location.hash = to
   }
 
-  // `select` is sent by the form after saving, so a rename doesn't change the
-  // active project out from under it (the old name is no longer in the list).
-  const refreshProjects = (select?: string) =>
-    api.projects().then(ps => {
-      setProjects(ps)
-      setCurrent(c => {
-        const wanted = select ?? c
-        return ps.some(p => p.name === wanted) ? wanted : (ps[0]?.name ?? null)
-      })
-    }).catch(e => setError(String(e)))
+  const refreshProjects = () =>
+    api.projects().then(setProjects).catch(e => setError(String(e)))
 
+  const ticketId = route.kind === "ticket" ? route.id : null
   const refresh = () => {
     api.tickets().then(setTickets).catch(() => {})
     api.activeRun().then(setActiveRun).catch(() => {})
-    if (view.kind === "ticket") api.detail(view.id).then(setDetail).catch(() => setDetail(null))
+    if (ticketId !== null) api.detail(ticketId).then(setDetail).catch(() => setDetail(null))
   }
 
   useEffect(() => { refreshProjects() }, [])
@@ -68,84 +62,94 @@ export default function App() {
     const t = setInterval(refresh, 3000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.kind, view.kind === "ticket" ? view.id : null])
+  }, [route.kind, ticketId])
 
-  const project = projects.find(p => p.name === current) ?? null
-  // The ticket stores the ADO project, not the catalog key.
-  // ponytail: today they match; if they ever diverge, tickets need a `project_key`.
-  const myTickets = project ? tickets.filter(t => t.project === project.project) : []
+  // On a project route the URL names it; on a ticket route the ticket does, through the
+  // ADO project it locked in when it was created.
+  // ponytail: today the catalog name and the ADO project match one-to-one; if they ever
+  // diverge, tickets need a `project_key`.
+  const project =
+    route.kind === "project" ? projects.find(p => p.name === route.name) ?? null
+    : detail ? projects.find(p => p.project === detail.ticket.project) ?? null
+    : null
 
   const act = (fn: () => Promise<unknown>) => {
     setError("")
     return fn().then(refresh).catch(e => setError(String(e)))
   }
 
-  const addTicket = (body: { ado_id?: number; request?: string }) =>
-    project && act(() => api.create(body, project.name))
-
-  const open = (id: number) => { setDetail(null); setView({ kind: "ticket", id }) }
-  const back = () => { setDetail(null); setView({ kind: "project" }) }
-  const editing = view.kind === "projectForm" ? view.name : null
+  const crumbs: Crumb[] =
+    route.kind === "home" ? []
+    : route.kind === "settings" ? [{ label: "Ajustes" }]
+    : route.kind === "projectForm"
+      ? [{ label: "Proyectos", to: { kind: "home" } },
+         { label: route.name ?? "Nuevo proyecto" }]
+    : route.kind === "project" ? [{ label: "Proyectos", to: { kind: "home" } },
+                                  { label: route.name }]
+    : [{ label: "Proyectos", to: { kind: "home" } },
+       ...(project ? [{ label: project.name, to: { kind: "project" as const, name: project.name } }] : []),
+       { label: detail ? `#${detail.ticket.ado_id}` : "…" }]
 
   return (
-    <div className="mx-auto flex w-full max-w-[92rem] gap-6 p-6">
-      <Sidebar projects={projects} current={current}
-               settings={view.kind === "settings" || view.kind === "projectForm"}
-               onSelect={n => navigate(() => { setCurrent(n); back() })}
-               onSettings={() => navigate(() => setView({ kind: "settings" }))} />
+    <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
+      <TopBar crumbs={crumbs} />
 
-      <main className="min-w-0 flex-1 space-y-4">
+      <main className="min-w-0 space-y-4">
         {error && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/40
+          <div className="flex items-start gap-2 rounded-sm border border-destructive/40
                           bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <span className="flex-1">{error}</span>
             <button onClick={() => setError("")} aria-label="Descartar el error"
-                    className="rounded px-1 focus-visible:outline-none focus-visible:ring-2
-                               focus-visible:ring-ring/50">✕</button>
+                    className="rounded px-1 focus-visible:outline-1 focus-visible:outline-ring">✕</button>
           </div>
         )}
 
-        {view.kind === "settings" && (
-          <>
-            <Projects projects={projects}
-                      onEdit={name => setView({ kind: "projectForm", name })}
-                      onNew={() => setView({ kind: "projectForm", name: null })}
-                      onChange={() => refreshProjects()} />
-            <Models />
-            <Archive />
-          </>
+        {route.kind === "home" && (
+          <Home projects={projects} tickets={tickets} activeRun={activeRun}
+                onChange={refreshProjects} />
         )}
 
-        {view.kind === "projectForm" && (
-          <ProjectForm initial={projects.find(p => p.name === editing) ?? null}
-                       onDirtyChange={setFormDirty}
-                       onSaved={name => { refreshProjects(name); setView({ kind: "settings" }) }}
-                       onCancel={() => setView({ kind: "settings" })} />
+        {route.kind === "settings" && <Settings />}
+
+        {route.kind === "projectForm" && (
+          <ProjectForm initial={projects.find(p => p.name === route.name) ?? null}
+                       onDirtyChange={d => { dirty.current = d }}
+                       onSaved={() => {
+                         dirty.current = false
+                         refreshProjects()
+                         go({ kind: "home" })
+                       }}
+                       onCancel={() => { dirty.current = false; go({ kind: "home" }) }} />
         )}
 
-        {(view.kind === "project" || view.kind === "ticket") && !project && (
+        {route.kind === "project" && !project && (
           <p className="text-sm text-muted-foreground">
-            Aún no hay proyectos.{" "}
-            <button className="underline" onClick={() => setView({ kind: "projectForm", name: null })}>
-              Agrega uno
-            </button>{" "}
-            para poder encolar tickets.
+            No hay ningún proyecto llamado «{route.name}».{" "}
+            <a className="underline" href="#/">Volver al inicio</a>
           </p>
         )}
 
-        {view.kind === "project" && project && (
+        {route.kind === "project" && project && (
           <>
             <ProjectHeader project={project} />
-            <TicketList tickets={myTickets} activeRun={activeRun} onAdd={addTicket} onOpen={open}
+            <TicketList tickets={tickets.filter(t => t.project === project.project)}
+                        activeRun={activeRun} onOpen={id => go({ kind: "ticket", id })}
+                        onAdd={body => act(() => api.create(body, project.name))}
                         onRun={id => act(() => api.run(id))} />
           </>
         )}
 
-        {view.kind === "ticket" && project && detail && (
-          <TicketDetail detail={detail} activeRun={activeRun} projectName={project.name}
-                        onBack={back}
+        {route.kind === "ticket" && !detail && (
+          <p className="text-sm text-muted-foreground">Cargando el ticket…</p>
+        )}
+
+        {route.kind === "ticket" && detail && (
+          <TicketDetail detail={detail} activeRun={activeRun}
                         onRun={(ins, phase, resume) => act(() => api.run(detail.ticket.id, ins, phase, resume))}
-                        onDelete={() => { act(() => api.remove(detail.ticket.id)); back() }}
+                        onDelete={() => {
+                          act(() => api.remove(detail.ticket.id))
+                          go(project ? { kind: "project", name: project.name } : { kind: "home" })
+                        }}
                         // NOT through `act`: that helper swallows the error into the global banner, and
                         // TicketDetail needs the 409 to decide whether to offer the overwrite dialog.
                         onRestore={(runId, overwrite) => api.restore(detail.ticket.id, runId, overwrite).then(() => refresh())} />
@@ -154,10 +158,10 @@ export default function App() {
 
       {/* Same wording and same component the form uses for Cancelar and Escape: leaving
           by a third route shouldn't feel like a different question. */}
-      <ConfirmDialog open={!!pendingNav} title="Hay cambios sin guardar."
+      <ConfirmDialog open={pendingHash !== null} title="Hay cambios sin guardar."
                      body="Si sales ahora se pierden." confirmLabel="Descartar"
-                     onConfirm={() => { const go = pendingNav; setPendingNav(null); go?.() }}
-                     onCancel={() => setPendingNav(null)} />
+                     onConfirm={leaveForm}
+                     onCancel={() => setPendingHash(null)} />
     </div>
   )
 }

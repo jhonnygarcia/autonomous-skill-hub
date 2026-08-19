@@ -37,13 +37,16 @@ export function ConfirmDialog({
     if (!open && d.open) d.close()
   }, [open])
 
+  // `m-auto` below restores the centring `showModal()` gets from the UA stylesheet
+  // (`inset:0; margin:auto`), which Tailwind's preflight zeroes out — without it the
+  // modal pins itself to the top-left corner.
   return (
     <dialog
       ref={ref}
       aria-labelledby={titleId}
       aria-describedby={body ? bodyId : undefined}
       onCancel={e => { e.preventDefault(); onCancel() }}
-      className="max-w-sm rounded-lg border border-border bg-background p-0
+      className="m-auto max-w-sm rounded-lg border border-border bg-background p-0
                  text-foreground backdrop:bg-black/40"
     >
       <div className="space-y-3 p-4">

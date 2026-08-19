@@ -10,13 +10,13 @@ import { blockReason, duration, runColor, ticketStatus } from "@/status"
 // ring, so we give it to them by hand for keyboard navigation.
 const TOGGLE =
   "rounded text-sm font-medium hover:underline focus-visible:outline-none " +
-  "focus-visible:ring-2 focus-visible:ring-ring/50"
+  "focus-visible:outline-1 focus-visible:outline-ring"
 
-export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, onDelete, onRestore }: {
+// The breadcrumb in `TopBar` is the way back now — it used to be a `←` link here, which
+// meant two back affordances on the same screen once the routes landed.
+export function TicketDetail({ detail, activeRun, onRun, onDelete, onRestore }: {
   detail: Detail
   activeRun: ActiveRun | null
-  projectName: string
-  onBack: () => void
   onRun: (instructions?: string, phase?: string, resume?: boolean) => void
   onDelete: () => void
   onRestore: (runId: number, overwrite: boolean) => Promise<void>
@@ -55,12 +55,6 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
 
   return (
     <div className="space-y-4">
-      <button onClick={onBack}
-              className="rounded text-sm text-muted-foreground hover:underline hover:text-foreground
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
-        ← {projectName} / ticket #{t.ado_id}
-      </button>
-
       {/* The header keeps the id, the status and Delete: phase actions live in their
           own timeline row, next to the information that justifies them. */}
       <div className="flex items-center gap-2">
@@ -71,7 +65,7 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
           Borrar
         </Button>
       </div>
-      {reason && <p className="text-xs text-amber-700 dark:text-amber-500">{reason}</p>}
+      {reason && <p className="text-xs text-warning-active">{reason}</p>}
 
       <Timeline phases={detail.fases} runs={detail.runs} activeRun={activeRun} ticketId={t.id}
                 onRun={(phase, ins, resume) => onRun(ins, phase, resume)}
@@ -132,7 +126,7 @@ export function TicketDetail({ detail, activeRun, projectName, onBack, onRun, on
         </button>
         {showLog && (
           <pre className="mt-2 max-h-[28rem] overflow-auto rounded border border-border
-                          bg-gray-950 p-3 text-xs text-gray-100">
+                          bg-tui p-3 text-xs text-tui-foreground">
             {detail.log_tail || "(el log aparecerá cuando arranque la corrida)"}
           </pre>
         )}
