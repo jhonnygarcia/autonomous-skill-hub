@@ -213,7 +213,7 @@ def engine_cmd(engine: str) -> list[str]:
         return json.loads(raw)
     exe = shutil.which(ENGINES[engine]["exe"])
     if not exe:
-        raise HTTPException(500, f"No se encontró el CLI '{ENGINES[engine]['exe']}' en el PATH")
+        raise HTTPException(500, msg("cli_not_found", exe=ENGINES[engine]["exe"]))
     return [exe]
 
 
@@ -591,7 +591,7 @@ def check_dirs(*paths: str) -> None:
     here blows up inside the CLI with an unreadable error."""
     bad = [p for p in paths if not is_repo_dir(p)]
     if bad:
-        raise HTTPException(400, "No existen o no son directorios: " + ", ".join(bad))
+        raise HTTPException(400, msg("not_dirs", paths=", ".join(bad)))
 
 
 def is_dirty(repo: str) -> bool:
@@ -608,20 +608,18 @@ def is_dirty(repo: str) -> bool:
     # git repository" — a 409 that lies about the cause. A real invocation failure
     # (git not installed, etc.) has to propagate, not turn into a 409.
     if not Path(repo).is_dir():
-        raise HTTPException(409, f"No es un repositorio git: {repo}")
+        raise HTTPException(409, msg("not_git_repo", repo=repo))
     r = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
                        capture_output=True, text=True)
     if r.returncode != 0:
-        raise HTTPException(409, f"No es un repositorio git: {repo}")
+        raise HTTPException(409, msg("not_git_repo", repo=repo))
     return any(not ln.startswith("??") for ln in r.stdout.splitlines() if ln.strip())
 
 
 def check_clean(repos: list[str]) -> None:
     bad = [r for r in repos if is_dirty(r)]
     if bad:
-        raise HTTPException(409, "Hay cambios sin commitear en: " + ", ".join(bad)
-                            + ". La fase implement commitea, y no debe llevarse por "
-                              "delante tu trabajo a medias.")
+        raise HTTPException(409, msg("uncommitted_changes", repos=", ".join(bad)))
 
 
 BRANCH_FMT = "ticket-agent/{ado_id}"
@@ -640,7 +638,7 @@ def prepare_branch(repo: str, ado_id: int | str) -> str:
     cmd = ["git", "switch", "-q", name] if exists else ["git", "switch", "-q", "-c", name]
     r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
     if r.returncode != 0:
-        raise HTTPException(409, f"No se pudo preparar la rama en {repo}: {r.stderr.strip()}")
+        raise HTTPException(409, msg("branch_prepare_failed", repo=repo, err=r.stderr.strip()))
     return name
 
 
@@ -825,10 +823,10 @@ def prepare_repos(repos: list[str], ado_id: int | str) -> str | None:
 def split_repos(repos: list) -> tuple:
     """Validates the list exactly as the UI sends it and splits it into (primary, rest)."""
     if not repos:
-        raise HTTPException(400, "El proyecto necesita al menos un repo")
+        raise HTTPException(400, msg("project_needs_repo"))
     primaries = [r for r in repos if r.primary]
     if len(primaries) != 1:
-        raise HTTPException(400, "Marca exactamente un repo como principal")
+        raise HTTPException(400, msg("mark_one_primary"))
     check_dirs(*[r.path for r in repos])
     return primaries[0], [r for r in repos if not r.primary]
 
@@ -847,7 +845,7 @@ def check_org(org: str) -> None:
     `https://dev.azure.com/` and fails with the exact "MCP not connected" message
     this feature exists to eliminate. Caught at save time instead."""
     if not org.strip():
-        raise HTTPException(400, "Falta la organización de Azure DevOps")
+        raise HTTPException(400, msg("missing_org"))
 
 
 def db() -> sqlite3.Connection:
@@ -1079,13 +1077,13 @@ def put_archive(body: ArchiveIn):
     if d:
         p = Path(d)
         if not p.is_dir():
-            raise HTTPException(400, f"No es un directorio: {d}")
+            raise HTTPException(400, msg("not_a_directory", d=d))
         try:
             probe = p / ".orch-probe"
             probe.write_text("", encoding="utf-8")
             probe.unlink()
         except OSError:
-            raise HTTPException(400, f"No se puede escribir en: {d}")
+            raise HTTPException(400, msg("cannot_write_to", d=d))
     set_setting("archive_dir", d)
     return {"dir": d}
 
@@ -1105,7 +1103,7 @@ def put_idioma(body: IdiomaIn):
     target repo — never the API's own JSON keys, which stay Spanish contract literals
     (see `CANON_TIPO`)."""
     if body.idioma not in LANGS:
-        raise HTTPException(400, f"Idioma no reconocido: {body.idioma}")
+        raise HTTPException(400, msg("unknown_language", idioma=body.idioma))
     set_setting("idioma", body.idioma)
     return {"idioma": body.idioma}
 
@@ -1136,26 +1134,24 @@ def put_models(body: dict[str, PhaseConfig]):
     phases with the new model and others with the old one, and nobody would know which."""
     for phase, cfg in body.items():
         if phase not in PHASE_COMMANDS:
-            raise HTTPException(400, f"La fase '{phase}' no es ejecutable")
+            raise HTTPException(400, msg("phase_not_runnable", phase=phase))
         if cfg.engine not in ENGINES:
             raise HTTPException(
-                400, f"Engine inválido: '{cfg.engine}' (usa {', '.join(ENGINES)})")
+                400, msg("invalid_engine", engine=cfg.engine, opciones=", ".join(ENGINES)))
         forced = SINGLE_ENGINE_PHASES.get(phase)
         if forced and cfg.engine != forced:
             raise HTTPException(
-                400, f"La fase '{phase}' solo corre en {ENGINES[forced]['label']}: cada "
-                     "hijo del abanico es una sesión enraizada en el otro repo, con sus "
-                     "reglas, sus hooks y su .mcp.json, y ese montaje es de ese CLI")
+                400, msg("phase_single_engine", phase=phase, label=ENGINES[forced]["label"]))
         if cfg.model and not MODEL_RE.match(cfg.model):
-            raise HTTPException(400, f"Modelo inválido: '{cfg.model}'")
+            raise HTTPException(400, msg("invalid_model", model=cfg.model))
         # Against THAT engine's list, not the union: `max` is legal in Claude and dies
         # with a 400 from the provider in Codex, and the run is the worst place to find
         # that out.
         efforts = ENGINES[cfg.engine]["efforts"]
         if cfg.effort not in efforts:
             raise HTTPException(
-                400, f"Effort inválido para {ENGINES[cfg.engine]['label']}: "
-                     f"'{cfg.effort}' (usa {', '.join(efforts[1:])})")
+                400, msg("invalid_effort", label=ENGINES[cfg.engine]["label"],
+                         effort=cfg.effort, opciones=", ".join(efforts[1:])))
     with db() as c:
         for phase, cfg in body.items():
             c.execute(
@@ -1178,7 +1174,7 @@ def create_project(body: ProjectIn):
     cols = repos_columns(body)
     with db() as c:
         if c.execute("SELECT 1 FROM projects WHERE name=?", (body.name,)).fetchone():
-            raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
+            raise HTTPException(409, msg("project_already_exists", name=body.name))
         c.execute(
             "INSERT INTO projects(name, org, project, repo_path, repo_label, extra_dirs, "
             "ado_pat) VALUES(?,?,?,?,?,?,?)",
@@ -1196,7 +1192,7 @@ def update_project(name: str, body: ProjectIn):
     # Renaming is safe: tickets copy the project's data when they're created, so none
     # of them point here. All that matters is keeping the name unique.
     if body.name != name and get_project(body.name):
-        raise HTTPException(409, f"Ya existe un proyecto '{body.name}'")
+        raise HTTPException(409, msg("project_already_exists", name=body.name))
     check_org(body.org)
     cols = repos_columns(body)
     # `None` (the field wasn't sent) keeps the stored token — the API never returns
@@ -1235,11 +1231,11 @@ def validar_ruta(body: RutaIn):
 def create_ticket(body: TicketIn):
     proj = get_project(body.project)
     if not proj:
-        raise HTTPException(400, f"El proyecto '{body.project}' no está dado de alta")
+        raise HTTPException(400, msg("project_not_registered", project=body.project))
     has_ado = body.ado_id is not None
     has_request = bool(body.request and body.request.strip())
     if has_ado == has_request:
-        raise HTTPException(400, "Manda ado_id o request, y exactamente uno de los dos")
+        raise HTTPException(400, msg("ticket_xor"))
     if has_request:
         # Stored stripped, not just validated stripped: a caller that skips the UI
         # (curl, the plugin) could otherwise leave leading/trailing whitespace that
@@ -1846,6 +1842,144 @@ def w(key: str, code: str | None = None, **fmt) -> str:
     """One deliverable-facing word or phrase. `code` defaults to the knob; pass it
     explicitly when appending to a file whose own language already decided."""
     return WORDS[code or lang()][key].format(**fmt)
+
+
+# UI-facing: lo lee el humano en el navegador. Sigue la perilla, como `WORDS`, pero
+# a diferencia de `WORDS` esto no termina dentro de ningún `.md` del repo destino —
+# es una respuesta HTTP y se resuelve siempre contra la perilla, nunca contra un
+# archivo. Los `code` estructurados (ver `RESTORE_EXISTS_CODE`) son contrato con el
+# frontend y NO viven acá: sólo el `msg` que los acompaña.
+MSG = {
+    "es": {
+        "cli_not_found": "No se encontró el CLI '{exe}' en el PATH",
+        "not_dirs": "No existen o no son directorios: {paths}",
+        "not_git_repo": "No es un repositorio git: {repo}",
+        "uncommitted_changes": "Hay cambios sin commitear en: {repos}. La fase "
+            "implement commitea, y no debe llevarse por delante tu trabajo a medias.",
+        "branch_prepare_failed": "No se pudo preparar la rama en {repo}: {err}",
+        "project_needs_repo": "El proyecto necesita al menos un repo",
+        "mark_one_primary": "Marca exactamente un repo como principal",
+        "missing_org": "Falta la organización de Azure DevOps",
+        "not_a_directory": "No es un directorio: {d}",
+        "cannot_write_to": "No se puede escribir en: {d}",
+        "unknown_language": "Idioma no reconocido: {idioma}",
+        "phase_not_runnable": "La fase '{phase}' no es ejecutable",
+        "invalid_engine": "Engine inválido: '{engine}' (usa {opciones})",
+        "phase_single_engine": "La fase '{phase}' solo corre en {label}: cada hijo "
+            "del abanico es una sesión enraizada en el otro repo, con sus reglas, "
+            "sus hooks y su .mcp.json, y ese montaje es de ese CLI",
+        "invalid_model": "Modelo inválido: '{model}'",
+        "invalid_effort": "Effort inválido para {label}: '{effort}' (usa {opciones})",
+        "project_already_exists": "Ya existe un proyecto '{name}'",
+        "project_not_registered": "El proyecto '{project}' no está dado de alta",
+        "ticket_xor": "Manda ado_id o request, y exactamente uno de los dos",
+        "phase_not_runnable_yet": "La fase '{phase}' no es ejecutable todavía",
+        "ticket_run_active": "Este ticket ya tiene una corrida activa",
+        "cannot_launch": "No se puede lanzar: {motivos}",
+        "config_create_failed": "No se pudo crear {rel}: {reason}",
+        "no_snapshot": "Esa corrida no dejó snapshot que restaurar",
+        "restore_not_primary": "Esa corrida archivó su entregable desde un repo "
+            "montado, no el principal: no se puede restaurar en un click. Cópialo a "
+            "mano desde {src}",
+        "ticket_active_wait_restore": "Este ticket tiene una corrida activa; "
+            "restaura cuando termine",
+        "snapshot_missing": "El snapshot ya no está en disco: {src}",
+        "path_outside_repo": "Ruta fuera del repo: {rel}",
+        "kind_dir": "un directorio",
+        "kind_file": "un archivo",
+        "restore_type_mismatch": "{rel} es {en_repo} en el repo pero el snapshot "
+            "es {en_snapshot}. Bórralo a mano si de verdad quieres reemplazarlo por "
+            "el otro tipo.",
+        "restore_tree_exists": "Ya hay archivos en {rel}: un árbol nunca se "
+            "sobreescribe. Si de verdad quieres volver atrás, bórralo a mano y "
+            "vuelve a restaurar",
+        "restore_failed": "No se pudo restaurar {rel}: {exc}",
+        "restore_file_exists": "Ya existe {rel}; repite con overwrite para "
+            "reemplazarlo",
+        "invalid_path": "Ruta inválida: {exc}",
+        "path_not_declared": "Esa ruta no la declaró ninguna corrida de este ticket",
+        "path_outside_ticket_repos": "Esa ruta cae fuera de los repos del ticket",
+        "not_regular_file": "No es un archivo regular",
+        "ticket_active_wait_decisions": "Este ticket tiene una corrida activa; "
+            "consulta las decisiones cuando termine",
+        "read_failed": "No se pudo leer {ruta}: {exc}",
+        "ticket_active_wait_answer": "Este ticket tiene una corrida activa; "
+            "responde cuando termine",
+        "answer_or_accept_required": "Escribe una respuesta o acepta la propuesta",
+        "already_answered": "Ese punto ya fue respondido",
+        "file_changed_reload": "El archivo cambió desde que se cargaron las "
+            "decisiones: vuelve a consultarlas e inténtalo de nuevo",
+        "no_proposal": "Este punto no trae una propuesta que aceptar",
+        "write_failed": "No se pudo escribir {ruta}: {exc}",
+    },
+    "en": {
+        "cli_not_found": "Could not find the '{exe}' CLI on the PATH",
+        "not_dirs": "Do not exist or are not directories: {paths}",
+        "not_git_repo": "Not a git repository: {repo}",
+        "uncommitted_changes": "There are uncommitted changes in: {repos}. The "
+            "implement phase commits, and it must not run over your work in "
+            "progress.",
+        "branch_prepare_failed": "Could not prepare the branch in {repo}: {err}",
+        "project_needs_repo": "The project needs at least one repo",
+        "mark_one_primary": "Mark exactly one repo as primary",
+        "missing_org": "Missing Azure DevOps organization",
+        "not_a_directory": "Not a directory: {d}",
+        "cannot_write_to": "Cannot write to: {d}",
+        "unknown_language": "Unrecognized language: {idioma}",
+        "phase_not_runnable": "Phase '{phase}' is not runnable",
+        "invalid_engine": "Invalid engine: '{engine}' (use {opciones})",
+        "phase_single_engine": "Phase '{phase}' only runs on {label}: every child "
+            "of the fan-out is a session rooted in the other repo, with its own "
+            "rules, its hooks and its .mcp.json, and that mount belongs to that CLI",
+        "invalid_model": "Invalid model: '{model}'",
+        "invalid_effort": "Invalid effort for {label}: '{effort}' (use {opciones})",
+        "project_already_exists": "A project '{name}' already exists",
+        "project_not_registered": "The project '{project}' is not registered",
+        "ticket_xor": "Send ado_id or request, exactly one of the two",
+        "phase_not_runnable_yet": "Phase '{phase}' is not runnable yet",
+        "ticket_run_active": "This ticket already has an active run",
+        "cannot_launch": "Cannot launch: {motivos}",
+        "config_create_failed": "Could not create {rel}: {reason}",
+        "no_snapshot": "That run left no snapshot to restore",
+        "restore_not_primary": "That run archived its deliverable from a mounted "
+            "repo, not the primary one: it can't be restored in one click. Copy it "
+            "by hand from {src}",
+        "ticket_active_wait_restore": "This ticket has an active run; restore once "
+            "it finishes",
+        "snapshot_missing": "The snapshot is no longer on disk: {src}",
+        "path_outside_repo": "Path outside the repo: {rel}",
+        "kind_dir": "a directory",
+        "kind_file": "a file",
+        "restore_type_mismatch": "{rel} is {en_repo} in the repo but the snapshot "
+            "is {en_snapshot}. Delete it by hand if you really want to replace it "
+            "with the other type.",
+        "restore_tree_exists": "There are already files in {rel}: a tree is never "
+            "overwritten. If you really want to roll back, delete it by hand and "
+            "restore again",
+        "restore_failed": "Could not restore {rel}: {exc}",
+        "restore_file_exists": "{rel} already exists; retry with overwrite to "
+            "replace it",
+        "invalid_path": "Invalid path: {exc}",
+        "path_not_declared": "That path was not declared by any run of this ticket",
+        "path_outside_ticket_repos": "That path falls outside the ticket's repos",
+        "not_regular_file": "Not a regular file",
+        "ticket_active_wait_decisions": "This ticket has an active run; check the "
+            "decisions once it finishes",
+        "read_failed": "Could not read {ruta}: {exc}",
+        "ticket_active_wait_answer": "This ticket has an active run; answer once "
+            "it finishes",
+        "answer_or_accept_required": "Write an answer or accept the proposal",
+        "already_answered": "That point was already answered",
+        "file_changed_reload": "The file changed since the decisions were loaded: "
+            "reload them and try again",
+        "no_proposal": "This point carries no proposal to accept",
+        "write_failed": "Could not write {ruta}: {exc}",
+    },
+}
+
+
+def msg(key: str, **fmt) -> str:
+    return MSG[lang()][key].format(**fmt)
 
 
 # The markers a deliverable closes with, unticked. `- [x]` is an answered one and
@@ -2769,19 +2903,18 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
     if not t:
         raise HTTPException(404)
     if body.phase not in PHASE_COMMANDS:
-        raise HTTPException(400, f"La fase '{body.phase}' no es ejecutable todavía")
+        raise HTTPException(400, msg("phase_not_runnable_yet", phase=body.phase))
     with db() as c:
         active = c.execute(
             "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued','running')", (tid,)
         ).fetchone()
     if active:
-        raise HTTPException(409, "Este ticket ya tiene una corrida activa")
+        raise HTTPException(409, msg("ticket_run_active"))
     # The authoritative gate. The panel in the UI is the early one — it can be stale by
     # the time you click, and nothing forces a caller through it at all.
     blocked = preflight_blockers(preflight(dict(t)), body.phase)
     if blocked:
-        raise HTTPException(400, "No se puede lanzar: "
-                            + "; ".join(b["msg"] for b in blocked))
+        raise HTTPException(400, msg("cannot_launch", motivos="; ".join(b["msg"] for b in blocked)))
     if body.phase == "implement":
         # The guard, here: it's the one that returns the immediate 409 without spending
         # a subprocess or leaving a run queued, and the design calls for that property.
@@ -2828,8 +2961,17 @@ def prepare_ticket_repo(tid: int):
     ticket = dict(t)
     result = ensure_ticket_agent_config(ticket)
     if result.startswith("error:"):
-        raise HTTPException(409, f"No se pudo crear {TICKET_AGENT_CONFIG_REL}: "
-                                 + result[len("error:"):].strip())
+        reason = result[len("error:"):].strip()
+        try:
+            detail = msg("config_create_failed", rel=TICKET_AGENT_CONFIG_REL, reason=reason)
+        except sqlite3.Error:
+            # Same failure `ensure_ticket_agent_config` already survived (a locked or
+            # unreadable DB breaks `lang()` too): the 409 must still carry the reason,
+            # not blow up the endpoint a second time. Falls back to `es`, same default
+            # `lang()` itself uses for anything it can't resolve.
+            detail = MSG["es"]["config_create_failed"].format(
+                rel=TICKET_AGENT_CONFIG_REL, reason=reason)
+        raise HTTPException(409, detail)
     if result == "created":
         journal_note(ticket, w("config_ui", journal_code(ticket), rel=TICKET_AGENT_CONFIG_REL))
     return preflight(ticket)
@@ -2868,7 +3010,7 @@ def restore_run(tid: int, body: RestoreIn):
             "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued','running')",
             (tid,)).fetchone()
     if not r or not r["archive_path"] or r["artifact_state"] not in ("ok", "parcial"):
-        raise HTTPException(404, "Esa corrida no dejó snapshot que restaurar")
+        raise HTTPException(404, msg("no_snapshot"))
     # `restorable` is the SAME flag the UI's buttons key off — NULL (nobody checked,
     # every row before the column existed) and 0 (checked, and it wasn't) both deny
     # here too. This is what actually stops a direct `POST /restaurar` call, not just
@@ -2878,19 +3020,18 @@ def restore_run(tid: int, body: RestoreIn):
     # prevent, just moved to the restore side.
     if not r["restorable"]:
         raise HTTPException(
-            404, "Esa corrida archivó su entregable desde un repo montado, no el "
-                 "principal: no se puede restaurar en un click. Cópialo a mano desde "
-                 f"{Path(r['archive_path']) / 'salida' / r['artifact_path']}")
+            404, msg("restore_not_primary",
+                     src=Path(r["archive_path"]) / "salida" / r["artifact_path"]))
     if active:
-        raise HTTPException(409, "Este ticket tiene una corrida activa; restaura cuando termine")
+        raise HTTPException(409, msg("ticket_active_wait_restore"))
     rel = r["artifact_path"]
     src = Path(r["archive_path"]) / "salida" / rel
     if not src.exists():
-        raise HTTPException(404, f"El snapshot ya no está en disco: {src}")
+        raise HTTPException(404, msg("snapshot_missing", src=src))
     repo = Path(t["repo_path"]).resolve()
     dest = (repo / rel).resolve()
     if not dest.is_relative_to(repo):
-        raise HTTPException(400, f"Ruta fuera del repo: {rel}")
+        raise HTTPException(400, msg("path_outside_repo", rel=rel))
     # A type flip (tree over a file, file over a tree) means the repo holds something
     # structurally different from what was archived. Without this, `dest.rglob("*")`
     # on a plain file silently returns nothing (making the tree guard below pass) and
@@ -2900,32 +3041,29 @@ def restore_run(tid: int, body: RestoreIn):
     # `overwrite` does not bypass this: it's not this endpoint's call to resolve a
     # structural mismatch.
     if dest.exists() and dest.is_dir() != src.is_dir():
-        en_repo = "un directorio" if dest.is_dir() else "un archivo"
-        en_snapshot = "un directorio" if src.is_dir() else "un archivo"
+        en_repo = msg("kind_dir") if dest.is_dir() else msg("kind_file")
+        en_snapshot = msg("kind_dir") if src.is_dir() else msg("kind_file")
         raise HTTPException(
-            409, f"{rel} es {en_repo} en el repo pero el snapshot es {en_snapshot}. "
-                 "Bórralo a mano si de verdad quieres reemplazarlo por el otro tipo.")
+            409, msg("restore_type_mismatch", rel=rel, en_repo=en_repo, en_snapshot=en_snapshot))
     if src.is_dir():
         if dest.exists() and any(x.is_file() for x in dest.rglob("*")):
-            raise HTTPException(
-                409, f"Ya hay archivos en {rel}: un árbol nunca se sobreescribe. "
-                     "Si de verdad quieres volver atrás, bórralo a mano y vuelve a restaurar")
+            raise HTTPException(409, msg("restore_tree_exists", rel=rel))
         try:
             shutil.copytree(src, dest, dirs_exist_ok=True)
         except OSError as exc:
-            raise HTTPException(409, f"No se pudo restaurar {rel}: {exc}")
+            raise HTTPException(409, msg("restore_failed", rel=rel, exc=exc))
         n = sum(1 for x in src.rglob("*") if x.is_file())
     else:
         if dest.exists() and not body.overwrite:
             raise HTTPException(409, {
                 "code": RESTORE_EXISTS_CODE,
-                "msg": f"Ya existe {rel}; repite con overwrite para reemplazarlo",
+                "msg": msg("restore_file_exists", rel=rel),
             })
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.copy2(src, dest)
         except OSError as exc:
-            raise HTTPException(409, f"No se pudo restaurar {rel}: {exc}")
+            raise HTTPException(409, msg("restore_failed", rel=rel, exc=exc))
         n = 1
     # `extra=`, not `note=`: `note` renders as `· reserva: ...`, and `reserva` is the
     # label for a `parcial` stamp's caveat — this line isn't one, it's the restore's
@@ -2980,7 +3118,7 @@ def declared_file(t: sqlite3.Row, ruta: str) -> Path:
     try:
         real = (Path(t["repo_path"]) / ruta).resolve()
     except (ValueError, OSError) as exc:
-        raise HTTPException(400, f"Ruta inválida: {exc}")
+        raise HTTPException(400, msg("invalid_path", exc=exc))
 
     # 1. Declared by a run OF THIS TICKET, or a file UNDER a declared directory — at
     #    any depth, not just a direct child: `stamp_stat` (Task 3) counts recursively
@@ -3019,16 +3157,16 @@ def declared_file(t: sqlite3.Row, ruta: str) -> Path:
         if any(r in rd.parents for r in roots):
             real_declared.append(rd)  # strictly inside some root: valid
     if not any(real == d or d in real.parents for d in real_declared):
-        raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
+        raise HTTPException(400, msg("path_not_declared"))
 
     # 2. Falls inside the main repo or the ticket's extras. resolve() follows symlinks,
     #    so a symlink pointing outside dies here.
     if not any(real == r or r in real.parents for r in roots):
-        raise HTTPException(400, "Esa ruta cae fuera de los repos del ticket")
+        raise HTTPException(400, msg("path_outside_ticket_repos"))
 
     # 3. Regular file: neither a directory nor a device.
     if not real.is_file():
-        raise HTTPException(400, "No es un archivo regular")
+        raise HTTPException(400, msg("not_regular_file"))
 
     return real
 
@@ -3099,14 +3237,14 @@ def decisiones(tid: int, ruta: str):
     if not t:
         raise HTTPException(404)
     if not _no_active_run(tid):
-        raise HTTPException(409, "Este ticket tiene una corrida activa; consulta las decisiones cuando termine")
+        raise HTTPException(409, msg("ticket_active_wait_decisions"))
     p = declared_file_or_none(t, ruta)
     if not p:
-        raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
+        raise HTTPException(400, msg("path_not_declared"))
     try:
         text = read_text_preserving_newlines(p)
     except OSError as exc:
-        raise HTTPException(404, f"No se pudo leer {ruta}: {exc}")
+        raise HTTPException(404, msg("read_failed", ruta=ruta, exc=exc))
     puntos = [{k: v for k, v in it.items() if not k.startswith("_")} for it in _decision_items(text)]
     return {"puntos": puntos}
 
@@ -3136,16 +3274,16 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
     if not t:
         raise HTTPException(404)
     if not _no_active_run(tid):
-        raise HTTPException(409, "Este ticket tiene una corrida activa; responde cuando termine")
+        raise HTTPException(409, msg("ticket_active_wait_answer"))
     p = declared_file_or_none(t, body.ruta)
     if not p:
-        raise HTTPException(400, "Esa ruta no la declaró ninguna corrida de este ticket")
+        raise HTTPException(400, msg("path_not_declared"))
     if not body.aceptar_propuesta and not (body.respuesta and body.respuesta.strip()):
-        raise HTTPException(400, "Escribe una respuesta o acepta la propuesta")
+        raise HTTPException(400, msg("answer_or_accept_required"))
     try:
         text = read_text_preserving_newlines(p)
     except OSError as exc:
-        raise HTTPException(404, f"No se pudo leer {body.ruta}: {exc}")
+        raise HTTPException(404, msg("read_failed", ruta=body.ruta, exc=exc))
     items = _decision_items(text)
     item = next((it for it in items if it["id"] == body.id), None)
     if not item:
@@ -3158,15 +3296,13 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
             if it["respondido"]:
                 core = text[it["_abs_start"]: it["_abs_start"] + it["_core_len"]]
                 if _pre_answer_id(core) == body.id:
-                    raise HTTPException(409, "Ese punto ya fue respondido")
-        raise HTTPException(
-            409, "El archivo cambió desde que se cargaron las decisiones: vuelve a "
-                 "consultarlas e inténtalo de nuevo")
+                    raise HTTPException(409, msg("already_answered"))
+        raise HTTPException(409, msg("file_changed_reload"))
     if item["respondido"]:
-        raise HTTPException(409, "Ese punto ya fue respondido")
+        raise HTTPException(409, msg("already_answered"))
     if body.aceptar_propuesta:
         if not item["propuesta"]:
-            raise HTTPException(400, "Este punto no trae una propuesta que aceptar")
+            raise HTTPException(400, msg("no_proposal"))
         answer = item["propuesta"]
     else:
         answer = body.respuesta.strip()
@@ -3174,7 +3310,7 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
     try:
         write_text_preserving_newlines(p, new_text)
     except OSError as exc:
-        raise HTTPException(409, f"No se pudo escribir {body.ruta}: {exc}")
+        raise HTTPException(409, msg("write_failed", ruta=body.ruta, exc=exc))
     jcode = journal_code(t)
     append_journal(dict(t), "decision", "ok", body.ruta,
                     extra=[f"{item['_marker']} {w('respondida', jcode)}: {item['pregunta'][:80]}"])

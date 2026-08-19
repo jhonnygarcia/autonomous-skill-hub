@@ -4339,6 +4339,19 @@ def test_idioma_rejects_anything_outside_the_two(client):
     assert client.get("/idioma").json() == {"idioma": "es"}
 
 
+def test_error_messages_follow_the_language_knob(client):
+    """Con la UI en inglés, un toast en español es el trabajo a medias."""
+    client.put("/idioma", json={"idioma": "en"})
+    r = client.put("/archivo", json={"dir": "Z:/no/existe/seguro"})
+    assert r.status_code == 400
+    assert "Not a directory" in r.json()["detail"]
+
+    client.put("/idioma", json={"idioma": "es"})
+    r = client.put("/archivo", json={"dir": "Z:/no/existe/seguro"})
+    assert r.status_code == 400
+    assert "No es un directorio" in r.json()["detail"]
+
+
 def test_the_language_directive_travels_in_the_prompt(client, monkeypatch):
     """The knob is worth nothing if the directive doesn't reach the child."""
     client.put("/idioma", json={"idioma": "en"})
