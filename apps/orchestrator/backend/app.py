@@ -725,8 +725,8 @@ LANGUAGE_PROMPT = (
     "for the human, including the DECIDIR/BLOQUEA section. Do NOT translate: literal "
     "quotes from the work item (they keep the source's language, so they can still be "
     "checked against the ticket), code identifiers, paths, `file:line`, branch names, "
-    "commit subjects, the `HUELLA:` and `SONDEAR:` lines, or OpenSpec's structural "
-    "headers. Your skill's `Output language` section carries the full list.")
+    "commit subjects, the `HUELLA:` line, or OpenSpec's structural headers. Your "
+    "skill's `Output language` section carries the full list.")
 
 
 def language_text(noun: str) -> str:
