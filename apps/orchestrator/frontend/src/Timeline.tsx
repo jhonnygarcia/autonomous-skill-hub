@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Decisions } from "@/Decisions"
 import { Markdown } from "@/Markdown"
 import { canRunPhase, durationText, formatSize, formatTime, phaseLabel, phaseColor, phaseIcon } from "@/status"
+import { plural, t } from "@/strings"
 
 // Shared focus/hover style for the viewer's native <button>s: shadcn buttons already
 // have their own ring, but these are plain (file chips, close, adjust) and without
@@ -95,7 +96,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
             <p key={b.que} className="text-destructive">
               ✖ {b.msg}
               {b.fases && <span className="text-muted-foreground">
-                {" "}(bloquea: {b.fases.map(x => phaseLabel(x)).join(", ")})
+                {" "}({t("timeline.blocksLabel")}: {b.fases.map(x => phaseLabel(x)).join(", ")})
               </span>}
             </p>
           ))}
@@ -105,7 +106,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
           {repairable && (
             <Button size="sm" variant="outline" className="mt-2" disabled={preparing}
                     onClick={prepare}>
-              {preparing ? "Preparando…" : "Preparar repo"}
+              {preparing ? t("timeline.preparing") : t("timeline.prepareRepo")}
             </Button>
           )}
           {pfError && <p className="mt-1 text-destructive">{pfError}</p>}
@@ -166,11 +167,11 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
         // of a row of loose chips: this way the phase name stays the only element
         // with visual weight and the rest reads as data, not another label.
         const metaParts: string[] = []
-        if (!f.disponible) metaParts.push("no disponible aún")
-        else if (f.estado === "pendiente") metaParts.push("sin corridas")
+        if (!f.disponible) metaParts.push(t("timeline.notAvailableYet"))
+        else if (f.estado === "pendiente") metaParts.push(t("timeline.noRunsShort"))
         if (f.en) metaParts.push(formatTime(f.en))
         if (f.duracion_s != null) metaParts.push(durationText(f.duracion_s))
-        if (f.corridas) metaParts.push(`${f.corridas} ${f.corridas === 1 ? "corrida" : "corridas"}`)
+        if (f.corridas) metaParts.push(`${f.corridas} ${plural(f.corridas, t("timeline.oneRun"), t("timeline.manyRuns"))}`)
 
         return (
           <li key={f.fase} className={`relative pl-9 ${f.disponible ? "" : "opacity-60"}`}>
@@ -209,18 +210,18 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                     <Button size="sm" variant={f.estado === "pendiente" ? "default" : "outline"}
                             disabled={!!blocked} title={blocked || undefined}
                             onClick={() => onRun(f.fase)}>
-                      {f.corridas ? "Re-correr" : "Correr"}
+                      {f.corridas ? t("timeline.rerun") : t("timeline.run")}
                     </Button>
                     <Button size="sm" variant="ghost" disabled={!!blocked}
-                            title={blocked || "Correr con instrucciones de ajuste"}
-                            aria-label={`Ajustar y correr ${phaseLabel(f.fase)}`}
+                            title={blocked || t("timeline.runWithAdjustmentsTitle")}
+                            aria-label={`${t("timeline.adjustAndRunAriaLabel")} ${phaseLabel(f.fase)}`}
                             aria-expanded={openPhase === f.fase}
                             aria-controls={`ajuste-${f.fase}`}
                             onClick={() => {
                               setOpenPhase(openPhase === f.fase ? null : f.fase)
                               setInstructions(""); setResume(false)
                             }}>
-                      ▾ Ajustar
+                      ▾ {t("timeline.adjust")}
                     </Button>
                   </div>
                 )}
@@ -240,7 +241,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                          style={{ width: `${Math.round(100 * f.progreso.hechas / f.progreso.total)}%` }} />
                   </div>
                   <span className="text-muted-foreground">
-                    tarea {f.progreso.hechas} de {f.progreso.total}
+                    {t("timeline.taskLabel")} {f.progreso.hechas} {t("timeline.taskOfLabel")} {f.progreso.total}
                   </span>
                 </div>
               )}
@@ -279,7 +280,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                   No slot when there's no branch — that's normal for the rest of the phases. */}
               {branch && (
                 <div className="flex flex-wrap items-center gap-x-2 pb-2 text-xs">
-                  <span className="text-muted-foreground">Rama</span>
+                  <span className="text-muted-foreground">{t("timeline.branchLabel")}</span>
                   <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
                     {branch}
                   </span>
@@ -291,12 +292,12 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                   {h.existe ? (
                     <>
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="text-muted-foreground">Artefacto</span>
+                        <span className="text-muted-foreground">{t("timeline.artifactLabel")}</span>
                         <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
                           {h.ruta}
                         </span>
                         <span className="text-muted-foreground">
-                          {h.archivos === 1 ? formatSize(h.bytes) : `${h.archivos} archivos · ${formatSize(h.bytes)}`}
+                          {h.archivos === 1 ? formatSize(h.bytes) : `${h.archivos} ${t("timeline.filesLabel")} · ${formatSize(h.bytes)}`}
                         </span>
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
@@ -307,7 +308,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                                   className={`${CHIP} ${viewer?.ruta === it.ruta
                                     ? "border-ring bg-accent text-accent-foreground"
                                     : "border-border text-muted-foreground"}`}>
-                            {loading === it.ruta ? "cargando…" : it.etiqueta}
+                            {loading === it.ruta ? t("common.loading") : it.etiqueta}
                           </button>
                         ))}
                       </div>
@@ -322,7 +323,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                         <Button size="sm" variant="outline" className="h-6 text-xs"
                                 disabled={restoring.has(restorableRun.id)}
                                 onClick={() => onRestore(restorableRun.id)}>
-                          Restaurar desde el archivo
+                          {t("timeline.restoreFromArchive")}
                         </Button>
                       )}
                     </span>
@@ -333,8 +334,8 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
               {openPhase === f.fase && (
                 <div id={`ajuste-${f.fase}`} className="pb-3">
                   <Textarea rows={2} value={instructions}
-                            placeholder={`Ajuste para ${phaseLabel(f.fase)}…`}
-                            aria-label={`Ajuste para ${phaseLabel(f.fase)}`}
+                            placeholder={`${t("timeline.adjustmentFor")} ${phaseLabel(f.fase)}…`}
+                            aria-label={`${t("timeline.adjustmentFor")} ${phaseLabel(f.fase)}`}
                             onChange={e => setInstructions(e.target.value)} />
 
                   {/* Two mutually exclusive routes, so a radio and not a checkbox:
@@ -342,26 +343,26 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                       because it's the safe one — continuing drags along the very
                       reasoning the adjustment may be correcting. */}
                   <fieldset className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                    <legend className="sr-only">Cómo aplicar el ajuste</legend>
+                    <legend className="sr-only">{t("timeline.howAdjustmentApplies")}</legend>
                     <label className="flex items-center gap-1.5">
                       <input type="radio" name={`modo-${f.fase}`} checked={!resume}
                              onChange={() => setResume(false)} />
-                      Sesión nueva
+                      {t("timeline.newSession")}
                     </label>
                     <label className="flex items-center gap-1.5"
                            title={f.puede_continuar
                              ? undefined
-                             : "Esta fase no tiene una sesión previa que continuar"}>
+                             : t("timeline.noPreviousSessionTitle")}>
                       <input type="radio" name={`modo-${f.fase}`} checked={resume}
                              disabled={!f.puede_continuar}
                              onChange={() => setResume(true)} />
                       <span className={f.puede_continuar ? "" : "text-muted-foreground"}>
-                        Continuar la anterior
+                        {t("timeline.continuePrevious")}
                       </span>
                     </label>
                     {!!f.continuaciones && (
                       <span className="text-muted-foreground">
-                        {f.continuaciones + 1}ª continuación
+                        #{f.continuaciones + 1} {t("timeline.continuationLabel")}
                       </span>
                     )}
                   </fieldset>
@@ -378,7 +379,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                             onRun(f.fase, instructions, resume)
                             setInstructions(""); setResume(false); setOpenPhase(null)
                           }}>
-                    Correr con este ajuste
+                    {t("timeline.runWithAdjustmentButton")}
                   </Button>
                 </div>
               )}
@@ -393,12 +394,12 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
               {viewer && paths.includes(viewer.ruta) && (
                 <div className="mb-3 overflow-hidden rounded-md border border-border">
                   <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/50 px-3 py-1.5 text-xs">
-                    <span className="text-muted-foreground">Viendo</span>
+                    <span className="text-muted-foreground">{t("timeline.viewing")}</span>
                     <span className="font-mono text-foreground">{viewer.ruta}</span>
                     <span className="text-muted-foreground">· {formatSize(viewer.bytes)}</span>
                     {viewer.truncado && (
                       <span className="text-warning-active">
-                        · truncado a 512 KB, se muestra solo el inicio
+                        · {t("timeline.truncatedNote")}
                       </span>
                     )}
                     {/* Toggle, never a replacement: the rendered view is a convenience
@@ -406,11 +407,11 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                     <button onClick={() => setRendered(v => !v)}
                             aria-pressed={!rendered}
                             className={`${CHIP} ml-auto border-border text-muted-foreground`}>
-                      {rendered ? "ver crudo" : "ver renderizado"}
+                      {rendered ? t("timeline.viewRaw") : t("timeline.viewRendered")}
                     </button>
                     <button onClick={() => setViewer(null)}
                             className={`${CHIP} border-transparent text-muted-foreground`}>
-                      cerrar
+                      {t("timeline.close")}
                     </button>
                   </div>
                   {rendered ? (

@@ -3,6 +3,7 @@ import { api, type Engine, type PhaseModels as Config } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Info } from "@/Info"
 import { phaseLabel } from "@/status"
+import { t } from "@/strings"
 
 // The fan-out is Claude's: each child is a session rooted in the other repo, with ITS
 // rules, hooks and `.mcp.json`, and that mounting is Claude Code's. The backend rejects
@@ -119,15 +120,14 @@ const PHASE_INFO: Record<string, ReactNode> = {
  *  list and disappear from the screen. */
 const STAGE: Record<string, { title: string; note?: string }> = {
   analyze: {
-    title: "1 · Entender el ticket",
-    note: "Dos caminos al mismo documento, y eliges uno al lanzar: Análisis si el " +
-      "proyecto es un solo repo; Brief → Sondeo → Consolidación si son varios.",
+    title: t("models.stageAnalyzeTitle"),
+    note: t("models.stageAnalyzeNote"),
   },
-  design: { title: "2 · Planear el cambio" },
-  implement: { title: "3 · Escribir el código" },
+  design: { title: t("models.stageDesignTitle") },
+  implement: { title: t("models.stageImplementTitle") },
 }
 
-function Selector({ value, onChange, options, label, empty = "(por defecto)" }: {
+function Selector({ value, onChange, options, label, empty = t("models.selectorDefault") }: {
   value: string; onChange: (v: string) => void; options: string[]
   label: string; empty?: string | null
 }) {
@@ -180,7 +180,7 @@ export function Models() {
         <strong>planearlo</strong> y <strong>escribir el código</strong>. Aquí eliges,
         para cada fase, con qué <strong>motor</strong> corre, con qué{" "}
         <strong>modelo</strong> y con cuánto <strong>esfuerzo</strong> de razonamiento.
-        <Info label="Cómo funciona esto">
+        <Info label={t("models.infoLabel")}>
           <p>
             El <strong>motor</strong> es el programa de IA que ejecuta la fase:{" "}
             <code className="text-foreground">claude</code> o{" "}
@@ -218,10 +218,10 @@ export function Models() {
             </colgroup>
             <thead>
               <tr>
-                <th className={th}>fase</th>
-                <th className={th}>motor</th>
-                <th className={th}>modelo</th>
-                <th className={th}>esfuerzo</th>
+                <th className={th}>{t("models.tableHeaderPhase")}</th>
+                <th className={th}>{t("models.tableHeaderEngine")}</th>
+                <th className={th}>{t("models.tableHeaderModel")}</th>
+                <th className={th}>{t("models.tableHeaderEffort")}</th>
               </tr>
             </thead>
             <tbody>
@@ -252,17 +252,17 @@ export function Models() {
                         {info && <Info label={name}>{info}</Info>}
                       </td>
                       <td className="py-2 pr-3">
-                        <Selector label={`Motor de ${name}`} value={f.engine} empty={null}
+                        <Selector label={`${t("models.engineLabel")} ${name}`} value={f.engine} empty={null}
                                   options={forced ? [forced] : engines.map(e => e.id)}
                                   onChange={v => set(phase, "engine", v)} />
                       </td>
                       <td className="py-2 pr-3">
-                        <Selector label={`Modelo de ${name}`} value={f.model}
+                        <Selector label={`${t("models.modelLabel")} ${name}`} value={f.model}
                                   options={MODELS[f.engine] ?? []}
                                   onChange={v => set(phase, "model", v)} />
                       </td>
                       <td className="py-2">
-                        <Selector label={`Esfuerzo de ${name}`} value={f.effort}
+                        <Selector label={`${t("models.effortLabel")} ${name}`} value={f.effort}
                                   options={efforts.filter(Boolean)}
                                   onChange={v => set(phase, "effort", v)} />
                       </td>
@@ -275,7 +275,7 @@ export function Models() {
         </div>
       )}
 
-      <Button size="sm" onClick={save} disabled={!dirty}>Guardar configuración de fases</Button>
+      <Button size="sm" onClick={save} disabled={!dirty}>{t("models.saveButton")}</Button>
     </div>
   )
 }

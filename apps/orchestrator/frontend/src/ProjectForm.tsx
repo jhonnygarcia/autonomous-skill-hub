@@ -3,6 +3,7 @@ import { api, type Project, type Repo } from "@/api"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/ConfirmDialog"
 import { Input } from "@/components/ui/input"
+import { t } from "@/strings"
 
 const EMPTY: Project = {
   name: "", org: "", project: "",
@@ -19,16 +20,16 @@ const newProject = (): Project => ({ ...EMPTY, repos: [{ ...EMPTY.repos[0] }] })
  */
 function validate(f: Project): Record<string, string> {
   const e: Record<string, string> = {}
-  if (!f.name.trim()) e.name = "Ponle un nombre al proyecto."
-  if (!f.org.trim()) e.org = "Falta la organización de Azure DevOps."
-  if (!f.project.trim()) e.project = "Falta el proyecto de Azure DevOps."
-  if (!f.repos.some(r => r.path.trim())) e.repos = "Necesitas al menos un repo con su ruta."
+  if (!f.name.trim()) e.name = t("projectform.errorName")
+  if (!f.org.trim()) e.org = t("projectform.errorOrg")
+  if (!f.project.trim()) e.project = t("projectform.errorProject")
+  if (!f.repos.some(r => r.path.trim())) e.repos = t("projectform.errorReposMissing")
   // Blank rows get dropped on save. If the one marked primary is among them, the payload
   // arrives with no primary at all: the backend answers 400 (`split_repos`) with a banner
   // that doesn't say which row to fix — a round trip to learn something the form already
   // knows. Reachable by filling the second row and forgetting to move the radio.
   else if (!f.repos.some(r => r.primary && r.path.trim())) {
-    e.repos = "El repo marcado como principal necesita su ruta."
+    e.repos = t("projectform.errorPrimaryRepoPath")
   }
   return e
 }
@@ -134,11 +135,11 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
           guard. A second `←` here was two answers to one question. */}
       <div className="flex items-center gap-2">
         <h2 className="text-xl font-semibold">
-          {original ? "Editar proyecto" : "Nuevo proyecto"}
+          {original ? t("projectform.editTitle") : t("common.newProject")}
         </h2>
         <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="outline" onClick={leave}>Cancelar</Button>
-          <Button size="sm" onClick={save}>Guardar</Button>
+          <Button size="sm" variant="outline" onClick={leave}>{t("common.cancel")}</Button>
+          <Button size="sm" onClick={save}>{t("common.save")}</Button>
         </div>
       </div>
 
@@ -146,45 +147,45 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
         <div className="flex items-start gap-2 rounded-md border border-destructive/40
                         bg-destructive/10 px-3 py-2 text-sm text-destructive">
           <span className="flex-1">{actionError}</span>
-          <button onClick={() => setActionError("")} aria-label="Descartar el error"
+          <button onClick={() => setActionError("")} aria-label={t("common.dismissError")}
                   className="rounded px-1 focus-visible:outline-1 focus-visible:outline-ring">✕</button>
         </div>
       )}
 
-      <Field id="campo-name" label="Nombre del proyecto" error={errors.name}
-             hint="como quieras llamarlo tú; puedes cambiarlo">
-        <Input id="campo-name" placeholder="p. ej. TMS" value={form.name}
+      <Field id="campo-name" label={t("projectform.nameLabel")} error={errors.name}
+             hint={t("projectform.nameHint")}>
+        <Input id="campo-name" placeholder={t("projectform.namePlaceholder")} value={form.name}
                aria-invalid={!!errors.name}
                onChange={e => setForm({ ...form, name: e.target.value })} />
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field id="campo-org" label="Organización de Azure DevOps" error={errors.org}>
-          <Input id="campo-org" placeholder="ProvidenceSolutions" value={form.org}
+        <Field id="campo-org" label={t("projectform.orgLabel")} error={errors.org}>
+          <Input id="campo-org" placeholder={t("projectform.orgPlaceholder")} value={form.org}
                  aria-invalid={!!errors.org}
                  onChange={e => setForm({ ...form, org: e.target.value })} />
         </Field>
-        <Field id="campo-project" label="Proyecto de Azure DevOps" error={errors.project}
-               hint="donde viven los tickets">
-          <Input id="campo-project" placeholder="ProvidenceTMS" value={form.project}
+        <Field id="campo-project" label={t("projectform.projectLabel")} error={errors.project}
+               hint={t("projectform.projectHint")}>
+          <Input id="campo-project" placeholder={t("projectform.projectPlaceholder")} value={form.project}
                  aria-invalid={!!errors.project}
                  onChange={e => setForm({ ...form, project: e.target.value })} />
         </Field>
       </div>
 
-      <Field id="campo-ado-pat" label="Token de Azure DevOps (PAT)"
-             hint="opcional — sin él se usa la sesión de az login">
+      <Field id="campo-ado-pat" label={t("projectform.patLabel")}
+             hint={t("projectform.patHint")}>
         <Input id="campo-ado-pat" type="password" autoComplete="new-password"
                placeholder={form.ado_pat_configured && !clearToken
-                 ? "•••••••• (configurado — deja vacío para no cambiarlo)"
-                 : "pégalo aquí para configurarlo"}
+                 ? t("projectform.patPlaceholderConfigured")
+                 : t("projectform.patPlaceholderEmpty")}
                value={tokenInput} disabled={clearToken}
                onChange={e => setTokenInput(e.target.value)} />
         {form.ado_pat_configured && (
           <label className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
             <input type="checkbox" checked={clearToken}
                    onChange={e => { setClearToken(e.target.checked); setTokenInput("") }} />
-            Quitar el token configurado
+            {t("projectform.removeTokenLabel")}
           </label>
         )}
         <p className="mt-1 text-xs text-muted-foreground">
@@ -195,7 +196,7 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
       </Field>
 
       <div>
-        <p className="text-xs font-medium">Repos que verá el agente</p>
+        <p className="text-xs font-medium">{t("projectheader.reposSeen")}</p>
         <p className="mb-3 text-xs text-muted-foreground">
           El marcado como <strong>principal</strong> es donde corre el agente y donde se
           escribe el análisis; los demás los lee. La descripción viaja al prompt y es lo
@@ -213,10 +214,10 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
                   <label className="flex items-center gap-1.5 text-xs">
                     <input type="radio" name="principal" checked={r.primary}
                            onChange={() => patch(rs => rs.map((x, j) => ({ ...x, primary: j === i })))} />
-                    {r.primary ? <strong>principal</strong> : <span className="text-muted-foreground">principal</span>}
+                    {r.primary ? <strong>{t("projectform.primaryLabel")}</strong> : <span className="text-muted-foreground">{t("projectform.primaryLabel")}</span>}
                   </label>
-                  {exists === true && <span className="text-xs text-foreground">✓ existe</span>}
-                  {exists === false && <span className="text-xs text-destructive">✗ no existe</span>}
+                  {exists === true && <span className="text-xs text-foreground">✓ {t("projectform.pathExists")}</span>}
+                  {exists === false && <span className="text-xs text-destructive">✗ {t("projectform.pathNotExists")}</span>}
                   <Button size="sm" variant="ghost" className="ml-auto"
                           disabled={form.repos.length === 1}
                           onClick={() => patch(rs => {
@@ -226,25 +227,25 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
                               ? remaining
                               : remaining.map((x, j) => ({ ...x, primary: j === 0 }))
                           })}>
-                    ✕ quitar
+                    ✕ {t("projectform.removeRepoButton")}
                   </Button>
                 </div>
 
-                <Input className="mt-2 font-mono" placeholder="D:/ruta/al/repo" value={r.path}
+                <Input className="mt-2 font-mono" placeholder={t("projectform.repoPathPlaceholder")} value={r.path}
                        id={r.primary ? "campo-repos" : undefined}
-                       aria-label="Ruta del repo"
+                       aria-label={t("projectform.repoPathAriaLabel")}
                        aria-invalid={!!errors.repos && r.primary}
                        onBlur={e => checkPath(e.target.value)}
                        onChange={e => patch(rs =>
                          rs.map((x, j) => j === i ? { ...x, path: e.target.value } : x))} />
                 {exists === false && (
                   <p className="mt-1 text-xs text-destructive">
-                    ⚠ No encontré esa carpeta en disco.
+                    ⚠ {t("projectform.pathNotFoundWarning")}
                   </p>
                 )}
 
-                <Input className="mt-2" placeholder="frontend, backend, app de auth…"
-                       aria-label="Descripción del repo" value={r.label}
+                <Input className="mt-2" placeholder={t("projectform.repoLabelPlaceholder")}
+                       aria-label={t("projectform.repoLabelAriaLabel")} value={r.label}
                        onChange={e => patch(rs =>
                          rs.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
               </div>
@@ -255,12 +256,12 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
 
         <Button size="sm" variant="outline" className="mt-2"
                 onClick={() => patch(rs => [...rs, { path: "", label: "", primary: false }])}>
-          + Agregar repo
+          + {t("projectform.addRepoButton")}
         </Button>
       </div>
 
-      <ConfirmDialog open={confirmLeave} title="Hay cambios sin guardar."
-                     body="Si sales ahora se pierden." confirmLabel="Descartar"
+      <ConfirmDialog open={confirmLeave} title={t("app.unsavedTitle")}
+                     body={t("app.unsavedBody")} confirmLabel={t("common.discard")}
                      onConfirm={() => { setConfirmLeave(false); onCancel() }}
                      onCancel={() => setConfirmLeave(false)} />
     </div>
