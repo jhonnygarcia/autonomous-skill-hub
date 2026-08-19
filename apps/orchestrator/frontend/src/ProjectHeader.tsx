@@ -1,5 +1,6 @@
 import type { Project } from "@/api"
 import { RepoTable } from "@/RepoTable"
+import { t } from "@/strings"
 
 /**
  * The repos the agent will mount need to be in view RIGHT WHERE launching a
@@ -14,11 +15,11 @@ export function ProjectHeader({ project }: { project: Project }) {
       </div>
 
       <div>
-        <p className="mb-1 text-xs font-medium text-foreground/70">Repos que verá el agente</p>
+        <p className="mb-1 text-xs font-medium text-foreground/70">{t("projectheader.reposSeen")}</p>
         <RepoTable repos={project.repos} />
         {project.repos.length === 1 && (
           <p className="mt-1 text-xs text-muted-foreground/70">
-            Solo un repo. Se añaden más al editar el proyecto.
+            {t("projectheader.onlyOneRepo")}
           </p>
         )}
       </div>

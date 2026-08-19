@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/ConfirmDialog"
 import { Timeline } from "@/Timeline"
 import { blockReason, duration, runColor, ticketStatus } from "@/status"
+// Aliased: `const t = detail.ticket` below shadows a plain `t` with the ticket itself.
+import { t as tt } from "@/strings"
 
 // The text toggles (History, Log) are native <button>s: without shadcn's own focus
 // ring, so we give it to them by hand for keyboard navigation.
@@ -62,7 +64,7 @@ export function TicketDetail({ detail, activeRun, onRun, onDelete, onRestore }: 
         <Badge className={color}>{label}</Badge>
         <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground"
                 onClick={() => setConfirmDelete(true)}>
-          Borrar
+          {tt("common.delete")}
         </Button>
       </div>
       {reason && <p className="text-xs text-warning-active">{reason}</p>}
@@ -73,7 +75,7 @@ export function TicketDetail({ detail, activeRun, onRun, onDelete, onRestore }: 
 
       <div>
         <button className={TOGGLE} onClick={() => setShowHistory(v => !v)}>
-          {showHistory ? "▾" : "▸"} Historial de corridas ({detail.runs.length})
+          {showHistory ? "▾" : "▸"} {tt("ticketdetail.runHistory")} ({detail.runs.length})
         </button>
         {showHistory && (
           <ul className="mt-2 space-y-1 text-sm">
@@ -81,7 +83,7 @@ export function TicketDetail({ detail, activeRun, onRun, onDelete, onRestore }: 
               <li key={r.id} className="flex items-center gap-2">
                 <Badge className={runColor(r.status)}>{r.status}</Badge>
                 <span className="text-xs text-muted-foreground">{r.phase}</span>
-                <span className="text-muted-foreground">{r.started_at ?? "en cola"}</span>
+                <span className="text-muted-foreground">{r.started_at ?? tt("ticketdetail.queued")}</span>
                 <span className="text-muted-foreground">{duration(r.started_at, r.finished_at)}</span>
                 {r.artifact_path && (
                   // Monospace only when it's actually a path: on `nada`,
@@ -105,13 +107,13 @@ export function TicketDetail({ detail, activeRun, onRun, onDelete, onRestore }: 
                   <Button size="sm" variant="ghost" className="ml-auto h-6 text-xs"
                           disabled={restoring.has(r.id)}
                           onClick={() => restore(r.id)} title={r.archive_path ?? undefined}>
-                    Restaurar
+                    {tt("ticketdetail.restore")}
                   </Button>
                 )}
               </li>
             ))}
             {detail.runs.length === 0 && (
-              <li className="text-muted-foreground">Sin corridas aún.</li>
+              <li className="text-muted-foreground">{tt("ticketdetail.noRuns")}</li>
             )}
           </ul>
         )}
@@ -122,25 +124,24 @@ export function TicketDetail({ detail, activeRun, onRun, onDelete, onRestore }: 
           says something failed, not the first thing to read. */}
       <div>
         <button className={TOGGLE} onClick={() => setShowLog(v => !v)}>
-          {showLog ? "▾" : "▸"} Log de la última corrida
+          {showLog ? "▾" : "▸"} {tt("ticketdetail.lastRunLog")}
         </button>
         {showLog && (
           <pre className="mt-2 max-h-[28rem] overflow-auto rounded border border-border
                           bg-tui p-3 text-xs text-tui-foreground">
-            {detail.log_tail || "(el log aparecerá cuando arranque la corrida)"}
+            {detail.log_tail || tt("ticketdetail.logPlaceholder")}
           </pre>
         )}
       </div>
 
-      <ConfirmDialog open={confirmDelete} title={`¿Borrar el ticket #${t.ado_id}?`}
-                     body="Se borran sus corridas y sus logs. Los artefactos que el
-                           agente escribió en el repo se quedan donde están."
+      <ConfirmDialog open={confirmDelete} title={`${tt("ticketdetail.confirmDeleteTitle")} #${t.ado_id}?`}
+                     body={tt("ticketdetail.confirmDeleteBody")}
                      onConfirm={() => { setConfirmDelete(false); onDelete() }}
                      onCancel={() => setConfirmDelete(false)} />
 
-      <ConfirmDialog open={confirmRestore !== null} title="El archivo ya existe"
-                     body="Reemplazarlo con la versión del snapshot. La versión actual se pierde (salvo que otra corrida la haya archivado)."
-                     confirmLabel="Reemplazar"
+      <ConfirmDialog open={confirmRestore !== null} title={tt("ticketdetail.fileExistsTitle")}
+                     body={tt("ticketdetail.fileExistsBody")}
+                     confirmLabel={tt("ticketdetail.replace")}
                      onConfirm={() => { const id = confirmRestore!; setConfirmRestore(null); restore(id, true) }}
                      onCancel={() => setConfirmRestore(null)} />
     </div>

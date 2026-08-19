@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { t } from "@/strings"
 
 /**
  * Hash routing, by hand.
@@ -24,10 +25,10 @@ export type Route =
  *  a bad hash is a typo or a stale bookmark, not an error worth a screen. */
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent)
-  if (parts[0] === "ajustes") return { kind: "settings" }
+  if (parts[0] === t("router.settingsSegment")) return { kind: "settings" }
   // Not under `#/ajustes/`: the form is reached from Home's project list, which is
   // where projects live. A URL saying otherwise is a URL that lies.
-  if (parts[0] === "proyecto") return { kind: "projectForm", name: parts[1] ?? null }
+  if (parts[0] === t("router.projectSegment")) return { kind: "projectForm", name: parts[1] ?? null }
   if (parts[0] === "p" && parts[1]) return { kind: "project", name: parts[1] }
   if (parts[0] === "t" && /^\d+$/.test(parts[1] ?? "")) return { kind: "ticket", id: Number(parts[1]) }
   return { kind: "home" }
@@ -36,9 +37,9 @@ export function parseRoute(hash: string): Route {
 export function href(r: Route): string {
   switch (r.kind) {
     case "home": return "#/"
-    case "settings": return "#/ajustes"
+    case "settings": return `#/${t("router.settingsSegment")}`
     case "projectForm":
-      return r.name ? `#/proyecto/${encodeURIComponent(r.name)}` : "#/proyecto"
+      return r.name ? `#/${t("router.projectSegment")}/${encodeURIComponent(r.name)}` : `#/${t("router.projectSegment")}`
     case "project": return `#/p/${encodeURIComponent(r.name)}`
     case "ticket": return `#/t/${r.id}`
   }

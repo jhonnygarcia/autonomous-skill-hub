@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { api } from "@/api"
 import { Info } from "@/Info"
-import { setLang } from "@/strings"
+import { setLang, t } from "@/strings"
 
 /** El idioma en que el agente escribe sus entregables. Global, como el archivo y
  *  los modelos: un mismo ticket con el análisis en un idioma y el plan en otro es
@@ -33,7 +33,7 @@ export function Language() {
       <div className="max-w-3xl text-xs text-muted-foreground">
         En qué idioma escribe el agente el análisis, el brief, los surveys, el plan y
         las preguntas que te deja. <strong>No cambia el idioma de esta app.</strong>
-        <Info label="Idioma de los entregables">
+        <Info label={t("common.languageTitle")}>
           <p>
             Afecta a los documentos que el agente escribe en el repo y a las decisiones
             que te deja para responder. <strong>Ninguna corrida ya hecha se retraduce.</strong>
@@ -48,7 +48,7 @@ export function Language() {
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-wrap gap-4">
-        {[["es", "Español"], ["en", "English"]].map(([code, label]) => (
+        {[["es", t("language.spanish")], ["en", t("language.english")]].map(([code, label]) => (
           <label key={code} className="flex items-center gap-2 text-sm">
             <input type="radio" name="idioma" value={code}
                    checked={idioma === code}

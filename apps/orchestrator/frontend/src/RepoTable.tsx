@@ -1,4 +1,5 @@
 import type { Repo } from "@/api"
+import { t } from "@/strings"
 
 /**
  * The repo table that used to live inside `ProjectHeader`.
@@ -16,8 +17,8 @@ export function RepoTable({ repos }: { repos: Repo[] }) {
         {sorted.map(r => (
           <tr key={r.path}>
             <td className="pr-3 align-top text-muted-foreground">
-              {r.label || "sin descripción"}
-              {r.primary && <span className="ml-1 text-muted-foreground/70">· principal</span>}
+              {r.label || t("repotable.noDescription")}
+              {r.primary && <span className="ml-1 text-muted-foreground/70">· {t("repotable.primary")}</span>}
             </td>
             <td className="font-mono text-foreground">{r.path}</td>
           </tr>

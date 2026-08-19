@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Moon, Sun } from "lucide-react"
 import { href, type Route } from "@/router"
+import { t } from "@/strings"
 
 export type Crumb = { label: string; to?: Route }
 
@@ -32,18 +33,18 @@ export function TopBar({ crumbs }: { crumbs: Crumb[] }) {
         <a href={href({ kind: "home" })} className="text-sm font-bold tracking-wide">
           [SYS // ORQUESTADOR]
         </a>
-        <span className="text-xs text-muted-foreground">| ticket-agent</span>
+        <span className="text-xs text-muted-foreground">| {t("topbar.pluginTag")}</span>
         <button
           type="button"
           onClick={toggleTheme}
           aria-pressed={dark}
-          aria-label={dark ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
-          title={dark ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+          aria-label={dark ? t("topbar.toLightTheme") : t("topbar.toDarkTheme")}
+          title={dark ? t("topbar.toLightTheme") : t("topbar.toDarkTheme")}
           className={`${action} ml-auto flex items-center px-1.5 py-1.5`}
         >
           {dark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
         </button>
-        <a href={href({ kind: "settings" })} className={action}>[*] Ajustes</a>
+        <a href={href({ kind: "settings" })} className={action}>[*] {t("common.settings")}</a>
       </div>
 
       {crumbs.length > 0 && (

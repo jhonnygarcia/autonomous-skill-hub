@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { Archive } from "@/Archive"
 import { Language } from "@/Language"
 import { Models } from "@/Models"
+import { t } from "@/strings"
 
 /**
  * A section is a hairline rectangle with a bracketed header — the system's only
@@ -33,18 +34,18 @@ export function Section({ mark, title, aside, children }: {
 export function Settings() {
   return (
     <div className="space-y-6">
-      <Section mark="+" title="Idioma de los entregables"
-               aside="global · aplica a la siguiente corrida">
+      <Section mark="+" title={t("common.languageTitle")}
+               aside={t("settings.globalNextRun")}>
         <Language />
       </Section>
 
-      <Section mark="+" title="Cómo corre cada fase"
-               aside="global · aplica a la siguiente corrida">
+      <Section mark="+" title={t("settings.phaseRunTitle")}
+               aside={t("settings.globalNextRun")}>
         <Models />
       </Section>
 
-      <Section mark="+" title="Archivo de entregables"
-               aside="global · opcional">
+      <Section mark="+" title={t("common.archiveTitle")}
+               aside={t("settings.globalOptional")}>
         <Archive />
       </Section>
     </div>

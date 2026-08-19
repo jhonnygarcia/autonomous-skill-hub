@@ -2,6 +2,7 @@ import { useState } from "react"
 import { api, type ActiveRun, type Project, type Ticket } from "@/api"
 import { ConfirmDialog } from "@/ConfirmDialog"
 import { go, href } from "@/router"
+import { t } from "@/strings"
 
 // The system's one dark surface per page (DESIGN.md: "a narrative device, not a chrome
 // treatment"), and the brand's only iconography is type. So the wordmark is type too.
@@ -43,22 +44,22 @@ export function Home({ projects, tickets, activeRun, onChange }: {
         <pre className="overflow-x-auto text-[10px] leading-tight sm:text-xs">{WORDMARK}</pre>
         <div className="mt-6 max-w-xl rounded-sm bg-tui-foreground/10 px-3 py-2 text-xs">
           {activeRun
-            ? <>│ corriendo #{activeRun.ado_id} · {activeRun.project}</>
-            : <>│ sin corridas activas · el runner corre una a la vez</>}
+            ? <>│ {t("home.runningPrefix")} #{activeRun.ado_id} · {activeRun.project}</>
+            : <>│ {t("home.noActiveRuns")}</>}
         </div>
         <p className="mt-4 text-xs text-tui-foreground/60">
-          elige un proyecto para encolar tickets · [*] ajustes para engines, modelos y archivo
+          {t("home.tagline")}
         </p>
       </div>
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-bold uppercase tracking-wide">
-            <span className="text-muted-foreground">[x]</span> Proyectos
+            <span className="text-muted-foreground">[x]</span> {t("common.projects")}
           </h2>
           <button className={`${action} ml-auto bg-primary text-primary-foreground hover:bg-primary/80`}
                   onClick={() => go({ kind: "projectForm", name: null })}>
-            [+] Nuevo proyecto
+            [+] {t("common.newProject")}
           </button>
         </div>
 
@@ -66,7 +67,7 @@ export function Home({ projects, tickets, activeRun, onChange }: {
           <div className="flex items-start gap-2 rounded-sm border border-destructive/40
                           bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <span className="flex-1">{error}</span>
-            <button onClick={() => setError("")} aria-label="Descartar el error"
+            <button onClick={() => setError("")} aria-label={t("common.dismissError")}
                     className="rounded px-1 focus-visible:outline-1 focus-visible:outline-ring">✕</button>
           </div>
         )}
@@ -84,24 +85,24 @@ export function Home({ projects, tickets, activeRun, onChange }: {
                 </a>
                 <span className="text-xs text-muted-foreground">{p.org}/{p.project}</span>
                 <span className="text-xs text-muted-foreground">
-                  · {mine.length} tickets · {open} abiertos
+                  · {mine.length} {t("home.ticketsSuffix")} · {open} {t("home.openSuffix")}
                 </span>
                 <div className="ml-auto flex items-center gap-2">
                   <button className={action}
                           onClick={() => go({ kind: "projectForm", name: p.name })}>
-                    [/] Editar
+                    [/] {t("common.edit")}
                   </button>
                   {/* Separated from `Editar` and muted: it used to sit right next to it,
                       same size and same weight, and it executed on the first click. */}
                   <button className={`${action} text-muted-foreground hover:text-destructive`}
                           onClick={() => setToDelete(p.name)}>
-                    [-] Borrar
+                    [-] {t("common.delete")}
                   </button>
                 </div>
               </div>
               <p className="mt-1 truncate text-xs text-muted-foreground">
-                principal: <span className="text-foreground">{main?.path ?? "sin repos"}</span>
-                {p.repos.length > 1 && <> · +{p.repos.length - 1} montados</>}
+                {t("home.primaryLabel")} <span className="text-foreground">{main?.path ?? t("home.noRepos")}</span>
+                {p.repos.length > 1 && <> · +{p.repos.length - 1} {t("home.mountedSuffix")}</>}
               </p>
             </div>
           )
@@ -109,14 +110,13 @@ export function Home({ projects, tickets, activeRun, onChange }: {
 
         {projects.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            Aún no hay proyectos. Agrega uno para poder encolar tickets.
+            {t("home.noProjectsYet")}
           </p>
         )}
       </section>
 
-      <ConfirmDialog open={!!toDelete} title={`¿Borrar el proyecto "${toDelete}"?`}
-                     body="Los tickets ya creados no se rompen: cada uno guardó su propia
-                           copia de los datos. Pero no vas a poder encolar nuevos."
+      <ConfirmDialog open={!!toDelete} title={`${t("home.confirmDeleteTitle")} "${toDelete}"?`}
+                     body={t("home.confirmDeleteBody")}
                      onConfirm={() => toDelete && remove(toDelete)}
                      onCancel={() => setToDelete(null)} />
     </div>

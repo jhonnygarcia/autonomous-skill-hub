@@ -9,6 +9,7 @@ import { TicketDetail } from "@/TicketDetail"
 import { TicketList } from "@/TicketList"
 import { TopBar, type Crumb } from "@/TopBar"
 import { go, parseRoute, setGuard, useRoute } from "@/router"
+import { t } from "@/strings"
 
 export default function App() {
   const route = useRoute()
@@ -80,13 +81,13 @@ export default function App() {
 
   const crumbs: Crumb[] =
     route.kind === "home" ? []
-    : route.kind === "settings" ? [{ label: "Ajustes" }]
+    : route.kind === "settings" ? [{ label: t("common.settings") }]
     : route.kind === "projectForm"
-      ? [{ label: "Proyectos", to: { kind: "home" } },
-         { label: route.name ?? "Nuevo proyecto" }]
-    : route.kind === "project" ? [{ label: "Proyectos", to: { kind: "home" } },
+      ? [{ label: t("common.projects"), to: { kind: "home" } },
+         { label: route.name ?? t("common.newProject") }]
+    : route.kind === "project" ? [{ label: t("common.projects"), to: { kind: "home" } },
                                   { label: route.name }]
-    : [{ label: "Proyectos", to: { kind: "home" } },
+    : [{ label: t("common.projects"), to: { kind: "home" } },
        ...(project ? [{ label: project.name, to: { kind: "project" as const, name: project.name } }] : []),
        { label: detail ? `#${detail.ticket.ado_id}` : "…" }]
 
@@ -99,7 +100,7 @@ export default function App() {
           <div className="flex items-start gap-2 rounded-sm border border-destructive/40
                           bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <span className="flex-1">{error}</span>
-            <button onClick={() => setError("")} aria-label="Descartar el error"
+            <button onClick={() => setError("")} aria-label={t("common.dismissError")}
                     className="rounded px-1 focus-visible:outline-1 focus-visible:outline-ring">✕</button>
           </div>
         )}
@@ -124,8 +125,8 @@ export default function App() {
 
         {route.kind === "project" && !project && (
           <p className="text-sm text-muted-foreground">
-            No hay ningún proyecto llamado «{route.name}».{" "}
-            <a className="underline" href="#/">Volver al inicio</a>
+            {t("app.noProjectNamed")} «{route.name}».{" "}
+            <a className="underline" href="#/">{t("app.backHome")}</a>
           </p>
         )}
 
@@ -140,7 +141,7 @@ export default function App() {
         )}
 
         {route.kind === "ticket" && !detail && (
-          <p className="text-sm text-muted-foreground">Cargando el ticket…</p>
+          <p className="text-sm text-muted-foreground">{t("app.loadingTicket")}</p>
         )}
 
         {route.kind === "ticket" && detail && (
@@ -158,8 +159,8 @@ export default function App() {
 
       {/* Same wording and same component the form uses for Cancelar and Escape: leaving
           by a third route shouldn't feel like a different question. */}
-      <ConfirmDialog open={pendingHash !== null} title="Hay cambios sin guardar."
-                     body="Si sales ahora se pierden." confirmLabel="Descartar"
+      <ConfirmDialog open={pendingHash !== null} title={t("app.unsavedTitle")}
+                     body={t("app.unsavedBody")} confirmLabel={t("common.discard")}
                      onConfirm={leaveForm}
                      onCancel={() => setPendingHash(null)} />
     </div>

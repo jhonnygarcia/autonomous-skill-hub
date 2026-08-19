@@ -2,6 +2,7 @@ import { useState } from "react"
 import { api, ApiError, type Decision } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { plural, t } from "@/strings"
 
 /**
  * The `## Decisiones para ti` items of one phase's deliverable, answerable in place —
@@ -63,22 +64,22 @@ export function Decisions({ ticketId, ruta, counts }: {
         {open ? "▾" : "▸"}{" "}
         {!!counts.decidir && (
           <span className="text-warning-active">
-            {counts.decidir} decisión{counts.decidir > 1 && "es"} para ti
+            {counts.decidir} {plural(counts.decidir, t("decisions.oneForYou"), t("decisions.manyForYou"))}
           </span>
         )}
         {!!counts.decidir && !!counts.bloquea && " · "}
         {!!counts.bloquea && (
           <span className="text-destructive">
-            {counts.bloquea} bloquea{counts.bloquea > 1 && "n"} la fase siguiente
+            {counts.bloquea} {plural(counts.bloquea, t("decisions.oneBlocks"), t("decisions.manyBlock"))}
           </span>
         )}
-        {total === 0 && <span>decisiones respondidas</span>}
+        {total === 0 && <span>{t("decisions.allAnswered")}</span>}
       </button>
 
       {open && (
         <div className="mt-2 space-y-2">
           {error && <p className="text-xs text-destructive">{error}</p>}
-          {puntos === null && !error && <p className="text-xs text-muted-foreground">cargando…</p>}
+          {puntos === null && !error && <p className="text-xs text-muted-foreground">{t("decisions.loading")}</p>}
           {puntos?.map(p => (
             <div key={p.id}
                  className={`rounded-md border p-2 text-xs ${
@@ -88,9 +89,9 @@ export function Decisions({ ticketId, ruta, counts }: {
               <div className="flex items-center gap-2">
                 <span className={`font-semibold ${
                   p.tipo === "BLOQUEA" ? "text-destructive" : "text-warning-active"}`}>
-                  {p.tipo === "BLOQUEA" ? "Bloquea la fase siguiente" : "Decide — con propuesta"}
+                  {p.tipo === "BLOQUEA" ? t("decisions.blocksNextPhase") : t("decisions.decideWithProposal")}
                 </span>
-                {p.respondido && <span className="text-muted-foreground">· respondido</span>}
+                {p.respondido && <span className="text-muted-foreground">· {t("decisions.answeredSuffix")}</span>}
               </div>
               <p className="mt-1 font-medium text-foreground">{p.pregunta}</p>
               {p.cuerpo && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{p.cuerpo}</p>}
@@ -101,17 +102,17 @@ export function Decisions({ ticketId, ruta, counts }: {
                     <Button size="sm" variant="outline" className="h-6 text-xs"
                             disabled={busy === p.id}
                             onClick={() => answer(p.id, true)}>
-                      Aceptar propuesta
+                      {t("decisions.acceptProposal")}
                     </Button>
                   )}
-                  <Textarea rows={2} placeholder="Tu respuesta…"
-                            aria-label={`Respuesta para: ${p.pregunta}`}
+                  <Textarea rows={2} placeholder={t("decisions.yourAnswerPlaceholder")}
+                            aria-label={`${t("decisions.answerForAriaLabel")}: ${p.pregunta}`}
                             value={drafts[p.id] ?? ""}
                             onChange={e => setDrafts(d => ({ ...d, [p.id]: e.target.value }))} />
                   <Button size="sm" className="h-6 text-xs"
                           disabled={busy === p.id || !drafts[p.id]?.trim()}
                           onClick={() => answer(p.id, false)}>
-                    Responder
+                    {t("decisions.respond")}
                   </Button>
                 </div>
               )}

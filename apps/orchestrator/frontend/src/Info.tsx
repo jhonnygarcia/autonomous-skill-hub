@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react"
+import { t } from "@/strings"
 
 /**
  * An explanation behind a visible `[i]`, in the browser's top layer.
@@ -20,7 +21,7 @@ export function Info({ label, children }: { label: string; children: ReactNode }
   const id = `info-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   return (
     <>
-      <button type="button" popoverTarget={id} aria-label={`Explicación: ${label}`}
+      <button type="button" popoverTarget={id} aria-label={`${t("info.explanationPrefix")}: ${label}`}
               className="ml-1 align-middle text-xs text-muted-foreground
                          hover:text-foreground focus-visible:outline-1
                          focus-visible:outline-ring">

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from "react"
 import { Button } from "@/components/ui/button"
+import { t } from "@/strings"
 
 /**
  * Confirmation on top of the native `<dialog>`.
@@ -14,7 +15,7 @@ import { Button } from "@/components/ui/button"
  * the state's back.
  */
 export function ConfirmDialog({
-  open, title, body, confirmLabel = "Borrar", onConfirm, onCancel,
+  open, title, body, confirmLabel = t("common.delete"), onConfirm, onCancel,
 }: {
   open: boolean
   title: string
@@ -53,7 +54,7 @@ export function ConfirmDialog({
         <p id={titleId} className="text-sm font-semibold">{title}</p>
         {body && <p id={bodyId} className="text-sm text-muted-foreground">{body}</p>}
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onCancel}>Cancelar</Button>
+          <Button size="sm" variant="outline" onClick={onCancel}>{t("common.cancel")}</Button>
           <Button size="sm" variant="destructive" onClick={onConfirm}>{confirmLabel}</Button>
         </div>
       </div>

@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { blockReason, phaseLabel, ticketStatus } from "@/status"
+// Aliased: `tickets.map(t => ...)` below shadows a plain `t` with the ticket itself.
+import { t, t as tt } from "@/strings"
 
 const DOT: Record<string, string> = {
   ok: "bg-success",
@@ -35,10 +37,10 @@ const DOT: Record<string, string> = {
  * six dots would answer "which sub-step", a question only the detail view asks, and it
  * would carry a permanently grey `analyze` dot on every ticket that took the fan-out.
  */
-const STAGES: { label: string; phases: string[] }[] = [
-  { label: "Análisis", phases: ["analyze", "brief", "survey", "consolidate"] },
-  { label: "Plan", phases: ["design"] },
-  { label: "Código", phases: ["implement"] },
+const STAGES: { id: "analyze" | "design" | "implement"; phases: string[] }[] = [
+  { id: "analyze", phases: ["analyze", "brief", "survey", "consolidate"] },
+  { id: "design", phases: ["design"] },
+  { id: "implement", phases: ["implement"] },
 ]
 /** The phases that actually produce the stage's deliverable. A stage only goes green
  *  when one of these did: `brief` and `survey` being done doesn't mean there's an
@@ -56,7 +58,8 @@ function stageState(members: Phase[]): string {
 
 function Stepper({ fases }: { fases: Phase[] }) {
   const stages = STAGES
-    .map(s => ({ ...s, members: fases.filter(f => f.disponible && s.phases.includes(f.fase)) }))
+    .map(s => ({ ...s, label: t(`phase.${s.id}`),
+                 members: fases.filter(f => f.disponible && s.phases.includes(f.fase)) }))
     .filter(s => s.members.length)
   // The hover carries the full truth the dot compresses: which sub-step got where.
   const detail = (s: typeof stages[number]) =>
@@ -90,8 +93,8 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
   return (
     <div className="space-y-3">
       <div className="rounded-md border border-border p-3">
-        <div className="flex gap-1" role="tablist" aria-label="Origen del ticket">
-          {([["ado", "Ticket de Azure"], ["request", "Solicitud directa"]] as const)
+        <div className="flex gap-1" role="tablist" aria-label={t("ticketlist.originAriaLabel")}>
+          {([["ado", t("ticketlist.tabAdo")], ["request", t("ticketlist.tabRequest")]] as const)
             .map(([k, label]) => (
               <Button key={k} size="sm" role="tab" aria-selected={mode === k}
                       variant={mode === k ? "secondary" : "ghost"}
@@ -103,39 +106,39 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
         {mode === "ado" ? (
           <>
             <label htmlFor="ado-id" className="mt-3 block text-xs font-medium">
-              ID del work item
+              {t("ticketlist.workItemIdLabel")}
             </label>
             <div className="mt-1 flex gap-2">
               <Input id="ado-id" className="w-40" placeholder="3332" value={adoId}
                      onChange={e => setAdoId(e.target.value.replace(/\D/g, ""))}
                      onKeyDown={e => e.key === "Enter" && adoId && add()} />
-              <Button onClick={add} disabled={!adoId}>+ Añadir</Button>
+              <Button onClick={add} disabled={!adoId}>{t("ticketlist.add")}</Button>
             </div>
             {/* The number is not validated against Azure DevOps on purpose: the backend has
                 no ADO credentials. Saying where it comes from costs a line and does the
                 same job. */}
             <p className="mt-2 text-xs text-muted-foreground">
-              El número del final de la URL en Azure DevOps:{" "}
+              {t("ticketlist.workItemUrlHint")}{" "}
               <span className="font-mono">…/_workitems/edit/<strong>3332</strong></span>
             </p>
           </>
         ) : (
           <>
             <label htmlFor="request-text" className="mt-3 block text-xs font-medium">
-              Qué necesitas
+              {t("ticketlist.whatDoYouNeedLabel")}
             </label>
             {/* Native textarea, mirroring the Input component's classes: the answer
                 arrives while the decision is being made — the placeholder IS the
                 cheapest quality lever this feature has (spec §4.5). */}
             <textarea id="request-text" rows={4} value={request}
                       onChange={e => setRequest(e.target.value)}
-                      placeholder={"Qué necesitas, dónde vive hoy (pantalla, módulo, repo), por qué, y cómo sabrás que quedó bien."}
+                      placeholder={t("ticketlist.requestPlaceholder")}
                       className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:outline-1 focus-visible:outline-ring" />
             <div className="mt-2 flex items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                La primera línea será el título en la lista.
+                {t("ticketlist.firstLineTitle")}
               </p>
-              <Button onClick={addRequest} disabled={!request.trim()}>+ Añadir</Button>
+              <Button onClick={addRequest} disabled={!request.trim()}>{t("ticketlist.add")}</Button>
             </div>
           </>
         )}
@@ -162,11 +165,11 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
                 )}
                 <div className={`flex gap-1 ${t.title ? "" : "ml-auto"}`}>
                   <Button size="sm" variant="outline" disabled={!!reason}
-                          title={reason || "Lanza la Fase 1; el resto se lanza desde el detalle"}
+                          title={reason || tt("ticketlist.launchPhase1Hint")}
                           onClick={() => onRun(t.id)}>
-                    {t.status === "queued" ? "Analizar" : "Re-analizar"}
+                    {t.status === "queued" ? tt("ticketlist.analyze") : tt("ticketlist.reanalyze")}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => onOpen(t.id)}>Ver</Button>
+                  <Button size="sm" variant="ghost" onClick={() => onOpen(t.id)}>{tt("common.view")}</Button>
                 </div>
               </div>
               <div className="mt-1 flex items-center gap-2">
@@ -181,7 +184,7 @@ export function TicketList({ tickets, activeRun, onAdd, onOpen, onRun }: {
         })}
         {tickets.length === 0 && (
           <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-            Sin tickets en este proyecto. Escribe un id arriba para añadir el primero.
+            {t("ticketlist.empty")}
           </p>
         )}
       </div>

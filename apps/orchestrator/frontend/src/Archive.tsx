@@ -3,6 +3,7 @@ import { api } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Info } from "@/Info"
+import { t } from "@/strings"
 
 /** Where every run leaves its snapshot (entrada/, salida/, run.json). Empty = off.
  *  A human preference, not a deployment knob: it lives in the DB with the models. */
@@ -24,7 +25,7 @@ export function Archive() {
       <div className="max-w-3xl text-xs text-muted-foreground">
         Una carpeta en tu disco donde cada corrida deja copia de lo que leyó y de lo que
         escribió. <strong>Déjala vacía para no archivar nada.</strong>
-        <Info label="Archivo de entregables">
+        <Info label={t("common.archiveTitle")}>
           <p>
             Por cada corrida se crea una subcarpeta con lo que la fase{" "}
             <strong>leyó</strong> (<code className="text-foreground">entrada/</code>) y lo
@@ -43,9 +44,9 @@ export function Archive() {
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-wrap gap-2">
-        <Input aria-label="Directorio de archivo" value={dir} placeholder="D:/archivo-tickets"
+        <Input aria-label={t("archive.dirAriaLabel")} value={dir} placeholder={t("archive.dirPlaceholder")}
                className="min-w-0 flex-1" onChange={e => setDir(e.target.value)} />
-        <Button size="sm" onClick={save} disabled={dir.trim() === saved}>Guardar ruta</Button>
+        <Button size="sm" onClick={save} disabled={dir.trim() === saved}>{t("archive.savePath")}</Button>
       </div>
     </div>
   )
