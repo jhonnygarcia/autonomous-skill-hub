@@ -246,21 +246,64 @@ no se hace bilingüe.
 ### 7 · i18n de la UI
 
 Sin dependencia nueva. Un `strings.ts` con dos `Record<string, string>`, una
-función `t(k)`, y el idioma leído una vez al arrancar desde `GET /idioma`;
-cambiar la perilla dispara `location.reload()`. Son ~30 líneas de máquina.
+función `t(k)`, y el idioma leído al arrancar desde `GET /idioma`; cambiar la
+perilla dispara `location.reload()`. Son ~30 líneas de máquina.
 
 Un provider con contexto y re-render no compra nada acá: la perilla es global y
 su propio aside ya dice «aplica a la siguiente corrida».
 
-El trabajo real es la extracción, medida: **287 líneas en 18 archivos**,
-concentradas en `Models.tsx` (51), `Timeline.tsx` (45) y `ProjectForm.tsx` (39).
+**Corrección de 2026-08-19, medida sobre el código.** La primera redacción de
+esta sección daba por hecho que ese diccionario plano cubría las 287 líneas. No
+las cubre. Clasificadas por forma:
+
+| Forma | Cuánto | Mecanismo |
+|---|---|---|
+| Etiquetas cortas, botones, encabezados | ~160 | `t("clave")` |
+| Atributos (`placeholder`, `aria-label`, `title`, `aside`) | 28 | `t("clave")` |
+| Mapas de etiquetas (`status.ts`, `PHASE_LABEL`, `STAGE`) | ~43 | `t("clave")` |
+| **Prosa con markup inline** | **41** | **módulo por idioma** |
+| Pluralización escrita a mano | 2 | helper `plural()` |
+
+Las 41 líneas de prosa —28 en `Models.tsx`, 5 en `Archive.tsx`, 4 en
+`Language.tsx`— llevan `<strong>` y `<code>` **dentro** de la frase, y son donde
+vive la mayor parte de las palabras de la app. Meterlas en una tabla de strings
+obliga a partir cada frase en varias claves, y **los puntos de corte no coinciden
+entre idiomas**, o a construir un componente de interpolación. Cuarenta y una
+líneas no pagan esa maquinaria.
+
+**Salen por el lado barato: esos bloques ya son datos o ya son JSX contiguo, así
+que se indexan por idioma en vez de extraerles las palabras.** `PHASE_INFO` en
+`Models.tsx` ya es una estructura de datos y pasa a `PHASE_INFO[lang]`; los
+cuerpos de `Info` en `Archive` y `Language` son JSX aislado y se duplican por
+idioma. Cero maquinaria nueva.
+
+Son entonces **dos mecanismos, no uno**, y la regla para elegir es: si la cadena
+lleva markup adentro, va al módulo por idioma; si no, va al diccionario.
+
+Dos detalles más que la primera redacción no nombró:
+
+- **El parpadeo al arrancar.** `GET /idioma` es asíncrono, así que la app pinta
+  español y salta a inglés. La última elección se cachea en `localStorage` y el
+  arranque la usa; la DB sigue siendo la fuente de verdad y corrige al llegar.
+- **La pluralización de hoy no es traducible.** `Decisions.tsx:66` y `:72` pegan
+  sufijos a mano (`decisión{n > 1 && "es"}`, `bloquea{n > 1 && "n"}`), que en
+  inglés no funciona. Un `plural(n, uno, varios)` de tres líneas; `Intl.PluralRules`
+  es de más para dos idiomas de plural simple.
 
 ### 8 · Mensajes del backend
 
 **49 `HTTPException` con detalle en español** salen como toast. Con la UI en
 inglés y los toasts en español el trabajo se ve a medias, así que entran — al
-final, en su propia fase, porque son 49 ediciones mecánicas y ninguna cambia
-comportamiento. Un dict `MSG[clave][idioma]` leído con `setting("idioma")`.
+final, porque son 49 ediciones mecánicas y ninguna cambia comportamiento. Un
+dict `MSG[clave][idioma]` leído con `setting("idioma")`.
+
+**Por qué no códigos de error.** La alternativa «arquitectónicamente correcta»
+—que el backend devuelva un `code` y el frontend ponga el texto— ya existe como
+precedente en un solo lugar (`RESTORE_EXISTS_CODE`, el 409 reintentable). Se
+descarta para los 49: cambia el contrato de la API, obliga a mantener el catálogo
+de códigos sincronizado con el frontend, y compra lo mismo que se ve en un toast.
+El precedente existe porque **ese** 409 es el único que el frontend reintenta
+programáticamente; ninguno de los otros 48 se ramifica en código.
 
 Las razones que se **guardan** (`NO_BRIEF_REASON` y familia) no son de esta
 fase: son deliverable-facing y las cubre la fase 3.
