@@ -33,12 +33,14 @@ export function ticketStatus(t: Ticket, activeRun: ActiveRun | null) {
 }
 
 /** Reason there's an active run that blocks, or "" if there isn't one. Shared by
- *  `blockReason` and `canRunPhase`: the two phrases ("esta corrida ya está en marcha" /
- *  "esperando a #N en proyecto") used to be duplicated literally in both. */
+ *  `blockReason` and `canRunPhase`: the two phrases (`status.activeRunSelf` /
+ *  `status.activeRunOther`) used to be duplicated literally in both. */
 function activeRunReason(activeRun: ActiveRun | null, ticketId: number): string {
   if (!activeRun) return ""
-  if (activeRun.ticket_id === ticketId) return "esta corrida ya está en marcha"
-  return `esperando a #${activeRun.ado_id} en ${activeRun.project}`
+  if (activeRun.ticket_id === ticketId) return translate("status.activeRunSelf")
+  return translate("status.activeRunOther")
+    .replace("{ado_id}", String(activeRun.ado_id))
+    .replace("{project}", activeRun.project)
 }
 
 /** Reason it CANNOT be launched, or "" if it can. The lock is global: what's
@@ -139,7 +141,7 @@ export function canRunPhase(
   phases: Phase[], i: number, activeRun: ActiveRun | null, ticketId: number,
 ): string {
   const f = phases[i]
-  if (!f.disponible) return "esta fase todavía no existe"
+  if (!f.disponible) return translate("status.phaseNotAvailable")
   const m = activeRunReason(activeRun, ticketId)
   if (m) return m
   const options = (PHASE_NEEDS[f.fase] ?? [])
@@ -149,7 +151,8 @@ export function canRunPhase(
   if (options.some(landed)) return ""
   // The distinction is worth the extra branch: "run it first" and "it ran and left
   // nothing" send you to different places.
+  const list = options.map(p => phaseLabel(p.fase)).join(` ${translate("status.orSeparator")} `)
   if (options.some(p => p.estado === "ok" || p.estado === "parcial"))
-    return `${options.map(p => phaseLabel(p.fase)).join(" o ")} declaró un entregable que no está en disco`
-  return `necesita ${options.map(p => phaseLabel(p.fase)).join(" o ")} en verde`
+    return translate("status.deliverableMissing").replace("{list}", list)
+  return translate("status.needsGreen").replace("{list}", list)
 }
