@@ -79,7 +79,7 @@ export function Decisions({ ticketId, ruta, counts }: {
       {open && (
         <div className="mt-2 space-y-2">
           {error && <p className="text-xs text-destructive">{error}</p>}
-          {puntos === null && !error && <p className="text-xs text-muted-foreground">{t("decisions.loading")}</p>}
+          {puntos === null && !error && <p className="text-xs text-muted-foreground">{t("common.loading")}</p>}
           {puntos?.map(p => (
             <div key={p.id}
                  className={`rounded-md border p-2 text-xs ${
