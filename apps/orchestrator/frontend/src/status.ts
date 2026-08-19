@@ -32,6 +32,15 @@ export function ticketStatus(t: Ticket, activeRun: ActiveRun | null) {
   return { label, color: COLOR[state] ?? COLOR.queued }
 }
 
+/** A phase's run state (`ok`/`parcial`/`error`/`corriendo`/`pendiente`) as a word,
+ *  same fallback-to-raw pattern as `ticketStatus`. Screen readers speak this text
+ *  through the stepper's `aria-label`, so it can't stay a raw backend token. */
+export function runStateLabel(estado?: string): string {
+  const state = estado ?? "pendiente"
+  const key = `status.${state}`
+  return translate(key) === key ? state : translate(key)
+}
+
 /** Reason there's an active run that blocks, or "" if there isn't one. Shared by
  *  `blockReason` and `canRunPhase`: the two phrases (`status.activeRunSelf` /
  *  `status.activeRunOther`) used to be duplicated literally in both. */

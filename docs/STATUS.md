@@ -1275,13 +1275,28 @@ minutos:
    del otro idioma, si un badge cambia de color al cambiar sólo el idioma (el
    color no debería moverse, sólo la etiqueta), o si la perilla queda en un
    valor distinto de `es` al cerrar la revisión.
+8. Abrir **Models → el popover ⓘ de cada fase, en los dos idiomas.** Es el
+   bloque de prosa traducida más grande de la app y el único lugar donde un
+   `Record<Lang, ReactNode>` por fase podría renderizar con una etiqueta sin
+   cerrar — invisible para `tsc`, `oxlint` y cualquier gate automático de este
+   repo.
+9. Abrir un ticket cuyo **repo_path esté roto, con la perilla en inglés**, y
+   leer el panel de preflight y el rechazo al presionar Run. Ahí es donde
+   renderiza el hallazgo del `cannot_launch` mezclado (fix del 2026-08-19).
+
+**Lo que esta lista no puede probar sin un navegador real:** que cada rama
+`Record<Lang, ReactNode>` efectivamente monta (nada automático confirma que el
+JSX del lado `en` compila y renderiza, sólo que compila), y cómo se sostiene
+el layout con strings en inglés más largos que su contraparte en español.
 
 **Lo que queda deliberadamente sin tocar, para que la próxima sesión no lo
 redescubra como bug:**
-- `Language.tsx` no tiene el guardia de doble clic que sí tiene `Archive.tsx`
-  (deshabilitar el control mientras la llamada está en vuelo). No rompe nada
-  hoy —`pick` recarga la página apenas la respuesta llega— pero es una
-  asimetría entre dos componentes que se ven casi idénticos.
+- Ni `Language.tsx` ni `Archive.tsx` deshabilitan su control mientras la
+  llamada está en vuelo — `Archive.tsx` sólo deshabilita "Guardar" cuando el
+  valor no cambió (`disabled={dir.trim() === saved}`), que es un chequeo de
+  "sucio", no un guardia de doble clic. Es deliberado en ambos: en
+  `Language.tsx`, `pick` recarga la página apenas la respuesta llega, así que
+  no hay ventana real que explotar con un segundo clic.
 - `Timeline.tsx:22,25` nombra un parámetro lambda `ruta`, un identificador en
   español en código, donde la regla del repo reserva el español para texto de
   UI. Renombrar a `path` es mecánico y quedó afuera por tamaño, no por duda.

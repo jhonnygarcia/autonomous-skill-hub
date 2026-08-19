@@ -1,7 +1,8 @@
-/** El idioma de la UI. Vive en la DB (`settings.idioma`, la misma perilla que
- *  gobierna lo que escribe el agente) y se cachea en `localStorage` sólo para
- *  poder pintar el primer frame sin esperar la red. La DB es la fuente de verdad:
- *  si el caché miente, `initLang` lo corrige y recarga. */
+/** The UI's language. Lives in the DB (`settings.idioma`, the same knob that
+ *  governs what the agent writes) and is cached in `localStorage` only so the
+ *  first frame can paint without waiting on the network. The DB is the source
+ *  of truth: if the cache lies, `initLang` corrects it — the reload, if any,
+ *  is `Language.tsx`'s job, not this function's. */
 export type Lang = "es" | "en"
 
 const KEY = "orq.idioma"
@@ -23,11 +24,12 @@ export function setLang(code: unknown): void {
   }
 }
 
-/** Resuelve el idioma antes del primer render. Arranca con lo cacheado —si no hay
- *  nada, español, que es el default del backend— y consulta la DB después. Sin el
- *  caché, la app pinta un frame en español y salta al inglés a la vista del usuario.
- *  Swallows all errors to guarantee it never rejects: this runs before React mounts,
- *  so a rejection is a blank page with no way to recover. */
+/** Resolves the language before the first render. Starts from the cache — if
+ *  there is none, Spanish, the backend's default — and queries the DB afterwards.
+ *  Without the cache, the app paints a Spanish frame and jumps to English in
+ *  front of the user. Swallows all errors to guarantee it never rejects: this
+ *  runs before React mounts, so a rejection is a blank page with no way to
+ *  recover. */
 export async function initLang(): Promise<void> {
   try {
     const cached = localStorage.getItem(KEY)
@@ -39,8 +41,8 @@ export async function initLang(): Promise<void> {
 
   try {
     const r = await fetch("/api/idioma")
-    if (!r.ok) return                       // la DB manda, pero si no contesta el
-    const { idioma } = await r.json()       // caché es mejor que nada
+    if (!r.ok) return                       // the DB is authoritative, but if it
+    const { idioma } = await r.json()       // doesn't answer the cache beats nothing
     if (idioma === "es" || idioma === "en") {
       current = idioma
       try {
@@ -50,7 +52,7 @@ export async function initLang(): Promise<void> {
       }
     }
   } catch {
-    // sin red no hay nada que corregir: seguimos con el caché
+    // no network, nothing to correct: stay with the cache
   }
 }
 
@@ -144,6 +146,10 @@ const ES: Record<string, string> = {
   "status.planned": "planificado",
   "status.implemented": "implementado",
   "status.error": "error",
+  "status.ok": "ok",
+  "status.parcial": "parcial",
+  "status.corriendo": "corriendo",
+  "status.pendiente": "pendiente",
   "status.activeRunSelf": "esta corrida ya está en marcha",
   "status.activeRunOther": "esperando a #{ado_id} en {project}",
   "status.phaseNotAvailable": "esta fase todavía no existe",
@@ -321,6 +327,10 @@ const EN: Record<string, string> = {
   "status.planned": "planned",
   "status.implemented": "implemented",
   "status.error": "error",
+  "status.ok": "ok",
+  "status.parcial": "partial",
+  "status.corriendo": "running",
+  "status.pendiente": "pending",
   "status.activeRunSelf": "this run is already in progress",
   "status.activeRunOther": "waiting on #{ado_id} in {project}",
   "status.phaseNotAvailable": "this phase doesn't exist yet",
@@ -408,16 +418,16 @@ const EN: Record<string, string> = {
   "projectform.editTitle": "Edit project",
 }
 
-/** Una cadena de UI. Una clave que falta se devuelve tal cual, en vez de romper la
- *  pantalla: un texto raro es un bug visible, una pantalla en blanco es una llamada. */
+/** A UI string. A missing key is returned as-is instead of breaking the screen:
+ *  odd-looking text is a visible bug, a blank screen is a phone call. */
 export function t(key: string): string {
   const dict = current === "en" ? EN : ES
   return dict[key] ?? ES[key] ?? key
 }
 
-/** Plural para dos idiomas de plural simple. `Intl.PluralRules` es de más acá, y lo
- *  que había antes —pegar el sufijo a mano (`decisión{n > 1 && "es"}`)— no sobrevive
- *  a un idioma donde el plural no es un sufijo del singular. */
+/** Plural for two simple-plural languages. `Intl.PluralRules` is overkill here, and
+ *  what came before it — hand-pasting the suffix (`decisión{n > 1 && "es"}`) —
+ *  doesn't survive a language where the plural isn't a suffix on the singular. */
 export function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many
 }

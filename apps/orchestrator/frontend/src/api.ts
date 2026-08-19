@@ -106,7 +106,7 @@ export type Engine = { id: string; label: string; efforts: string[] }
 
 /** Thrown by `json()` below. `code` only travels on the one refusal the caller may
  *  legitimately retry (`/restaurar`'s "file already exists"); every other error is
- *  Spanish prose meant for display, not for branching on. */
+ *  prose in the knob's language meant for display, not for branching on. */
 export class ApiError extends Error {
   code?: string
   constructor(message: string, code?: string) {
@@ -118,8 +118,9 @@ export class ApiError extends Error {
 const json = async <T,>(r: Response): Promise<T> => {
   if (!r.ok) {
     const detail = (await r.json().catch(() => null))?.detail
-    // `detail` is normally a plain Spanish sentence (CLAUDE.md: reworded at will, never
-    // matched on). The ONE exception is `/restaurar`'s retryable 409, shaped as
+    // `detail` is normally a plain sentence in the knob's language (CLAUDE.md:
+    // reworded at will, never matched on). The ONE exception is `/restaurar`'s
+    // retryable 409, shaped as
     // `{code, msg}` — a machine-readable marker instead of sniffing a word out of the
     // prose, which broke the day a ticket's own path happened to contain that word.
     const isTagged = detail !== null && typeof detail === "object"

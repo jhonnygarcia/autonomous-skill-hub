@@ -392,9 +392,10 @@ N`) rather than `note=`, which renders as `· reserva: ...` — the label a `par
 stamp's caveat owns, not a restore's provenance.
 
 The retryable 409 (an existing file, no `overwrite`) is the one `/restaurar` refusal
-the frontend may resend with `overwrite: true`; every other detail in this file is
-Spanish prose, reworded at will (see the language rule below), which is exactly why
-the UI can't key off it. It's tagged `{"code": "existe_archivo", "msg": <sentence>}`
+the frontend may resend with `overwrite: true`; every other detail in this file
+follows the language knob (see the language rule below) and is reworded at will
+within that, which is exactly why the UI can't key off it. It's tagged
+`{"code": "existe_archivo", "msg": <sentence>}`
 instead of a plain string — a ticket whose declared path or OpenSpec slug happens to
 contain the literal word "overwrite" used to make the (never retryable) tree refusal
 match a substring check too, reopening the confirmation dialog forever. `api.ts`'s
@@ -769,7 +770,7 @@ fake that shared Claude's shape would pass while the runner mixed the two up.
   frontend) are read by you in the browser, and **since 2026-08-19 they follow the
   same `settings.idioma` knob as the deliverable-facing category below** — not
   "Spanish, fixed" as this rule used to say. On the backend, `MSG`/`msg()` (next to
-  `journal_lang`) resolve an error's text against the knob at request time, the same
+  `WORDS`/`w()`) resolve an error's text against the knob at request time, the same
   way `journal_code` already resolved a deliverable's. On the frontend, two
   mechanisms split the work, and the choice between them is not a preference, it is
   forced by one property of the string:

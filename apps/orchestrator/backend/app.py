@@ -1485,31 +1485,26 @@ def preflight(ticket: dict) -> dict:
     bloqueos, avisos = [], []
     repo = Path(ticket["repo_path"])
     if not repo.is_dir():
-        bloqueos.append(_check(
-            "repo", f"El repo principal ya no está en disco: {repo}. "
-                    "Corrígelo en el proyecto o vuelve a crear el ticket."))
+        bloqueos.append(_check("repo", msg("preflight_repo", repo=repo)))
     faltan = [e["path"] for e in normalize_dirs(json.loads(ticket["extra_dirs"] or "[]"))
               if not Path(e["path"]).is_dir()]
     if faltan:
         bloqueos.append(_check(
-            "extras", "Repos montados que ya no están en disco: " + ", ".join(faltan)))
+            "extras", msg("preflight_extras", paths=", ".join(faltan))))
     if repo.is_dir() and not (repo / TICKET_AGENT_CONFIG_REL).exists():
         # The one blocker with a button behind it: `organization` and `project` are
         # already columns on the ticket, so the UI has everything it needs to write it.
         bloqueos.append(_check(
-            "config", f"Falta {TICKET_AGENT_CONFIG_REL} en {repo}: sin él la skill no "
-                      "sabe contra qué proyecto de Azure DevOps consultar.",
+            "config", msg("preflight_config", rel=TICKET_AGENT_CONFIG_REL, repo=repo),
             reparable=True, fases=MCP_PHASES))
     if not (ticket["ado_pat"] or "").strip() and not az_logged_in():
         bloqueos.append(_check(
-            "credencial", "Sin credencial de Azure DevOps: corre `az login` en una "
-                          "terminal, o guarda un PAT en el proyecto.", fases=MCP_PHASES))
+            "credencial", msg("preflight_credential"), fases=MCP_PHASES))
     if repo.is_dir() and not (repo / ".git").exists():
         # An aviso and not a blocker: only `implement` needs git, and `check_clean`
         # already stops it there with its own 409. Saying it out loud anyway, because
         # discovering it at the last phase is discovering it at the worst moment.
-        avisos.append(_check(
-            "git", f"{repo} no es un repo git: la fase implement no podrá crear su rama."))
+        avisos.append(_check("git", msg("preflight_git", repo=repo)))
     return {"ok": not bloqueos, "bloqueos": bloqueos, "avisos": avisos}
 
 
@@ -1883,6 +1878,14 @@ MSG = {
         "phase_not_runnable_yet": "La fase '{phase}' no es ejecutable todavía",
         "ticket_run_active": "Este ticket ya tiene una corrida activa",
         "cannot_launch": "No se puede lanzar: {reasons}",
+        "preflight_repo": "El repo principal ya no está en disco: {repo}. "
+            "Corrígelo en el proyecto o vuelve a crear el ticket.",
+        "preflight_extras": "Repos montados que ya no están en disco: {paths}",
+        "preflight_config": "Falta {rel} en {repo}: sin él la skill no "
+            "sabe contra qué proyecto de Azure DevOps consultar.",
+        "preflight_credential": "Sin credencial de Azure DevOps: corre `az login` en una "
+            "terminal, o guarda un PAT en el proyecto.",
+        "preflight_git": "{repo} no es un repo git: la fase implement no podrá crear su rama.",
         "config_create_failed": "No se pudo crear {rel}: {reason}",
         "no_snapshot": "Esa corrida no dejó snapshot que restaurar",
         "restore_not_primary": "Esa corrida archivó su entregable desde un repo "
@@ -1946,6 +1949,14 @@ MSG = {
         "phase_not_runnable_yet": "Phase '{phase}' is not runnable yet",
         "ticket_run_active": "This ticket already has an active run",
         "cannot_launch": "Cannot launch: {reasons}",
+        "preflight_repo": "The primary repo is no longer on disk: {repo}. "
+            "Fix it in the project or recreate the ticket.",
+        "preflight_extras": "Mounted repos no longer on disk: {paths}",
+        "preflight_config": "Missing {rel} in {repo}: without it the skill doesn't "
+            "know which Azure DevOps project to query.",
+        "preflight_credential": "No Azure DevOps credential: run `az login` in a "
+            "terminal, or save a PAT on the project.",
+        "preflight_git": "{repo} is not a git repo: the implement phase won't be able to create its branch.",
         "config_create_failed": "Could not create {rel}: {reason}",
         "no_snapshot": "That run left no snapshot to restore",
         "restore_not_primary": "That run archived its deliverable from a mounted "

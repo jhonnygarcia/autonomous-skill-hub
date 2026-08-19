@@ -3700,6 +3700,24 @@ def test_no_az_session_blocks_only_the_phases_that_need_the_work_item(
     assert blocked.status_code == 400 and "az login" in blocked.json()["detail"]
 
 
+def test_preflight_refusal_is_wholly_english_when_the_knob_is_english(
+        client, monkeypatch, tmp_path):
+    """Regression for the third occurrence of the same shape: `preflight`'s own
+    blocker strings used to be hardcoded Spanish, so `POST /run`'s refusal — an
+    already-translated frame (`cannot_launch`) wrapping those literals — came out
+    half Spanish, half English with the knob on `en`. Both halves must now agree."""
+    client.put("/idioma", json={"idioma": "en"})
+    _no_az(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 61, "project": "Demo"}).json()["id"]
+    blocked = client.post(f"/tickets/{tid}/run", json={})
+    assert blocked.status_code == 400
+    detail = blocked.json()["detail"]
+    assert detail.startswith("Cannot launch:")
+    assert "credential" in detail
+    for spanish_fragment in ("No se puede", "Sin credencial", "credencial"):
+        assert spanish_fragment not in detail
+
+
 def test_a_project_with_a_pat_needs_no_az_session(client, monkeypatch, tmp_path):
     """`ADO_AUTH=envvar` reads the token instead of the `az login` session, so gating a
     project that carries one on a session it never uses would be a lie."""
