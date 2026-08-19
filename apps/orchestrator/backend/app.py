@@ -714,6 +714,26 @@ JOURNAL_HEADER = "# Journal — {ado_id}\n\n## Corridas\n\n## Hallazgos\n"
 JOURNAL_CLAIM = (
     "\n\nThe runner keeps the `## Corridas` section of the journal for this run; "
     "don't write a run line yourself. `## Hallazgos` is still yours.")
+LANGUAGE_NAME = {"es": "Spanish", "en": "English"}
+# Prompt-facing, so it's English like every other instruction the agent reads. The
+# exemption list is short here and complete in the skill's own `Output language`
+# section: run 3320 taught that what a prompt doesn't name, the agent invents — but a
+# prompt that repeats a whole SKILL.md section is a second source free to drift, so
+# this names the traps and points at the skill for the rest.
+LANGUAGE_PROMPT = (
+    "\n\nWrite {noun} in {language}: headings, prose, and every question you leave "
+    "for the human, including the DECIDIR/BLOQUEA section. Do NOT translate: literal "
+    "quotes from the work item (they keep the source's language, so they can still be "
+    "checked against the ticket), code identifiers, paths, `file:line`, branch names, "
+    "commit subjects, the `HUELLA:` and `SONDEAR:` lines, or OpenSpec's structural "
+    "headers. Your skill's `Output language` section carries the full list.")
+
+
+def language_text(noun: str) -> str:
+    """The language directive for a run, read from the knob at launch time."""
+    return LANGUAGE_PROMPT.format(noun=noun, language=LANGUAGE_NAME[lang()])
+
+
 SURVEY_PROMPT = (
     "{command} {ado_id}\n\n"
     "You are rooted in the repo `{label}` ({path}), and this session is the only one "
@@ -2355,7 +2375,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
             # dropped too: it's already in that context.
             # The stamp reminder is not optional: the runner demands the stamp on
             # every run, and without it a good continuation is marked as an error.
-            prompt = (instructions or "") + RESUME_STAMP_REMINDER + JOURNAL_CLAIM
+            # The language is NOT dropped the way `repos_text` is: what's already in
+            # that session's context is the OLD language, and the knob may have moved
+            # between runs — which is precisely why a resume has to restate it.
+            prompt = ((instructions or "") + RESUME_STAMP_REMINDER
+                      + language_text(noun) + JOURNAL_CLAIM)
             set_run(run_id, resumed_from=prev)
         else:
             # The slash command exists because the plugin is installed, and only
@@ -2375,10 +2399,11 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                 missing = [label for label, _ in ticket_labels(ticket) if label not in done]
                 prompt += CONSOLIDATE_PROMPT.format(
                     dir=Path(surveys).as_posix(),
-                    surveyed=", ".join(sorted(done)) or "ninguno",
+                    surveyed=", ".join(sorted(done)) or "none",
                     missing=(f"Mounted but NOT surveyed: {', '.join(missing)} — say so in "
                              "the analysis.\n") if missing else "")
             prompt += adjustment_text(phase, noun, instructions)
+            prompt += language_text(noun)
             prompt += JOURNAL_CLAIM
         # The fan-out replaces the single child with one per routed repo. It's built
         # before argv because each child gets its own prompt, its own cwd and its own
@@ -2408,6 +2433,9 @@ async def execute_run(run_id: int, ticket: dict, instructions: str | None, phase
                     command=PHASE_COMMANDS[phase], ado_id=ticket["ado_id"],
                     label=label, path=path, out=out, brief=brief)
                 child_prompt += adjustment_text(phase, noun, instructions)
+                # A second constructor, and the one where forgetting this doesn't show:
+                # the survey would just come out in whatever language the child picked.
+                child_prompt += language_text(noun)
                 # No JOURNAL_CLAIM here: a survey child mounts only its own repo and the
                 # scratch dir, never the primary repo where the journal lives, so a claim
                 # about `## Corridas` is an instruction it cannot obey. `repo-survey`

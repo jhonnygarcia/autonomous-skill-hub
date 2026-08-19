@@ -757,12 +757,17 @@ def test_the_brief_is_told_the_primary_repos_label(client, monkeypatch):
 
 def test_only_the_brief_gets_the_routing_labels(client, monkeypatch):
     """The other phases don't write a routing line, and a prompt that explains one is a
-    prompt inviting a phase to produce something nobody reads."""
+    prompt inviting a phase to produce something nobody reads.
+
+    A bare `"SONDEAR" not in prompt` broke once `LANGUAGE_PROMPT` started travelling in
+    every phase's prompt: its do-not-translate list names the `SONDEAR:` literal, which
+    is a legitimate, unrelated mention — not the routing explanation this test guards.
+    Narrowed to the routing-specific phrase instead of the bare token."""
     _use_fake_claude(monkeypatch)
     cap = _spy_argv(monkeypatch)
     tid = client.post("/tickets", json={"ado_id": 38, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
-    assert "SONDEAR" not in _prompt_from(cap)
+    assert "labels to use verbatim on the" not in _prompt_from(cap)
 
 
 def test_survey_launches_one_child_per_routed_repo(client, monkeypatch, tmp_path):
@@ -4188,3 +4193,40 @@ def test_idioma_rejects_anything_outside_the_two(client):
         assert client.put("/idioma", json={"idioma": bad}).status_code == 400
     # and the stored value is untouched by a rejected write
     assert client.get("/idioma").json() == {"idioma": "es"}
+
+
+def test_the_language_directive_travels_in_the_prompt(client, monkeypatch):
+    """The knob is worth nothing if the directive doesn't reach the child."""
+    client.put("/idioma", json={"idioma": "en"})
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 60, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    prompt = _prompt_from(cap)
+    assert "in English" in prompt
+    assert "in Spanish" not in prompt
+
+
+def test_the_language_directive_reaches_every_fan_out_child(client, monkeypatch, tmp_path):
+    """`SURVEY_PROMPT` is a second constructor: a survey that misses the directive
+    comes out in whatever language the child feels like, and nothing reports it."""
+    client.put("/idioma", json={"idioma": "en"})
+    _use_fake_claude(monkeypatch, stamp="ok — survey.md")
+    _write_brief(tmp_path, 61, routing="SONDEAR: front, backend")
+    calls = _spy_all_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 61, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={"phase": "survey"})
+    child_prompts = [c[c.index("-p") + 1] for c in calls]
+    assert child_prompts and all("in English" in p for p in child_prompts)
+
+
+def test_the_resume_prompt_carries_the_current_language(client, monkeypatch):
+    """`repos_text` is dropped on resume because it's already in context; the language
+    is not, because it's exactly what may have changed since the previous run."""
+    _use_fake_claude(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 62, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})          # first run, Spanish
+    client.put("/idioma", json={"idioma": "en"})
+    cap = _spy_argv(monkeypatch)
+    client.post(f"/tickets/{tid}/run", json={"resume": True})
+    assert "in English" in _prompt_from(cap)
