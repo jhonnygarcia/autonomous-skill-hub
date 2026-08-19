@@ -1137,7 +1137,7 @@ def put_models(body: dict[str, PhaseConfig]):
             raise HTTPException(400, msg("phase_not_runnable", phase=phase))
         if cfg.engine not in ENGINES:
             raise HTTPException(
-                400, msg("invalid_engine", engine=cfg.engine, opciones=", ".join(ENGINES)))
+                400, msg("invalid_engine", engine=cfg.engine, options=", ".join(ENGINES)))
         forced = SINGLE_ENGINE_PHASES.get(phase)
         if forced and cfg.engine != forced:
             raise HTTPException(
@@ -1151,7 +1151,7 @@ def put_models(body: dict[str, PhaseConfig]):
         if cfg.effort not in efforts:
             raise HTTPException(
                 400, msg("invalid_effort", label=ENGINES[cfg.engine]["label"],
-                         effort=cfg.effort, opciones=", ".join(efforts[1:])))
+                         effort=cfg.effort, options=", ".join(efforts[1:])))
     with db() as c:
         for phase, cfg in body.items():
             c.execute(
@@ -1844,11 +1844,18 @@ def w(key: str, code: str | None = None, **fmt) -> str:
     return WORDS[code or lang()][key].format(**fmt)
 
 
-# UI-facing: lo lee el humano en el navegador. Sigue la perilla, como `WORDS`, pero
-# a diferencia de `WORDS` esto no termina dentro de ningún `.md` del repo destino —
-# es una respuesta HTTP y se resuelve siempre contra la perilla, nunca contra un
-# archivo. Los `code` estructurados (ver `RESTORE_EXISTS_CODE`) son contrato con el
-# frontend y NO viven acá: sólo el `msg` que los acompaña.
+# UI-facing: read by the human in the browser. Follows the knob, like `WORDS`, but
+# unlike `WORDS` this never ends up inside any `.md` of the target repo — it's an
+# HTTP response and it's always resolved against the knob, never against a file.
+# The structured `code`s (see `RESTORE_EXISTS_CODE`) are a contract with the
+# frontend and do NOT live here: only the `msg` that goes with them does.
+#
+# Placeholder names inside the strings below are code identifiers (the repo's
+# "code in English" rule covers them), with two deliberate exceptions: `{idioma}`
+# and `{ruta}` stay Spanish because they mirror real contract literals — the JSON
+# key of `PUT /idioma` and the query parameter of `GET /artefacto?ruta=` — and a
+# placeholder that carries the exact name of the field it interpolates is worth
+# more than a translated one that doesn't. Don't "finish the job" on those two.
 MSG = {
     "es": {
         "cli_not_found": "No se encontró el CLI '{exe}' en el PATH",
@@ -1864,18 +1871,18 @@ MSG = {
         "cannot_write_to": "No se puede escribir en: {d}",
         "unknown_language": "Idioma no reconocido: {idioma}",
         "phase_not_runnable": "La fase '{phase}' no es ejecutable",
-        "invalid_engine": "Engine inválido: '{engine}' (usa {opciones})",
+        "invalid_engine": "Engine inválido: '{engine}' (usa {options})",
         "phase_single_engine": "La fase '{phase}' solo corre en {label}: cada hijo "
             "del abanico es una sesión enraizada en el otro repo, con sus reglas, "
             "sus hooks y su .mcp.json, y ese montaje es de ese CLI",
         "invalid_model": "Modelo inválido: '{model}'",
-        "invalid_effort": "Effort inválido para {label}: '{effort}' (usa {opciones})",
+        "invalid_effort": "Effort inválido para {label}: '{effort}' (usa {options})",
         "project_already_exists": "Ya existe un proyecto '{name}'",
         "project_not_registered": "El proyecto '{project}' no está dado de alta",
         "ticket_xor": "Manda ado_id o request, y exactamente uno de los dos",
         "phase_not_runnable_yet": "La fase '{phase}' no es ejecutable todavía",
         "ticket_run_active": "Este ticket ya tiene una corrida activa",
-        "cannot_launch": "No se puede lanzar: {motivos}",
+        "cannot_launch": "No se puede lanzar: {reasons}",
         "config_create_failed": "No se pudo crear {rel}: {reason}",
         "no_snapshot": "Esa corrida no dejó snapshot que restaurar",
         "restore_not_primary": "Esa corrida archivó su entregable desde un repo "
@@ -1887,8 +1894,8 @@ MSG = {
         "path_outside_repo": "Ruta fuera del repo: {rel}",
         "kind_dir": "un directorio",
         "kind_file": "un archivo",
-        "restore_type_mismatch": "{rel} es {en_repo} en el repo pero el snapshot "
-            "es {en_snapshot}. Bórralo a mano si de verdad quieres reemplazarlo por "
+        "restore_type_mismatch": "{rel} es {in_repo} en el repo pero el snapshot "
+            "es {in_snapshot}. Bórralo a mano si de verdad quieres reemplazarlo por "
             "el otro tipo.",
         "restore_tree_exists": "Ya hay archivos en {rel}: un árbol nunca se "
             "sobreescribe. Si de verdad quieres volver atrás, bórralo a mano y "
@@ -1927,18 +1934,18 @@ MSG = {
         "cannot_write_to": "Cannot write to: {d}",
         "unknown_language": "Unrecognized language: {idioma}",
         "phase_not_runnable": "Phase '{phase}' is not runnable",
-        "invalid_engine": "Invalid engine: '{engine}' (use {opciones})",
+        "invalid_engine": "Invalid engine: '{engine}' (use {options})",
         "phase_single_engine": "Phase '{phase}' only runs on {label}: every child "
             "of the fan-out is a session rooted in the other repo, with its own "
             "rules, its hooks and its .mcp.json, and that mount belongs to that CLI",
         "invalid_model": "Invalid model: '{model}'",
-        "invalid_effort": "Invalid effort for {label}: '{effort}' (use {opciones})",
+        "invalid_effort": "Invalid effort for {label}: '{effort}' (use {options})",
         "project_already_exists": "A project '{name}' already exists",
         "project_not_registered": "The project '{project}' is not registered",
         "ticket_xor": "Send ado_id or request, exactly one of the two",
         "phase_not_runnable_yet": "Phase '{phase}' is not runnable yet",
         "ticket_run_active": "This ticket already has an active run",
-        "cannot_launch": "Cannot launch: {motivos}",
+        "cannot_launch": "Cannot launch: {reasons}",
         "config_create_failed": "Could not create {rel}: {reason}",
         "no_snapshot": "That run left no snapshot to restore",
         "restore_not_primary": "That run archived its deliverable from a mounted "
@@ -1950,8 +1957,8 @@ MSG = {
         "path_outside_repo": "Path outside the repo: {rel}",
         "kind_dir": "a directory",
         "kind_file": "a file",
-        "restore_type_mismatch": "{rel} is {en_repo} in the repo but the snapshot "
-            "is {en_snapshot}. Delete it by hand if you really want to replace it "
+        "restore_type_mismatch": "{rel} is {in_repo} in the repo but the snapshot "
+            "is {in_snapshot}. Delete it by hand if you really want to replace it "
             "with the other type.",
         "restore_tree_exists": "There are already files in {rel}: a tree is never "
             "overwritten. If you really want to roll back, delete it by hand and "
@@ -1979,6 +1986,14 @@ MSG = {
 
 
 def msg(key: str, **fmt) -> str:
+    """Deliberately does NOT swallow `lang()`'s database errors: at almost every call
+    site, a failed knob read is a real failure and should surface as a 500, not be
+    hidden behind a guessed language. The one exception is `prepare_ticket_repo`
+    (`POST /tickets/{tid}/preparar`), which has a documented never-raises contract —
+    that call site guards its own `msg()` call locally instead of this function
+    guarding every caller. Copy that pattern if you add another never-raises endpoint;
+    don't make `msg()` itself swallow errors, or every OTHER caller silently loses the
+    ability to notice a broken DB."""
     return MSG[lang()][key].format(**fmt)
 
 
@@ -2914,7 +2929,7 @@ def run_ticket(tid: int, body: RunIn, background: BackgroundTasks):
     # the time you click, and nothing forces a caller through it at all.
     blocked = preflight_blockers(preflight(dict(t)), body.phase)
     if blocked:
-        raise HTTPException(400, msg("cannot_launch", motivos="; ".join(b["msg"] for b in blocked)))
+        raise HTTPException(400, msg("cannot_launch", reasons="; ".join(b["msg"] for b in blocked)))
     if body.phase == "implement":
         # The guard, here: it's the one that returns the immediate 409 without spending
         # a subprocess or leaving a run queued, and the design calls for that property.
@@ -3041,10 +3056,10 @@ def restore_run(tid: int, body: RestoreIn):
     # `overwrite` does not bypass this: it's not this endpoint's call to resolve a
     # structural mismatch.
     if dest.exists() and dest.is_dir() != src.is_dir():
-        en_repo = msg("kind_dir") if dest.is_dir() else msg("kind_file")
-        en_snapshot = msg("kind_dir") if src.is_dir() else msg("kind_file")
+        in_repo = msg("kind_dir") if dest.is_dir() else msg("kind_file")
+        in_snapshot = msg("kind_dir") if src.is_dir() else msg("kind_file")
         raise HTTPException(
-            409, msg("restore_type_mismatch", rel=rel, en_repo=en_repo, en_snapshot=en_snapshot))
+            409, msg("restore_type_mismatch", rel=rel, in_repo=in_repo, in_snapshot=in_snapshot))
     if src.is_dir():
         if dest.exists() and any(x.is_file() for x in dest.rglob("*")):
             raise HTTPException(409, msg("restore_tree_exists", rel=rel))
