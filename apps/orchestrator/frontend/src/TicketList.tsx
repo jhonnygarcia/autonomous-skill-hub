@@ -3,7 +3,7 @@ import type { ActiveRun, Phase, Ticket } from "@/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { blockReason, PHASE_LABEL, ticketStatus } from "@/status"
+import { blockReason, phaseLabel, ticketStatus } from "@/status"
 
 const DOT: Record<string, string> = {
   ok: "bg-success",
@@ -60,7 +60,7 @@ function Stepper({ fases }: { fases: Phase[] }) {
     .filter(s => s.members.length)
   // The hover carries the full truth the dot compresses: which sub-step got where.
   const detail = (s: typeof stages[number]) =>
-    `${s.label}: ${s.members.map(f => `${PHASE_LABEL[f.fase] ?? f.fase} ${f.estado ?? "pendiente"}`).join(", ")}`
+    `${s.label}: ${s.members.map(f => `${phaseLabel(f.fase)} ${f.estado ?? "pendiente"}`).join(", ")}`
   return (
     <span className="flex items-center" role="img" aria-label={stages.map(detail).join(" · ")}>
       {stages.map((s, i) => (

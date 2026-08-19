@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { api, type Engine, type PhaseModels as Config } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Info } from "@/Info"
-import { PHASE_LABEL } from "@/status"
+import { phaseLabel } from "@/status"
 
 // The fan-out is Claude's: each child is a session rooted in the other repo, with ITS
 // rules, hooks and `.mcp.json`, and that mounting is Claude Code's. The backend rejects
@@ -226,7 +226,7 @@ export function Models() {
             </thead>
             <tbody>
               {Object.entries(cfg).map(([phase, f]) => {
-                const name = PHASE_LABEL[phase] ?? phase
+                const name = phaseLabel(phase)
                 const info = PHASE_INFO[phase]
                 const stage = STAGE[phase]
                 // The effort list comes from the backend's registry, per engine. An

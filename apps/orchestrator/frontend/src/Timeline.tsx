@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Decisions } from "@/Decisions"
 import { Markdown } from "@/Markdown"
-import { canRunPhase, durationText, formatSize, formatTime, PHASE_LABEL, phaseColor, phaseIcon } from "@/status"
+import { canRunPhase, durationText, formatSize, formatTime, phaseLabel, phaseColor, phaseIcon } from "@/status"
 
 // Shared focus/hover style for the viewer's native <button>s: shadcn buttons already
 // have their own ring, but these are plain (file chips, close, adjust) and without
@@ -95,7 +95,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
             <p key={b.que} className="text-destructive">
               ✖ {b.msg}
               {b.fases && <span className="text-muted-foreground">
-                {" "}(bloquea: {b.fases.map(x => PHASE_LABEL[x] ?? x).join(", ")})
+                {" "}(bloquea: {b.fases.map(x => phaseLabel(x)).join(", ")})
               </span>}
             </p>
           ))}
@@ -193,7 +193,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
             <div className={`-mx-2 rounded-lg px-2 transition-colors ${isRunning ? "bg-info/5" : ""}`}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
                 <span className={`text-sm font-semibold tracking-tight ${f.disponible ? "text-foreground" : "text-muted-foreground"}`}>
-                  {PHASE_LABEL[f.fase] ?? f.fase}
+                  {phaseLabel(f.fase)}
                 </span>
                 {metaParts.length > 0 && (
                   <span className="text-xs text-muted-foreground">{metaParts.join(" · ")}</span>
@@ -213,7 +213,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                     </Button>
                     <Button size="sm" variant="ghost" disabled={!!blocked}
                             title={blocked || "Correr con instrucciones de ajuste"}
-                            aria-label={`Ajustar y correr ${PHASE_LABEL[f.fase] ?? f.fase}`}
+                            aria-label={`Ajustar y correr ${phaseLabel(f.fase)}`}
                             aria-expanded={openPhase === f.fase}
                             aria-controls={`ajuste-${f.fase}`}
                             onClick={() => {
@@ -333,8 +333,8 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
               {openPhase === f.fase && (
                 <div id={`ajuste-${f.fase}`} className="pb-3">
                   <Textarea rows={2} value={instructions}
-                            placeholder={`Ajuste para ${PHASE_LABEL[f.fase] ?? f.fase}…`}
-                            aria-label={`Ajuste para ${PHASE_LABEL[f.fase] ?? f.fase}`}
+                            placeholder={`Ajuste para ${phaseLabel(f.fase)}…`}
+                            aria-label={`Ajuste para ${phaseLabel(f.fase)}`}
                             onChange={e => setInstructions(e.target.value)} />
 
                   {/* Two mutually exclusive routes, so a radio and not a checkbox:
