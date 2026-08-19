@@ -1,34 +1,35 @@
 import type { ActiveRun, Phase, Ticket } from "@/api"
+import { t as translate } from "@/strings"
 
 // The Apple HIG semantic ramp, four colours for six states. Type stays ink at every
 // state and the colour lives in the border and a 12% fill: the ramp is a signal, not a
 // palette, and ink-on-tint is the only combination that clears contrast for all of them.
 // The three landed states share `success` on purpose — the label beside the chip already
 // says which one, and a second hue encoding the same fact is a hue that can disagree.
+//
+// Indexed by the backend STATE, not by the displayed label: the label is translated and
+// the state is not. When this hung off the label, translating it left every badge on the
+// fallback grey without breaking anything the compiler could see.
 const COLOR: Record<string, string> = {
-  registrado: "border-border bg-muted text-muted-foreground",
-  corriendo: "border-info/60 bg-info/12 text-foreground",
-  analizado: "border-success/60 bg-success/12 text-foreground",
-  planificado: "border-success/60 bg-success/12 text-foreground",
-  implementado: "border-success/60 bg-success/12 text-foreground",
+  queued: "border-border bg-muted text-muted-foreground",
+  running: "border-info/60 bg-info/12 text-foreground",
+  analyzed: "border-success/60 bg-success/12 text-foreground",
+  planned: "border-success/60 bg-success/12 text-foreground",
+  implemented: "border-success/60 bg-success/12 text-foreground",
   error: "border-destructive/60 bg-destructive/12 text-foreground",
   // The fan-out's two intermediate states. Warning, not success: they're steps toward the
-  // analysis, not the analysis — a ticket sitting on `sondeado` still has no analysis
+  // analysis, not the analysis — a ticket sitting on `surveyed` still has no analysis
   // to plan from, and painting it in the "done" colour would say otherwise.
-  briefeado: "border-warning/60 bg-warning/12 text-foreground",
-  sondeado: "border-warning/60 bg-warning/12 text-foreground",
-}
-const LABEL: Record<string, string> = {
-  queued: "registrado", running: "corriendo", analyzed: "analizado",
-  briefed: "briefeado", surveyed: "sondeado",
-  planned: "planificado", implemented: "implementado", error: "error",
+  briefed: "border-warning/60 bg-warning/12 text-foreground",
+  surveyed: "border-warning/60 bg-warning/12 text-foreground",
 }
 
 /** `queued` means two things in the backend — just added and about to run.
  *  The active run disambiguates it without asking the API for anything new. */
 export function ticketStatus(t: Ticket, activeRun: ActiveRun | null) {
-  const label = activeRun?.ticket_id === t.id ? "corriendo" : (LABEL[t.status] ?? t.status)
-  return { label, color: COLOR[label] ?? COLOR.registrado }
+  const state = activeRun?.ticket_id === t.id ? "running" : t.status
+  const label = translate(`status.${state}`) === `status.${state}` ? state : translate(`status.${state}`)
+  return { label, color: COLOR[state] ?? COLOR.queued }
 }
 
 /** Reason there's an active run that blocks, or "" if there isn't one. Shared by
@@ -48,10 +49,10 @@ export function blockReason(t: Ticket, activeRun: ActiveRun | null): string {
 
 /** A run's own states are (queued/running/success/error), not the ticket's. */
 export function runColor(status: string): string {
-  return status === "success" ? COLOR.analizado
+  return status === "success" ? COLOR.analyzed
     : status === "error" ? COLOR.error
-    : status === "running" ? COLOR.corriendo
-    : COLOR.registrado
+    : status === "running" ? COLOR.running
+    : COLOR.queued
 }
 
 /** `Xm00s` or `Xs`: the same expression that used to be duplicated by `duration`
@@ -68,10 +69,13 @@ export function duration(from: string | null, to: string | null): string {
 
 /** The pipeline's phases, with the name shown to the user.
  *  `test` disappeared on 2026-08-11 (tests are written inside `implement`), and
- *  `guards`/`pr` on the same date for the opposite reason: they never existed. */
-export const PHASE_LABEL: Record<string, string> = {
-  analyze: "Análisis", brief: "Brief", survey: "Sondeo",
-  consolidate: "Consolidación", design: "Plan", implement: "Código",
+ *  `guards`/`pr` on the same date for the opposite reason: they never existed — so
+ *  `phase.guards`/`phase.pr` don't exist in the dictionary either, and the fallback to
+ *  the raw phase name below is what `PHASES` actually relies on for those two. */
+export function phaseLabel(phase: string): string {
+  const key = `phase.${phase}`
+  const resolved = translate(key)
+  return resolved === key ? phase : resolved
 }
 
 /** What each phase needs in green before it can run, as a list of alternatives.
@@ -108,11 +112,11 @@ export function phaseIcon(status?: string): string {
 }
 
 export function phaseColor(status?: string): string {
-  return status === "ok" ? COLOR.analizado
-    : status === "parcial" ? COLOR.briefeado
+  return status === "ok" ? COLOR.analyzed
+    : status === "parcial" ? COLOR.briefed
     : status === "error" ? COLOR.error
-    : status === "corriendo" ? COLOR.corriendo
-    : COLOR.registrado
+    : status === "corriendo" ? COLOR.running
+    : COLOR.queued
 }
 
 /**
@@ -146,6 +150,6 @@ export function canRunPhase(
   // The distinction is worth the extra branch: "run it first" and "it ran and left
   // nothing" send you to different places.
   if (options.some(p => p.estado === "ok" || p.estado === "parcial"))
-    return `${options.map(p => PHASE_LABEL[p.fase] ?? p.fase).join(" o ")} declaró un entregable que no está en disco`
-  return `necesita ${options.map(p => PHASE_LABEL[p.fase] ?? p.fase).join(" o ")} en verde`
+    return `${options.map(p => phaseLabel(p.fase)).join(" o ")} declaró un entregable que no está en disco`
+  return `necesita ${options.map(p => phaseLabel(p.fase)).join(" o ")} en verde`
 }

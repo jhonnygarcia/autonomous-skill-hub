@@ -57,11 +57,39 @@ export async function initLang(): Promise<void> {
 const ES: Record<string, string> = {
   "common.save": "Guardar",
   "common.cancel": "Cancelar",
+  "status.queued": "registrado",
+  "status.running": "corriendo",
+  "status.analyzed": "analizado",
+  "status.briefed": "briefeado",
+  "status.surveyed": "sondeado",
+  "status.planned": "planificado",
+  "status.implemented": "implementado",
+  "status.error": "error",
+  "phase.analyze": "Análisis",
+  "phase.brief": "Brief",
+  "phase.survey": "Sondeo",
+  "phase.consolidate": "Consolidación",
+  "phase.design": "Plan",
+  "phase.implement": "Código",
 }
 
 const EN: Record<string, string> = {
   "common.save": "Save",
   "common.cancel": "Cancel",
+  "status.queued": "queued",
+  "status.running": "running",
+  "status.analyzed": "analyzed",
+  "status.briefed": "briefed",
+  "status.surveyed": "surveyed",
+  "status.planned": "planned",
+  "status.implemented": "implemented",
+  "status.error": "error",
+  "phase.analyze": "Analysis",
+  "phase.brief": "Brief",
+  "phase.survey": "Survey",
+  "phase.consolidate": "Consolidation",
+  "phase.design": "Plan",
+  "phase.implement": "Code",
 }
 
 /** Una cadena de UI. Una clave que falta se devuelve tal cual, en vez de romper la
