@@ -759,14 +759,57 @@ fake that shared Claude's shape would pass while the runner mixed the two up.
   skills under `skills/<name>/SKILL.md`, commands under `commands/*.md`, and a registry
   entry in `.claude-plugin/marketplace.json`.
 - Designs go in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`.
-- **Code, comments, and process docs in English; Spanish only in UI text.**
+- **Code, comments, and process docs in English; UI text follows the language knob.**
   Planning documents (`docs/superpowers/plans/`, `docs/superpowers/specs/`) are
   exempt from this rule and can stay in Spanish. Four categories decide it:
   **prompt-facing** strings (`PHASE_NOUN`, `repos_text`, `adjustment_text`)
   are read by the agent, so they're English and track the skills.
   **UI-facing** strings (`HTTPException` details and the rest of the `motivo` text
-  that never travels into a deliverable) are read by you in the browser, so they
-  stay Spanish.
+  that never travels into a deliverable, plus every label, button and toast in the
+  frontend) are read by you in the browser, and **since 2026-08-19 they follow the
+  same `settings.idioma` knob as the deliverable-facing category below** — not
+  "Spanish, fixed" as this rule used to say. On the backend, `MSG`/`msg()` (next to
+  `journal_lang`) resolve an error's text against the knob at request time, the same
+  way `journal_code` already resolved a deliverable's. On the frontend, two
+  mechanisms split the work, and the choice between them is not a preference, it is
+  forced by one property of the string:
+  - **`t("key")` over a flat `ES`/`EN` dictionary (`strings.ts`)** for a short string
+    that translates as a whole — a button label, a toast, an aria-label.
+  - **A `Record<Lang, ReactNode>` per component** (`LANGUAGE_INFO`, `ARCHIVE_INFO`,
+    `PHASE_INFO`, …) for prose that carries markup — a `<strong>`, a `<code>`, a link
+    — **inside** the sentence. The rule that picks one over the other: markup inside
+    the sentence → a per-language JSX block; otherwise → the dictionary. The reason
+    is that a dictionary needs a key per **fragment** once markup splits a sentence,
+    and the cut points a translator needs almost never land in the same place in two
+    languages — Spanish and English break a sentence around its bolded clause
+    differently, so a fragment-keyed dictionary either produces ungrammatical splices
+    or grows one key per sentence anyway, at which point it has stopped being a
+    dictionary and should just be the JSX block it was avoiding.
+  - **A status badge's colour hangs off the backend STATE, never off the translated
+    label.** `status.ts`'s `COLOR` map is indexed by `queued`/`analyzed`/`error`/…
+    — the literal the backend returns — and `ticketStatus`/`phaseColor` look up that
+    state directly; the *label* shown next to the colour goes through `t()`
+    separately. This one is not obvious because it worked by accident until it
+    didn't: the map used to be indexed by the (translated) label, and every badge
+    silently fell back to one grey the moment a second language existed, with no
+    build or lint error to catch it — a `Record<string, string>` doesn't know its
+    keys were supposed to be exhaustive.
+  - **The hash-route segments (`#/ajustes`, `#/proyecto/…`) are deliberately NOT in
+    the dictionary** (`router.ts`'s `SEG_SETTINGS`/`SEG_PROJECT` are plain constants,
+    kept outside `strings.ts` on purpose). A route token is an address, not prose:
+    translating it would break every existing bookmark on the other language and
+    fork the app's URL space in two, one per language, for no reader-facing benefit.
+  - **The language is resolved once, before React mounts, never in an effect.**
+    `main.tsx` awaits `initLang()` (which reads the `localStorage` cache first, then
+    corrects it against `GET /idioma`) and only then calls `createRoot(...).render`.
+    Resolving it inside a `useEffect` instead would paint the first frame in
+    whatever the stale default is and jump languages after the user has already
+    started reading it — worse for a `useState` initial value that reads `t()` once
+    and keeps that string forever, since an effect firing later can't retroactively
+    fix it. Because the knob is read exactly once per page load, `Language.tsx`'s
+    `pick` doesn't try to re-propagate a change through React state — it calls
+    `location.reload()` after saving, which is the only way to make `initLang` run
+    again.
   **Contract literals** (the `HUELLA` stamp and its values, the `/modelos` and
   `/artefacto?ruta=` route paths, JSON keys like `fases`) are matched byte-for-byte
   somewhere, so they don't get translated in either direction — read

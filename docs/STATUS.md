@@ -1174,6 +1174,122 @@ lista de bullets — se reescribió en inglés con la forma de `subagent_model`
 `test_flipping_the_knob_mid_ticket_keeps_the_line_wholly_in_the_journals_language`
 — **292 tests backend**, `claude plugin validate .` en verde.
 
+## Decimoquinta sesión — 2026-08-19: la perilla llega a la UI (fases 4-5 del spec)
+
+Cerró lo que la sesión anterior dejó explícitamente afuera: la perilla
+`settings.idioma` ahora gobierna también el frontend del orquestador y los
+`detail` de los `HTTPException` del backend, no sólo lo que el agente escribe
+en el repo destino. Siete tareas secuenciales sobre un plan propio
+(`.superpowers/sdd/2026-08-19-i18n-de-la-ui/`), cada una revisada por un
+segundo agente antes de la siguiente.
+
+**La corrección de fondo la trajo el propio §7 del spec.** El diseño original
+asumía que un diccionario plano (`ES`/`EN`, `t(clave)`) alcanzaba para toda la
+UI. No alcanzó: **41 bloques de prosa** (`Language.tsx`, `Archive.tsx`,
+`Models.tsx`, y los que se sumaron después) llevan `<strong>`, `<code>` o un
+enlace **adentro** de la oración — no antes ni después, adentro — y un
+diccionario por clave necesita una clave por *fragmento* una vez que el markup
+corta la oración. Los puntos de corte que pide un traductor casi nunca caen en
+el mismo lugar en dos idiomas: español e inglés parten la oración alrededor de
+la cláusula en negrita de forma distinta, así que un diccionario fragmentado o
+produce empalmes agramaticales o termina con una clave por oración, momento en
+el que dejó de ser un diccionario y debería haber sido directamente el bloque
+JSX que se estaba evitando. La corrección quedó plantada como regla en
+`docs/superpowers/specs/2026-08-19-idioma-de-los-entregables-design.md` (§7 y
+§8, reescritas el mismo día que se detectó) y en el `CLAUDE.md` de este
+commit: markup adentro de la oración → módulo `Record<Lang, ReactNode>` por
+componente; si no → diccionario plano.
+
+**El defecto que un diccionario correcto no hubiera atrapado.** `status.ts`
+indexaba el color del badge por la ETIQUETA ya traducida, no por el estado
+crudo del backend. `tsc` y `oxlint` lo dejaron pasar los dos — un
+`Record<string, string>` no sabe que sus claves debían ser exhaustivas — y el
+efecto era silencioso: con un segundo idioma activo, todo badge caía al gris
+de respaldo, sin error de build ni de lint. La Tarea 2 lo corrigió indexando
+por el literal que devuelve el backend (`queued`, `analyzed`, `error`, …) y
+traduciendo la etiqueta por separado; un test manual (grep de que ningún
+`COLOR[...]` queda indexado por una clave traducida) es el único guardia,
+porque este repo no tiene harness de test de frontend.
+
+**Los segmentos de ruta salieron del diccionario, a propósito.** Un revisor de
+la Tarea 3 encontró `"ajustes"`/`"proyecto"` ya adentro de `ES`/`EN` y
+recomendó dejarlos porque ambos lados tenían hoy el mismo literal. Se
+descartó: una tabla de traducción es exactamente el lugar donde alguien
+traduce una palabra, y el día que el lado EN diga `"settings"` se rompe todo
+bookmark `#/ajustes` existente y el espacio de URLs se bifurca por idioma.
+Quedaron como constantes planas en `router.ts` (`SEG_SETTINGS`/`SEG_PROJECT`),
+usadas tanto para parsear como para construir el link, con un comentario que
+nombra la rotura.
+
+**Verificación real, en orden:**
+- Backend: **293 tests** (292 + 1 de la Tarea 6: `msg()` resuelve contra la
+  perilla, con un test dedicado al call site de `/preparar` que documenta por
+  qué NO puede tirar la corrida abajo).
+- Frontend: `npm run build` limpio, `npm run lint` limpio (los dos warnings
+  preexistentes de `button.tsx`/`badge.tsx` no son de este trabajo).
+- `claude plugin validate .`: verde.
+- `i18n-check.ps1`: `SCANNED: 27 files` (28 `.ts`/`.tsx` del frontend, menos
+  `strings.ts`, excluido a propósito porque el diccionario ES vive ahí),
+  `TOTAL: 169`. El script es una heurística de grep, no una prueba de
+  corrección: su total nunca va a ser cero porque los 41 bloques por idioma
+  contienen español legítimo en el lado `es`. Lo que importa no es el número,
+  es que cada hit quede clasificado — y quedó, tarea por tarea, en los
+  `review-task-*.md` de este mismo plan.
+- Backend en vivo, verificado con HTTP real (no por lectura de código): con la
+  perilla en `en`, `PUT /archivo` sobre un directorio inexistente devuelve
+  `{"detail":"Not a directory: ..."}`, y `POST /tickets` con un proyecto no
+  registrado devuelve `{"detail":"The project '...' is not registered"}`; con
+  la perilla en `es`, las mismas dos llamadas devuelven `"No es un
+  directorio: ..."` y `"El proyecto '...' no está dado de alta"`. La perilla
+  quedó en `"es"` al cerrar la sesión, que es el valor real de la base de
+  datos del humano.
+
+**Lo que la Tarea 7 NO pudo hacer, y no simuló haber hecho.** La herramienta
+de navegador se cayó a mitad de la sesión anterior y siguió caída en esta: no
+hay verificación visual de que ningún idioma deje una palabra suelta en el
+otro, ni de que los badges realmente se vean con colores distintos en
+pantalla — sólo la verificación lógica (grep, símbolos, la prueba HTTP de
+arriba) más una lista de chequeo para que un humano lo confirme en cinco
+minutos:
+
+1. Abrir Ajustes con la perilla en Español: los tres títulos de sección
+   (Modelos, Archivo, Idioma) y las dos etiquetas de radio button del idioma
+   están en español. Cambiar a English y recargar: los mismos tres títulos y
+   las dos etiquetas pasan a inglés.
+2. En Ajustes → Idioma, abrir el popover `<Info>` en los dos idiomas: el
+   cuerpo entero (los dos párrafos, con `<strong>` y `<code>` incluidos) está
+   en el idioma activo, sin mezcla.
+3. Abrir Home con un proyecto real: el botón de crear ticket, los estados de
+   la lista de tickets y el mensaje de "no hay tickets" están en el idioma
+   activo.
+4. Abrir el Timeline de un ticket con al menos dos fases corridas: los badges
+   de estado NO son todos del mismo color (comparar `queued`/`running` contra
+   `analyzed`/`error`), y la etiqueta de cada badge (no el color) cambia de
+   idioma al cambiar la perilla.
+5. Forzar un error: en Ajustes → Archivo, escribir una ruta que no existe y
+   guardar. El toast de error aparece en el idioma activo, sin fragmentos del
+   otro.
+6. Abrir el formulario de un proyecto (crear o editar): las etiquetas de cada
+   campo y el botón de guardar están en el idioma activo.
+7. Falla si: cualquier pantalla de las anteriores muestra una palabra suelta
+   del otro idioma, si un badge cambia de color al cambiar sólo el idioma (el
+   color no debería moverse, sólo la etiqueta), o si la perilla queda en un
+   valor distinto de `es` al cerrar la revisión.
+
+**Lo que queda deliberadamente sin tocar, para que la próxima sesión no lo
+redescubra como bug:**
+- `Language.tsx` no tiene el guardia de doble clic que sí tiene `Archive.tsx`
+  (deshabilitar el control mientras la llamada está en vuelo). No rompe nada
+  hoy —`pick` recarga la página apenas la respuesta llega— pero es una
+  asimetría entre dos componentes que se ven casi idénticos.
+- `Timeline.tsx:22,25` nombra un parámetro lambda `ruta`, un identificador en
+  español en código, donde la regla del repo reserva el español para texto de
+  UI. Renombrar a `path` es mecánico y quedó afuera por tamaño, no por duda.
+- `initLang` (`strings.ts`) duplica exactamente la escritura a `localStorage`
+  que ya hace `setLang`, en vez de llamarlo. Dos escritores de la misma clave
+  en el mismo archivo es exactamente el tipo de cosa que diverge el día que
+  uno de los dos lados crezca lógica que el otro no tiene.
+
 ## Immediate pending items
 
 - [ ] **A first real run of a vague request through the fan-out route.** Every check
