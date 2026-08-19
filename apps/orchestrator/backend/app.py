@@ -732,9 +732,13 @@ def journal_lang(text: str) -> str:
 # the journal exist in plugin-only sessions. Orchestrated, this phrase claims the run
 # line for the runner, whose line is richer (duration, branch, session); otherwise
 # every run would come out twice. Findings stay the skill's either way.
+# Names both spellings of each section: the journal's language is the FILE's, decided
+# by `journal_lang` at append time, not the knob's — so this prompt, built before the
+# file is touched, cannot know which one this ticket's journal actually uses.
 JOURNAL_CLAIM = (
-    "\n\nThe runner keeps the `## Corridas` section of the journal for this run; "
-    "don't write a run line yourself. `## Hallazgos` is still yours.")
+    "\n\nThe runner keeps the journal's runs section (`## Corridas`, or `## Runs` "
+    "in an English journal) for this run; don't write a run line yourself. The "
+    "findings section (`## Hallazgos` / `## Findings`) is still yours.")
 LANGUAGE_NAME = {"es": "Spanish", "en": "English"}
 # Prompt-facing, so it's English like every other instruction the agent reads. The
 # exemption list is short here and complete in the skill's own `Output language`
@@ -1552,7 +1556,7 @@ def copy_into(repo: Path, rel: str, dest: Path) -> tuple[int, str | None]:
                 over = w("mas_de", n=ARCHIVE_TREE_MAX_FILES)
                 break
             if size > ARCHIVE_TREE_MAX_BYTES:
-                over = f"más de {ARCHIVE_TREE_MAX_BYTES // (1024 * 1024)} MB"
+                over = w("mas_de_mb", n=ARCHIVE_TREE_MAX_BYTES // (1024 * 1024))
                 break
         if over:
             return 0, f"omitido — {rel}: {over}"
@@ -1792,7 +1796,8 @@ def marker_lang(marker: str) -> str:
 WORDS = {
     "es": {"rama": "rama", "resume": "← resume de", "reserva": "reserva",
            "archivo": "archivo", "no_copiado": "no copiado",
-           "mas_de": "más de {n} archivos", "desde_run": "desde run {n}",
+           "mas_de": "más de {n} archivos", "mas_de_mb": "más de {n} MB",
+           "desde_run": "desde run {n}",
            "respondida": "respondida", "config_ui": "creaste {rel} desde la UI",
            "sin_huella": "la corrida no declaró huella",
            "sin_brief": "no existe el brief de la fase anterior; corre primero la fase «brief»",
@@ -1800,7 +1805,8 @@ WORDS = {
            "ningun_repo": "ningún repo pudo sondearse"},
     "en": {"rama": "branch", "resume": "← resumed from", "reserva": "caveat",
            "archivo": "archive", "no_copiado": "not copied",
-           "mas_de": "more than {n} files", "desde_run": "from run {n}",
+           "mas_de": "more than {n} files", "mas_de_mb": "more than {n} MB",
+           "desde_run": "from run {n}",
            "respondida": "answered", "config_ui": "you created {rel} from the UI",
            "sin_huella": "the run declared no stamp",
            "sin_brief": "the previous phase's brief does not exist; run the «brief» phase first",

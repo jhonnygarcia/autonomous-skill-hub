@@ -2559,6 +2559,20 @@ def test_the_orchestrated_prompt_claims_the_journal(client, monkeypatch):
     assert "don't write a run line yourself" in _prompt_from(cap)
 
 
+def test_the_journal_claim_names_both_spellings(client, monkeypatch):
+    """`JOURNAL_CLAIM` is built before the journal is touched, so it can't know
+    whether THIS ticket's journal is Spanish or English — it has to name both
+    spellings of each section, or an English journal leaves the agent unable to
+    recognise the section as claimed and it writes its own run line anyway."""
+    _use_fake_claude(monkeypatch)
+    cap = _spy_argv(monkeypatch)
+    tid = client.post("/tickets", json={"ado_id": 9, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    prompt = _prompt_from(cap)
+    assert "## Corridas" in prompt and "## Runs" in prompt
+    assert "## Hallazgos" in prompt and "## Findings" in prompt
+
+
 def _spy_all_argv(monkeypatch):
     """Every spawn, in order — the fan-out launches several."""
     import asyncio
