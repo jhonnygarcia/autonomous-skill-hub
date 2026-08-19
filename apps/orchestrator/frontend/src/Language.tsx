@@ -19,7 +19,7 @@ export function Language() {
     api.saveIdioma(code)
       .then(r => {
         setIdioma(r.idioma)
-        setLang(r.idioma as "es" | "en")
+        setLang(r.idioma)
         // Recarga en vez de re-render: el idioma se resuelve una sola vez, antes
         // del montaje (ver `main.tsx`), así que no hay forma de propagarlo sin
         // volver a arrancar. Es una perilla que se toca dos veces en la vida.

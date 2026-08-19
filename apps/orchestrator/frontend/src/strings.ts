@@ -11,25 +11,43 @@ export function lang(): Lang {
   return current
 }
 
-/** Updates the language both in memory and in localStorage. */
-export function setLang(code: Lang): void {
+/** Updates the language both in memory and in localStorage. Silently ignores
+ *  invalid values (not "es" or "en"). */
+export function setLang(code: unknown): void {
+  if (code !== "es" && code !== "en") return
   current = code
-  localStorage.setItem(KEY, code)
+  try {
+    localStorage.setItem(KEY, code)
+  } catch {
+    // Storage write failed; the value is in memory, which is enough
+  }
 }
 
 /** Resuelve el idioma antes del primer render. Arranca con lo cacheado —si no hay
  *  nada, español, que es el default del backend— y consulta la DB después. Sin el
- *  caché, la app pinta un frame en español y salta al inglés a la vista del usuario. */
+ *  caché, la app pinta un frame en español y salta al inglés a la vista del usuario.
+ *  Swallows all errors to guarantee it never rejects: this runs before React mounts,
+ *  so a rejection is a blank page with no way to recover. */
 export async function initLang(): Promise<void> {
-  const cached = localStorage.getItem(KEY)
-  if (cached === "es" || cached === "en") current = cached
+  try {
+    const cached = localStorage.getItem(KEY)
+    if (cached === "es" || cached === "en") current = cached
+  } catch {
+    // Storage unavailable or disabled (e.g., Safari private browsing, sandboxed iframe);
+    // stay with default "es"
+  }
+
   try {
     const r = await fetch("/api/idioma")
     if (!r.ok) return                       // la DB manda, pero si no contesta el
     const { idioma } = await r.json()       // caché es mejor que nada
     if (idioma === "es" || idioma === "en") {
       current = idioma
-      localStorage.setItem(KEY, idioma)
+      try {
+        localStorage.setItem(KEY, idioma)
+      } catch {
+        // Storage write failed; the value is in memory, which is enough
+      }
     }
   } catch {
     // sin red no hay nada que corregir: seguimos con el caché
