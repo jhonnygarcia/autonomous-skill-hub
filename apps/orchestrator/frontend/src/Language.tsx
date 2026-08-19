@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { api } from "@/api"
 import { Info } from "@/Info"
+import { setLang } from "@/strings"
 
 /** El idioma en que el agente escribe sus entregables. Global, como el archivo y
  *  los modelos: un mismo ticket con el análisis en un idioma y el plan en otro es
@@ -16,7 +17,14 @@ export function Language() {
   const pick = (code: string) => {
     setError("")
     api.saveIdioma(code)
-      .then(r => setIdioma(r.idioma))
+      .then(r => {
+        setIdioma(r.idioma)
+        setLang(r.idioma as "es" | "en")
+        // Recarga en vez de re-render: el idioma se resuelve una sola vez, antes
+        // del montaje (ver `main.tsx`), así que no hay forma de propagarlo sin
+        // volver a arrancar. Es una perilla que se toca dos veces en la vida.
+        location.reload()
+      })
       .catch(e => { setError(String(e)); api.idioma().then(r => setIdioma(r.idioma)) })
   }
 

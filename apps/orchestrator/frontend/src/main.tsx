@@ -2,9 +2,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { initLang } from './strings.ts'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// `await` antes de montar, no dentro de un efecto: con el idioma resuelto en un
+// efecto, el primer render sale en el idioma equivocado y todo componente que lea
+// `t()` en un valor inicial de `useState` se queda con esa cadena para siempre.
+initLang().then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+})
