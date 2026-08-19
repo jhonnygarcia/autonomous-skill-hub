@@ -4193,6 +4193,45 @@ def test_responder_decision_stale_id_after_answering_reports_already_answered(cl
     assert "cambió" not in r2.json()["detail"]
 
 
+def test_answering_an_english_item_writes_an_english_label(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path,
+                                       doc=REAL_3359_DECISIONS_DOC_EN)
+    decidir = [x for x in _puntos(client, tid, ruta) if x["tipo"] == "DECIDIR"][0]
+    client.post(f"/tickets/{tid}/decisiones",
+                json={"ruta": ruta, "id": decidir["id"], "aceptar_propuesta": True})
+    text = p.read_text(encoding="utf-8")
+    assert "**Answer:** repoint the legacy routes" in text
+    assert "**Respuesta:**" not in text
+
+
+def test_a_spanish_document_is_answered_in_spanish_even_with_the_knob_in_english(
+        client, monkeypatch, tmp_path):
+    """The document's language wins over the knob. Otherwise an old analysis answered
+    today comes out half and half, and `_pre_answer_id` stops recognising its own
+    work — the 'already answered' 409 degrades into 'the file changed', which is the
+    wrong story told to the human."""
+    client.put("/idioma", json={"idioma": "en"})
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)   # Spanish doc
+    punto = _puntos(client, tid, ruta)[1]
+    client.post(f"/tickets/{tid}/decisiones",
+                json={"ruta": ruta, "id": punto["id"], "aceptar_propuesta": True})
+    assert "**Respuesta:**" in p.read_text(encoding="utf-8")
+    assert "**Answer:**" not in p.read_text(encoding="utf-8")
+
+
+def test_stale_id_is_recognised_in_english_too(client, monkeypatch, tmp_path):
+    """`_pre_answer_id` undoes exactly what `_write_answer` did. If it only knows the
+    Spanish label, an English resubmit falls through to 'the file changed'."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path,
+                                       doc=REAL_3359_DECISIONS_DOC_EN)
+    punto = _puntos(client, tid, ruta)[1]
+    body = {"ruta": ruta, "id": punto["id"], "aceptar_propuesta": True}
+    assert client.post(f"/tickets/{tid}/decisiones", json=body).status_code == 200
+    r = client.post(f"/tickets/{tid}/decisiones", json=body)   # the double click
+    assert r.status_code == 409
+    assert "ya fue respondido" in r.json()["detail"]
+
+
 def test_responder_decision_refuses_when_the_file_changed_underneath(client, monkeypatch, tmp_path):
     tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
     bloquea = next(x for x in _puntos(client, tid, ruta) if x["tipo"] == "BLOQUEA")

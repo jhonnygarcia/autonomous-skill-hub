@@ -1905,8 +1905,8 @@ def _decision_items(text: str) -> list[dict]:
 
 
 def _write_answer(text: str, item: dict, answer: str) -> str:
-    """Ticks `item`'s checkbox and appends an indented `**Respuesta:**` line right
-    after its body — the convention documented in CLAUDE.md next to `DECIDIR`/`BLOQUEA`.
+    """Ticks `item`'s checkbox and appends an indented `**Respuesta:**` / `**Answer:**`
+    line, in the document's own language, right after its body — the convention documented in CLAUDE.md next to `DECIDIR`/`BLOQUEA`.
     Every byte outside `item`'s own core is copied through unchanged: this is a
     string-splice at `item`'s recorded offsets, never a rewrite of the whole document.
 
@@ -1921,19 +1921,27 @@ def _write_answer(text: str, item: dict, answer: str) -> str:
     core = text[start:start + core_len]
     new_core = "- [x]" + core[5:]   # "- [ ]" and "- [x]" are both 5 characters wide
     eol = _dominant_eol(text)
+    # The DOCUMENT's language, not the knob's: a Spanish analysis answered while the
+    # knob says English must stay Spanish, or the file comes out half and half and
+    # `_pre_answer_id` no longer recognises what this function wrote.
+    label = MARKERS[marker_lang(item["_marker"])]["respuesta"]
     lines = answer.splitlines() or [""]
     answer_block = eol.join(
-        f"{DECISION_INDENT}**Respuesta:** {ln}" if i == 0 else f"{DECISION_INDENT}{ln}"
+        f"{DECISION_INDENT}**{label}:** {ln}" if i == 0 else f"{DECISION_INDENT}{ln}"
         for i, ln in enumerate(lines)
     )
     return text[:start] + new_core + eol + answer_block + text[start + core_len:]
 
 
 # What `_write_answer` always appends, as a regex: a line starting with the same
-# indent as every other continuation line, followed by the literal "**Respuesta:**"
-# marker, through to the end of the item. Used only by `_pre_answer_id` to undo it.
+# indent as every other continuation line, followed by the literal "**Respuesta:**" /
+# "**Answer:**" marker, through to the end of the item. Used only by `_pre_answer_id`
+# to undo it.
 ANSWER_BLOCK_RE = re.compile(
-    r"^" + re.escape(DECISION_INDENT) + r"\*\*Respuesta:\*\*.*\Z", re.MULTILINE | re.DOTALL
+    r"^" + re.escape(DECISION_INDENT)
+    + r"\*\*(?:" + "|".join(re.escape(MARKERS[c]["respuesta"]) for c in LANGS)
+    + r"):\*\*.*\Z",
+    re.MULTILINE | re.DOTALL
 )
 
 
