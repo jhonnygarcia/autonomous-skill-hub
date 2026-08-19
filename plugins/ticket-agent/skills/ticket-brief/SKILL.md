@@ -97,7 +97,7 @@ this structure. Presenting it in chat without writing the file is a task failure
 # Brief of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Collected:** <date> by ticket-agent v0.11.0
+**Collected:** <date> by ticket-agent v0.12.0
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)
@@ -143,6 +143,43 @@ ambiguity blocks, the tool stops helping and becomes a form.
 
 The routing line goes **last**, after everything, because the runner anchors on
 the last match — this file's own example carries the literal.
+
+## Output language
+
+Write **the brief** — headings, prose, and every question you leave for the
+human — in the language named by, in this order:
+
+1. the prompt, if it names one;
+2. `language` in `.claude/ticket-agent.json` (`"es"` or `"en"`);
+3. Spanish, if neither says anything.
+
+The section headings above are shown in English because this procedure is
+written in English. **Translate them too** when the target language is not
+English: they are part of the document, not part of the contract.
+
+**What never gets translated, in either language:**
+
+- **Literal quotes from the work item, comments, wiki or any cited document.**
+  They keep the source's language. An analyst has to be able to check a quote
+  against the ticket, and a translated quote can't be checked. Put the
+  translation next to it if it helps, marked as a translation.
+- **Code identifiers, file paths, `file:line` references, branch names, commit
+  subjects, and command lines** copied from a build or a test run.
+- **The `HUELLA:` line and its values** (`ok`, `parcial`, `nada`), and the
+  `SONDEAR:` line with its repo labels. The runner matches them byte for byte.
+- **OpenSpec's structural headers**, wherever they appear:
+  `## Why`, `## What Changes`, `## Purpose`, `## Requirements`,
+  `## ADDED Requirements` (and `MODIFIED`, `REMOVED`, `RENAMED`),
+  `### Requirement:`, `#### Scenario:`, and the `**WHEN**` / `**THEN**` /
+  `**AND**` bullets. Its validator parses those literals; a translated one
+  fails the change.
+
+**What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
+markers and their section. In Spanish they read `## Decisiones para ti`,
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
+`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+orchestrator reads both.
 
 ## 6. Closing
 

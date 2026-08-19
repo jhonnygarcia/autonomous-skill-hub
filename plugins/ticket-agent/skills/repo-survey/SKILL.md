@@ -59,41 +59,41 @@ Write EXACTLY this structure, at the path the prompt gives you:
 ```markdown
 # Survey <id> — <label> (<repo path>)
 
-## Veredicto
+## Verdict
 touched
 
-## Qué exige de este repo
+## What it demands of this repo
 (2-6 lines. What has to change here, without proposing how)
 
-## Rutas afectadas
+## Affected paths
 - `src/reports/TrendTable.tsx:112` — what role it plays  [verificado]
 
-## Espejo a copiar
+## Mirror to copy
 - `src/reports/CsvExport.tsx:1-90` — the equivalent pattern that already exists
   (or: "no encontrado — busqué `Glob **/*Export*.tsx`")
 
-## Reglas de este repo que aplican
+## This repo's rules that apply
 - CLAUDE.md:31 — new components don't go in the barrel export
 
-## Espero de otros
+## What I expect from others
 - de `back`: `GET /api/trends/export?format=xlsx` → xlsx binary   [asumido]
 
-## Ofrezco a otros
+## What I offer others
 - the export button on the trends view                            [nuevo]
 
-## No pude determinar
+## Could not determine
 - whether the back already paginates that response — lives outside this repo
 ```
 
 Four rules about that shape, each with its reason:
 
-**`Veredicto` first, one word.** `touched` or `not-touched`. If the ticket
+**`Verdict` first, one word.** `touched` or `not-touched`. If the ticket
 doesn't touch this repo, write `not-touched`, say why in one line, and leave the
 rest empty. This is what makes over-inclusive routing cheap: the consolidation
 discards you without reading further, and being routed by mistake costs almost
 nothing.
 
-**`Espero de otros` and `Ofrezco a otros` are the point of the whole run.**
+**`What I expect from others` and `What I offer others` are the point of the whole run.**
 Everything else could be written by a session that saw all the repos at once.
 These two can't: they're your assumptions about the others, in a shape that can
 be collated. The consolidation matches every `espero` against an `ofrezco` —
@@ -103,7 +103,7 @@ them in the exact shape you'd need if you had to consume them: name, signature,
 field. "The back gives me the data" is useless; `GET /api/trends/export →
 xlsx binary` is checkable.
 
-**`No pude determinar` is mandatory and can't be empty out of laziness.** It's
+**`Could not determine` is mandatory and can't be empty out of laziness.** It's
 this session's declared blindness, and it's the raw material for the questions
 the consolidation asks the human. A survey that claims to know everything about
 a cross-repo ticket is lying.
@@ -112,12 +112,49 @@ a cross-repo ticket is lying.
 phase; mixing it in hands the consolidation N incompatible partial plans instead
 of N observations.
 
+## Output language
+
+Write **the survey** — headings, prose, and every question you leave for the
+human — in the language named by, in this order:
+
+1. the prompt, if it names one;
+2. `language` in `.claude/ticket-agent.json` (`"es"` or `"en"`);
+3. Spanish, if neither says anything.
+
+The section headings above are shown in English because this procedure is
+written in English. **Translate them too** when the target language is not
+English: they are part of the document, not part of the contract.
+
+**What never gets translated, in either language:**
+
+- **Literal quotes from the work item, comments, wiki or any cited document.**
+  They keep the source's language. An analyst has to be able to check a quote
+  against the ticket, and a translated quote can't be checked. Put the
+  translation next to it if it helps, marked as a translation.
+- **Code identifiers, file paths, `file:line` references, branch names, commit
+  subjects, and command lines** copied from a build or a test run.
+- **The `HUELLA:` line and its values** (`ok`, `parcial`, `nada`), and the
+  `SONDEAR:` line with its repo labels. The runner matches them byte for byte.
+- **OpenSpec's structural headers**, wherever they appear:
+  `## Why`, `## What Changes`, `## Purpose`, `## Requirements`,
+  `## ADDED Requirements` (and `MODIFIED`, `REMOVED`, `RENAMED`),
+  `### Requirement:`, `#### Scenario:`, and the `**WHEN**` / `**THEN**` /
+  `**AND**` bullets. Its validator parses those literals; a translated one
+  fails the change.
+
+**What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
+markers and their section. In Spanish they read `## Decisiones para ti`,
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
+`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+orchestrator reads both.
+
 ## 5. Closing
 
 **Journal.** This session usually can't reach the primary repo's journal — a
 fan-out child mounts only its own repo and the scratch. Findings outside the
 survey's scope still matter: put them in the survey itself under a final
-`## Hallazgos fuera de alcance` section. The consolidation reads every survey and
+`## Out-of-scope findings` section. The consolidation reads every survey and
 carries them to the journal.
 
 Always finish with one of these three lines, and make it the **last** one:

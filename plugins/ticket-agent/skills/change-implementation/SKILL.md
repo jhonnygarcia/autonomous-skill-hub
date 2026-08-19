@@ -138,6 +138,12 @@ it), don't move them ahead or reorder them:
    `git add -A` or `git add .` — with the message `<id> task N: <subject>`, and
    check the box `- [x]` in `tasks.md`. One commit per task.
 
+   **The commit subject is always in English**, whatever the output language is.
+   `tasks.md` may be in Spanish and the commit still reads
+   `3323 task 4: add the carrier mapper` — the `git log` of a client's repo is
+   shared infrastructure and rewriting it is expensive, so it doesn't hang off a
+   setting in a tool they don't run.
+
    The asymmetry is deliberate: green you can re-run, red you cannot — the code
    exists now. So the red evidence stays the subagent's word, and it's the
    weakest link in the chain. If its report shows no red output, the task is
@@ -233,6 +239,43 @@ outside the change entirely.
    green the first time proved nothing.
 7. **Only `critical` and `important` block.** Taste doesn't stop a plan, and what
    the plan ordered isn't a finding. Both get written down instead.
+
+## Output language
+
+Write **the implementation** — headings, prose, and every question you leave for
+the human — in the language named by, in this order:
+
+1. the prompt, if it names one;
+2. `language` in `.claude/ticket-agent.json` (`"es"` or `"en"`);
+3. Spanish, if neither says anything.
+
+The section headings above are shown in English because this procedure is
+written in English. **Translate them too** when the target language is not
+English: they are part of the document, not part of the contract.
+
+**What never gets translated, in either language:**
+
+- **Literal quotes from the work item, comments, wiki or any cited document.**
+  They keep the source's language. An analyst has to be able to check a quote
+  against the ticket, and a translated quote can't be checked. Put the
+  translation next to it if it helps, marked as a translation.
+- **Code identifiers, file paths, `file:line` references, branch names, commit
+  subjects, and command lines** copied from a build or a test run.
+- **The `HUELLA:` line and its values** (`ok`, `parcial`, `nada`), and the
+  `SONDEAR:` line with its repo labels. The runner matches them byte for byte.
+- **OpenSpec's structural headers**, wherever they appear:
+  `## Why`, `## What Changes`, `## Purpose`, `## Requirements`,
+  `## ADDED Requirements` (and `MODIFIED`, `REMOVED`, `RENAMED`),
+  `### Requirement:`, `#### Scenario:`, and the `**WHEN**` / `**THEN**` /
+  `**AND**` bullets. Its validator parses those literals; a translated one
+  fails the change.
+
+**What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
+markers and their section. In Spanish they read `## Decisiones para ti`,
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
+`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+orchestrator reads both.
 
 ## Closing
 

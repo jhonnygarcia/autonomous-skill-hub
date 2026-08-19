@@ -103,6 +103,17 @@ Four files:
 
 **`proposal.md`** — why, what, and with what impact. Each change in the form:
 
+Two headings are **mandatory and parsed by the validator**, and the run fails
+without them — they are not optional prose:
+
+```markdown
+## Why
+[at least 50 characters, at most 1000]
+
+## What Changes
+[the list of changes, in the form below]
+```
+
 ```markdown
 **[Behavior or section name]**
 - From: [current state]
@@ -186,6 +197,28 @@ down, a ticked one wins.
 OpenSpec reuses across changes. If one already exists under `openspec/specs/`
 that fits, use it; don't invent a new one per ticket.
 
+**This file is always written in English, whatever the output language is.**
+Every one of its structural tokens belongs to the OpenSpec validator's parser,
+and a translated one is an ERROR that fails the change:
+
+```markdown
+## ADDED Requirements
+
+### Requirement: The system SHALL do the thing
+[the requirement text; it must contain SHALL or MUST]
+
+#### Scenario: Descriptive name
+- **WHEN** [the condition]
+- **THEN** [the expected result]
+- **AND** [anything else]
+```
+
+`## ADDED Requirements` can also be `## MODIFIED`, `## REMOVED` or
+`## RENAMED Requirements`. **Every requirement needs at least one scenario, and
+the scenario has to be a level-4 header** — a bullet list instead of
+`#### Scenario:` is an ERROR. A main spec under `openspec/specs/` needs
+`## Purpose` and `## Requirements` instead of the delta headers.
+
 ## 6. Validation
 
 Run exactly:
@@ -197,6 +230,43 @@ waiting for a terminal selection, and in headless there's no terminal to answer
 it: the run hangs. If it fails, fix it and validate again. **On the second
 failed validation, stop**: leave the change written and report what doesn't
 pass. An invalid change that can be reviewed is worth more than none at all.
+
+## Output language
+
+Write **the change** — headings, prose, and every question you leave for the
+human — in the language named by, in this order:
+
+1. the prompt, if it names one;
+2. `language` in `.claude/ticket-agent.json` (`"es"` or `"en"`);
+3. Spanish, if neither says anything.
+
+The section headings above are shown in English because this procedure is
+written in English. **Translate them too** when the target language is not
+English: they are part of the document, not part of the contract.
+
+**What never gets translated, in either language:**
+
+- **Literal quotes from the work item, comments, wiki or any cited document.**
+  They keep the source's language. An analyst has to be able to check a quote
+  against the ticket, and a translated quote can't be checked. Put the
+  translation next to it if it helps, marked as a translation.
+- **Code identifiers, file paths, `file:line` references, branch names, commit
+  subjects, and command lines** copied from a build or a test run.
+- **The `HUELLA:` line and its values** (`ok`, `parcial`, `nada`), and the
+  `SONDEAR:` line with its repo labels. The runner matches them byte for byte.
+- **OpenSpec's structural headers**, wherever they appear:
+  `## Why`, `## What Changes`, `## Purpose`, `## Requirements`,
+  `## ADDED Requirements` (and `MODIFIED`, `REMOVED`, `RENAMED`),
+  `### Requirement:`, `#### Scenario:`, and the `**WHEN**` / `**THEN**` /
+  `**AND**` bullets. Its validator parses those literals; a translated one
+  fails the change.
+
+**What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
+markers and their section. In Spanish they read `## Decisiones para ti`,
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
+`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+orchestrator reads both.
 
 ## 7. Closing based on autonomy
 
