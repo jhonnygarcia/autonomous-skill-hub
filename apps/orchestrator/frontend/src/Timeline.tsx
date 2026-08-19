@@ -1,11 +1,37 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { api, type ActiveRun, type Artifact, type Phase, type Preflight, type Run } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Decisions } from "@/Decisions"
 import { Markdown } from "@/Markdown"
 import { canRunPhase, durationText, formatSize, formatTime, phaseLabel, phaseColor, phaseIcon } from "@/status"
-import { plural, t } from "@/strings"
+import { lang, plural, t, type Lang } from "@/strings"
+
+// Two prose blocks with markup inside the sentence, indexed by language where they
+// already live — same reasoning as `Models.tsx`'s `PHASE_INFO`, not split into keys.
+const ARTIFACT_NOT_FOUND: Record<Lang, (ruta: string) => ReactNode> = {
+  es: ruta => (
+    <>Artefacto declarado en <span className="font-mono">{ruta}</span>, no se encontró en disco</>
+  ),
+  en: ruta => (
+    <>Artifact declared at <span className="font-mono">{ruta}</span> wasn't found on disk</>
+  ),
+}
+
+const ADJUSTMENT_GUIDANCE: Record<Lang, ReactNode> = {
+  es: (
+    <>
+      Si <strong>añades</strong> alcance, continuar ahorra la exploración.
+      Si <strong>corriges</strong> lo que entendió, sesión nueva.
+    </>
+  ),
+  en: (
+    <>
+      If you're <strong>adding</strong> scope, continuing saves the exploration.
+      If you're <strong>correcting</strong> what it understood, use a new session.
+    </>
+  ),
+}
 
 // Shared focus/hover style for the viewer's native <button>s: shadcn buttons already
 // have their own ring, but these are plain (file chips, close, adjust) and without
@@ -316,8 +342,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                   ) : (
                     <span className="flex flex-wrap items-center gap-2 text-warning-active">
                       <span>
-                        Artefacto declarado en{" "}
-                        <span className="font-mono">{h.ruta}</span>, no se encontró en disco
+                        {ARTIFACT_NOT_FOUND[lang()](h.ruta)}
                       </span>
                       {restorableRun && (
                         <Button size="sm" variant="outline" className="h-6 text-xs"
@@ -370,8 +395,7 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                   {/* The criterion, written down: it's the one decision only the human
                       can make, and it doesn't survive as something to remember. */}
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Si <strong>añades</strong> alcance, continuar ahorra la exploración.
-                    Si <strong>corriges</strong> lo que entendió, sesión nueva.
+                    {ADJUSTMENT_GUIDANCE[lang()]}
                   </p>
 
                   <Button size="sm" className="mt-2" disabled={!instructions || !!reason}

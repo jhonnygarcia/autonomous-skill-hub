@@ -1,13 +1,49 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { api, type Project, type Repo } from "@/api"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/ConfirmDialog"
 import { Input } from "@/components/ui/input"
-import { t } from "@/strings"
+import { lang, t, type Lang } from "@/strings"
 
 const EMPTY: Project = {
   name: "", org: "", project: "",
   repos: [{ path: "", label: "", primary: true }],
+}
+
+// Two prose blocks with markup inside the sentence, indexed by language where they
+// already live — same reasoning as `Models.tsx`'s `PHASE_INFO`, not split into keys.
+const PAT_DISCLAIMER: Record<Lang, ReactNode> = {
+  es: (
+    <>
+      Se guarda tal cual, en texto plano, en <code>orchestrator.db</code>: no hay
+      cifrado en reposo. Que la API nunca lo devuelva evita que se filtre por ahí,
+      pero no protege el archivo en disco.
+    </>
+  ),
+  en: (
+    <>
+      It's stored as-is, in plain text, in <code>orchestrator.db</code>: there's no
+      encryption at rest. The API never returning it keeps it from leaking through
+      there, but that doesn't protect the file on disk.
+    </>
+  ),
+}
+
+const REPOS_DESCRIPTION: Record<Lang, ReactNode> = {
+  es: (
+    <>
+      El marcado como <strong>principal</strong> es donde corre el agente y donde se
+      escribe el análisis; los demás los lee. La descripción viaja al prompt y es lo
+      que le dice cuándo mirar en cada uno.
+    </>
+  ),
+  en: (
+    <>
+      The one marked <strong>primary</strong> is where the agent runs and where the
+      analysis gets written; it reads the rest. The description travels into the
+      prompt, and it's what tells it when to look at each one.
+    </>
+  ),
 }
 
 // Module-local, both of them: nothing outside this file uses them, and exporting a
@@ -189,18 +225,14 @@ export function ProjectForm({ initial, onSaved, onCancel, onDirtyChange }: {
           </label>
         )}
         <p className="mt-1 text-xs text-muted-foreground">
-          Se guarda tal cual, en texto plano, en <code>orchestrator.db</code>: no hay
-          cifrado en reposo. Que la API nunca lo devuelva evita que se filtre por ahí,
-          pero no protege el archivo en disco.
+          {PAT_DISCLAIMER[lang()]}
         </p>
       </Field>
 
       <div>
         <p className="text-xs font-medium">{t("projectheader.reposSeen")}</p>
         <p className="mb-3 text-xs text-muted-foreground">
-          El marcado como <strong>principal</strong> es donde corre el agente y donde se
-          escribe el análisis; los demás los lee. La descripción viaja al prompt y es lo
-          que le dice cuándo mirar en cada uno.
+          {REPOS_DESCRIPTION[lang()]}
         </p>
 
         <div className="space-y-4">
