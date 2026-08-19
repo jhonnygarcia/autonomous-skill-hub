@@ -1354,6 +1354,9 @@ def ensure_ticket_agent_config(ticket: dict) -> str:
 
     Writes only what the orchestrator actually has a source for: `organization`
     and `project`, copied from the ticket the same way `org`/`project` already are.
+    `language` too, since this change: the knob IS a source, and the skills read
+    this key as the fallback when the prompt names no language — which is the only
+    thing a plugin-only session (no orchestrator, no prompt directive) has to go on.
     No `autonomy`: the skills treat it (and its absence) as `supervised`, the safe
     default, so inventing a value here would be filler with no source — see
     `ticket-comprehension/SKILL.md` step 4. No `subagent_model` either: the
@@ -1365,7 +1368,8 @@ def ensure_ticket_agent_config(ticket: dict) -> str:
             return "exists"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"organization": ticket["org"], "project": ticket["project"]},
+            json.dumps({"organization": ticket["org"], "project": ticket["project"],
+                        "language": lang()},
                       indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8")
         return "created"

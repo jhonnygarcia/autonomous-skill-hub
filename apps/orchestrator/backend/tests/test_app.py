@@ -3557,7 +3557,7 @@ def test_missing_config_blocks_the_run_until_you_prepare_it(client, monkeypatch,
     prepared = client.post(f"/tickets/{tid}/preparar")
     assert prepared.status_code == 200 and prepared.json()["ok"] is True
     assert json.loads(cfg_path.read_text(encoding="utf-8")) == {
-        "organization": "DemoOrg", "project": "Demo"}
+        "organization": "DemoOrg", "project": "Demo", "language": "es"}
     assert client.post(f"/tickets/{tid}/run", json={}).status_code == 202
 
 
@@ -3603,6 +3603,39 @@ def test_preparar_reports_a_write_failure_instead_of_stranding_a_run(client, tmp
     assert r.status_code == 409 and "ticket-agent.json" in r.json()["detail"]
     assert client.post(f"/tickets/{tid}/run", json={}).status_code == 400
     assert client.get(f"/tickets/{tid}").json()["runs"] == []
+
+
+def _ticket_in_unconfigured_repo(client, tmp_path):
+    """Create a ticket whose primary repo lacks .claude/ticket-agent.json."""
+    (tmp_path / "repo" / ".claude" / "ticket-agent.json").unlink()
+    ado_id = 61
+    return client.post("/tickets", json={"ado_id": ado_id, "project": "Demo"}).json()["id"]
+
+
+def test_preparar_writes_the_current_language(client, tmp_path):
+    """The language knob governs the default language for new analyses and plans.
+    A plugin running standalone (no orchestrator, no prompt directive) reads `language`
+    from this file as its fallback — so `POST /preparar` must write it."""
+    client.put("/idioma", json={"idioma": "en"})
+    tid = _ticket_in_unconfigured_repo(client, tmp_path)
+    client.post(f"/tickets/{tid}/preparar")
+    cfg = json.loads((tmp_path / "repo" / ".claude" / "ticket-agent.json")
+                     .read_text(encoding="utf-8"))
+    assert cfg["language"] == "en"
+    assert cfg["organization"] and cfg["project"]
+
+
+def test_preparar_still_never_overwrites_a_tuned_file(client, tmp_path):
+    """A human may have set `language` by hand, or `autonomy`, or anything else:
+    an existing file is left byte-for-byte alone. This is the promise the runner
+    depends on, and adding a key must not weaken it."""
+    tid = _ticket_in_unconfigured_repo(client, tmp_path)
+    cfg_path = tmp_path / "repo" / ".claude" / "ticket-agent.json"
+    original = '{"organization": "Mio", "project": "Mio", "autonomy": "autonomous"}\n'
+    cfg_path.write_text(original, encoding="utf-8")
+    client.put("/idioma", json={"idioma": "en"})
+    client.post(f"/tickets/{tid}/preparar")
+    assert cfg_path.read_text(encoding="utf-8") == original
 
 
 def test_preflight_separates_blockers_from_warnings(client, tmp_path):
