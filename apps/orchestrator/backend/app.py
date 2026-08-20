@@ -82,9 +82,23 @@ PHASE_ALLOWED_TOOLS = {
     # going back to the work item would make it a second, divergent reading.
     "survey": [],
     "consolidate": [],
+    # Both shells, same two commands. On Windows the agent reaches for the PowerShell
+    # tool first — it's the primary shell there — and with only the Bash spellings
+    # listed, every one of those attempts came back "requires approval" (real run 11 of
+    # R-5, 2026-08-20). It then fell back to Bash and got `npx: command not found` from
+    # a child shell with no usable PATH, so `openspec validate` never ran and the plan
+    # closed `parcial`. Listing the tool the agent actually picks costs nothing when
+    # Bash works and is the difference between validated and not when it doesn't.
     "design": [
         "Bash(npx --yes @fission-ai/openspec@latest:*)",
         "Bash(npx @fission-ai/openspec:*)",
+        # `PowerShell(npx:*)` and not the package-specific spelling the Bash rules use:
+        # the agent quotes the package (`npx --yes '@fission-ai/openspec@latest' …`), so a
+        # rule written unquoted never matches the prefix, and Claude's PowerShell
+        # permission parser splits the command and wants every part covered. Verified
+        # against the real binary on 2026-08-20: with this rule the validation runs
+        # (`1 passed, 0 failed`); with the two package-specific ones it was denied.
+        "PowerShell(npx:*)",
     ],
     # No specifier, on purpose: it's verified on a real run that `Bash(x:*)` enables
     # the tool and does not scope it. Pretending otherwise would be worse than not
@@ -1810,7 +1824,8 @@ WORDS = {
            "archivo": "archivo", "no_copiado": "no copiado",
            "mas_de": "más de {n} archivos", "mas_de_mb": "más de {n} MB",
            "desde_run": "desde run {n}",
-           "respondida": "respondida", "config_ui": "creaste {rel} desde la UI",
+           "respondida": "respondida", "reabierta": "reabierta",
+           "config_ui": "creaste {rel} desde la UI",
            "sin_huella": "la corrida no declaró huella",
            "sin_brief": "no existe el brief de la fase anterior; corre primero la fase «brief»",
            "sin_surveys": "no hay surveys que consolidar; corre primero la fase «survey»",
@@ -1822,7 +1837,8 @@ WORDS = {
            "archivo": "archive", "no_copiado": "not copied",
            "mas_de": "more than {n} files", "mas_de_mb": "more than {n} MB",
            "desde_run": "from run {n}",
-           "respondida": "answered", "config_ui": "you created {rel} from the UI",
+           "respondida": "answered", "reabierta": "reopened",
+           "config_ui": "you created {rel} from the UI",
            "sin_huella": "the run declared no stamp",
            "sin_brief": "the previous phase's brief does not exist; run the «brief» phase first",
            "sin_surveys": "there are no surveys to consolidate; run the «survey» phase first",
@@ -1920,6 +1936,9 @@ MSG = {
         "file_changed_reload": "El archivo cambió desde que se cargaron las "
             "decisiones: vuelve a consultarlas e inténtalo de nuevo",
         "no_proposal": "Este punto no trae una propuesta que aceptar",
+        "not_answered": "Ese punto no esta respondido",
+        "answer_not_ours": "Esa respuesta no la escribio la app: cambiala en el "
+            "archivo y vuelve a cargar las decisiones",
         "write_failed": "No se pudo escribir {ruta}: {exc}",
     },
     "en": {
@@ -1991,6 +2010,9 @@ MSG = {
         "file_changed_reload": "The file changed since the decisions were loaded: "
             "reload them and try again",
         "no_proposal": "This point carries no proposal to accept",
+        "not_answered": "That point isn't answered",
+        "answer_not_ours": "That answer wasn't written by the app: change it in the "
+            "file and reload the decisions",
         "write_failed": "Could not write {ruta}: {exc}",
     },
 }
@@ -2008,14 +2030,28 @@ def msg(key: str, **fmt) -> str:
     return MSG[lang()][key].format(**fmt)
 
 
+# A real analysis (R-5) numbered its items — `**D2 · BLOQUEA**` instead of the
+# template's bare `**BLOQUEA**` — and both regexes below silently matched nothing: no
+# counter, no panel, and the document said the decision was there. `[^*]*?` on either
+# side of the keyword tolerates that label wherever the agent puts it inside the bold.
 # The markers a deliverable closes with, unticked. `- [x]` is an answered one and
 # doesn't count. The keywords are contract literals, matched byte for byte, in either
 # language (see `MARKERS`/`CANON_TIPO` above).
-DECISION_RE = re.compile(r"^\s*- \[ \]\s*\*\*(" + _ANY_TIPO + r")\*\*", re.MULTILINE)
+DECISION_RE = re.compile(r"^\s*- \[ \]\s*\*\*[^*]*?(" + _ANY_TIPO + r")[^*]*\*\*",
+                         re.MULTILINE)
+# The same, ticked or not. A file whose decisions are ALL answered still has to be
+# reachable: the panel is where an answer gets changed (`_reopen`), and keying the
+# panel's existence on what's left OPEN made it vanish the moment the last item was
+# answered — which is exactly when R-5 needed it, with `implement` stopped over two
+# answers that contradicted each other and no way back to either (2026-08-20).
+ANY_DECISION_RE = re.compile(r"^\s*- \[[ xX]\]\s*\*\*([^*]*?)(" + _ANY_TIPO + r")[^*]*\*\*",
+                             re.MULTILINE)
 
 
 def open_decisions(t: sqlite3.Row, rel: str) -> dict | None:
-    """How many decisions the phase left waiting for a human.
+    """How many decisions the phase left waiting for a human, or `None` if it left
+    none at all — a file whose items are all ANSWERED still reports (with both counts
+    at zero), because the panel is also the only way to change an answer.
 
     Without this the `## Decisiones para ti` sections are read by nobody: today the
     only way to find them is to open an 8 KB document and go hunting. Goes through
@@ -2029,18 +2065,31 @@ def open_decisions(t: sqlite3.Row, rel: str) -> dict | None:
         text = p.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    found = DECISION_RE.findall(text)
-    if not found:
+    todas = ANY_DECISION_RE.findall(text)
+    if not todas:
         return None
-    canon = [CANON_TIPO[f] for f in found]
-    return {"decidir": canon.count("DECIDIR"), "bloquea": canon.count("BLOQUEA")}
+    canon = [CANON_TIPO[f] for f in DECISION_RE.findall(text)]
+    # Both counts can be zero — that's "all answered", which the panel says out loud.
+    # Whoever gates a phase on this must read the counts, never the field's presence.
+    #
+    # `etiquetas` names them WITHOUT opening the panel ("D1 D2 …" under the analysis,
+    # "P1 P2 P3" under the plan). Two phases showing an identical "decisiones
+    # respondidas" line is what left R-5 stuck: `implement` refused over "P2/P3" and
+    # nothing on screen said which of the two collapsed lines held a P.
+    nombres = [pref.strip(" ·-–—	") for pref, _tipo in todas]
+    return {"decidir": canon.count("DECIDIR"), "bloquea": canon.count("BLOQUEA"),
+            "etiquetas": [n for n in nombres if n]}
 
 
 # Matches the start of one item under "## Decisiones para ti" — checked or not, unlike
 # `DECISION_RE` above (which only cares about UNTICKED items, for the counter): the
 # answerable-decisions panel has to show already-answered items too, not just count
 # what's left.
-DECISION_ITEM_RE = re.compile(r"^- \[([ xX])\] \*\*(" + _ANY_TIPO + r")\*\* — ",
+# Group 2 is the label the agent puts in front of the keyword ("D1 · ", "P2 · "), the
+# handle every other document uses to refer to the item — the plan's own `## Review
+# notes` says "conflicto P2/P3", and a panel whose cards don't carry that name makes
+# the reader hunt for which card is which (real R-5, 2026-08-20).
+DECISION_ITEM_RE = re.compile(r"^- \[([ xX])\] \*\*([^*]*?)(" + _ANY_TIPO + r")[^*]*\*\* — ",
                               re.MULTILINE)
 
 # The proposal inside a DECIDIR item's body: "Propuesta: **<text>**" (or "Proposal:"
@@ -2133,7 +2182,9 @@ def _decision_items(text: str) -> list[dict]:
         propuesta = re.sub(r"\s+", " ", prop.group(1)).strip() if prop else None
         items.append({
             "id": hashlib.sha256(core.encode("utf-8")).hexdigest()[:16],
-            "tipo": CANON_TIPO[m.group(2)],
+            "tipo": CANON_TIPO[m.group(3)],
+            # "D1", "P2" — "" when the agent numbered nothing.
+            "etiqueta": m.group(2).strip(" ·-–—	"),
             "pregunta": pregunta,
             "cuerpo": cuerpo,
             "propuesta": propuesta,
@@ -2145,7 +2196,7 @@ def _decision_items(text: str) -> list[dict]:
             # Internal-only, like the two offsets above: the marker AS WRITTEN, so
             # `_write_answer` can answer in the document's own language instead of
             # the knob's.
-            "_marker": m.group(2),
+            "_marker": m.group(3),
         })
     return items
 
@@ -2191,6 +2242,22 @@ ANSWER_BLOCK_RE = re.compile(
 )
 
 
+def _pre_answer_core(core: str) -> str | None:
+    """`core` as it read BEFORE `_write_answer` touched it, or `None` if it isn't
+    shaped like something that function produced. A human who answered by hand, in
+    their own format, leaves bytes this cannot safely undo — guessing at them would
+    delete prose nobody asked us to delete, so it says no instead."""
+    if not core.startswith("- [x]"):
+        return None
+    m = ANSWER_BLOCK_RE.search(core)
+    if not m:
+        return None
+    pre = core[:m.start()].rstrip("\r\n")
+    if not pre.startswith("- [x]"):
+        return None
+    return "- [ ]" + pre[5:]
+
+
 def _pre_answer_id(core: str) -> str | None:
     """The id this item hashed to BEFORE it was answered, or `None` if `core` isn't
     shaped like something `_write_answer` produced.
@@ -2206,16 +2273,8 @@ def _pre_answer_id(core: str) -> str | None:
     appended block (a human answered by hand, in some other format), returns `None` —
     that's a real edit, not a resubmit, and stays "file changed".
     """
-    if not core.startswith("- [x]"):
-        return None
-    m = ANSWER_BLOCK_RE.search(core)
-    if not m:
-        return None
-    pre = core[:m.start()].rstrip("\r\n")
-    if not pre.startswith("- [x]"):
-        return None
-    pre = "- [ ]" + pre[5:]
-    return hashlib.sha256(pre.encode("utf-8")).hexdigest()[:16]
+    pre = _pre_answer_core(core)
+    return None if pre is None else hashlib.sha256(pre.encode("utf-8")).hexdigest()[:16]
 
 
 def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) -> list[dict]:
@@ -2273,11 +2332,37 @@ def phases_for(t: sqlite3.Row, runs: list[dict], with_footprint: bool = True) ->
                 e["motivo"] = latest["artifact_note"]
             if e["estado"] in ("ok", "parcial") and latest["artifact_path"] and with_footprint:
                 e["huella"] = stamp_stat(t["repo_path"], latest["artifact_path"])
-                pend = open_decisions(t, latest["artifact_path"])
-                if pend:
-                    e["decisiones"] = pend
+                for ruta in decision_rutas(t, latest["artifact_path"], e["huella"]):
+                    pend = open_decisions(t, ruta)
+                    if pend:
+                        # The concrete file, which is NOT the declared path when the
+                        # deliverable is a directory: the panel answers into a file.
+                        e["decisiones"] = {**pend, "ruta": ruta}
+                        break
         out.append(e)
     return out
+
+
+def decision_rutas(t: sqlite3.Row, rel: str, huella: dict) -> list[str]:
+    """Where a phase's decisions can live, as paths `declared_file_or_none` accepts.
+
+    A file declares itself. A **directory** — `openspec/changes/<id>-<slug>/`, Phase 2's
+    deliverable — declares its markdown children instead: `declared_file_or_none` rejects
+    a directory outright, so until this existed the plan's own `## Decisiones para ti`
+    had no counter and no panel, and the only way to answer one was an editor. Real R-5
+    (2026-08-20) ended with `implement` refusing over three unanswered `P` decisions the
+    UI had never offered.
+
+    ponytail: first child with open decisions wins, and only its own are counted. Today
+    only `design.md` writes that section; if a second file starts to, this returns the
+    first and the other stays invisible.
+    """
+    if not huella.get("existe"):
+        return []
+    if not (Path(t["repo_path"]) / rel).is_dir():
+        return [rel]
+    base = rel.rstrip("/")
+    return [f"{base}/{n}" for n in huella["nombres"] if n.endswith(".md")]
 
 
 def folded_status(phases: list[dict]) -> str:
@@ -3283,6 +3368,42 @@ class DecisionAnswerIn(BaseModel):
     # state — an item that isn't being answered isn't posted at all.
     aceptar_propuesta: bool = False
     respuesta: str | None = None
+    # Undoes an answer instead of writing one, so an item can be answered again. Set,
+    # the other two fields are ignored: reopening isn't a third kind of answer.
+    reabrir: bool = False
+
+
+def _reopen(t: sqlite3.Row, p: Path, text: str, item: dict, body: "DecisionAnswerIn") -> dict:
+    """Puts one answered item back the way it was, so it can be answered again.
+
+    An answer used to be final: `_write_answer` changes the item's text, which changes
+    its id, and every door back through this endpoint 409s on purpose. That was fine
+    while an answer only fed the next phase's prose — it stopped being fine the moment
+    two answers could contradict each other. Real R-5 (2026-08-20): `implement` got to
+    task 5, found the answers to `P2` and `P3` mutually unsatisfiable, and stopped —
+    correctly. The human's only way out was an editor, because the app had no way to
+    change either answer.
+
+    Only what `_write_answer` itself wrote is undone (`_pre_answer_core`), and only at
+    this item's own offsets: an answer written by hand, in some other shape, is refused
+    rather than approximated. The reopened item goes back to unanswered, which puts it
+    back in the counter and back in front of the phase gate — that's the point.
+    """
+    core = text[item["_abs_start"]: item["_abs_start"] + item["_core_len"]]
+    if not item["respondido"]:
+        raise HTTPException(409, msg("not_answered"))
+    pre = _pre_answer_core(core)
+    if pre is None:
+        raise HTTPException(409, msg("answer_not_ours"))
+    new_text = text[:item["_abs_start"]] + pre + text[item["_abs_start"] + item["_core_len"]:]
+    try:
+        write_text_preserving_newlines(p, new_text)
+    except OSError as exc:
+        raise HTTPException(409, msg("write_failed", ruta=body.ruta, exc=exc))
+    jcode = journal_code(t)
+    append_journal(dict(t), "decision", "ok", body.ruta,
+                   extra=[f"{item['_marker']} {w('reabierta', jcode)}: {item['pregunta'][:80]}"])
+    return {"ruta": body.ruta, "id": body.id, "respondido": False}
 
 
 @app.post("/tickets/{tid}/decisiones")
@@ -3304,7 +3425,7 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
     p = declared_file_or_none(t, body.ruta)
     if not p:
         raise HTTPException(400, msg("path_not_declared"))
-    if not body.aceptar_propuesta and not (body.respuesta and body.respuesta.strip()):
+    if not body.reabrir and not body.aceptar_propuesta and not (body.respuesta and body.respuesta.strip()):
         raise HTTPException(400, msg("answer_or_accept_required"))
     try:
         text = read_text_preserving_newlines(p)
@@ -3324,6 +3445,8 @@ def responder_decision(tid: int, body: DecisionAnswerIn):
                 if _pre_answer_id(core) == body.id:
                     raise HTTPException(409, msg("already_answered"))
         raise HTTPException(409, msg("file_changed_reload"))
+    if body.reabrir:
+        return _reopen(t, p, text, item, body)
     if item["respondido"]:
         raise HTTPException(409, msg("already_answered"))
     if body.aceptar_propuesta:

@@ -1,8 +1,35 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { api, ApiError, type Decision } from "@/api"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { plural, t } from "@/strings"
+
+// The decisions are lifted verbatim from a `.md`, so they arrive carrying their own
+// markup — until this existed the panel showed `**D2**` and backticked file names as
+// literal asterisks and backticks. Inline only, two constructs, no block syntax: a
+// decision is a question and a paragraph, never a heading or a list, and pulling in a
+// markdown renderer (50 KB) to bold two words would be paying document prices for a
+// sentence. ponytail: `**bold**` and `code`, nothing else; add a case when a real
+// decision needs one.
+const INLINE = /\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*/g
+
+function md(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  let last = 0
+  for (const m of text.matchAll(INLINE)) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    // Bold is tried before italic in the alternation, so `**x**` never reads as two
+    // empty emphases. Each recurses one level (a code span inside a bold run —
+    // "**una propiedad `x`**", real R-5 P2) and terminates, since neither body can
+    // contain its own delimiter.
+    out.push(m[1] ? <strong key={m.index} className="font-semibold text-foreground">{md(m[1])}</strong>
+      : m[2] ? <code key={m.index} className="rounded bg-muted px-1 py-0.5 font-mono">{m[2]}</code>
+      : <em key={m.index}>{md(m[3])}</em>)
+    last = m.index + m[0].length
+  }
+  out.push(text.slice(last))
+  return out
+}
 
 /**
  * The `## Decisiones para ti` items of one phase's deliverable, answerable in place —
@@ -20,7 +47,7 @@ import { plural, t } from "@/strings"
 export function Decisions({ ticketId, ruta, counts }: {
   ticketId: number
   ruta: string
-  counts: { decidir: number; bloquea: number }
+  counts: { decidir: number; bloquea: number; etiquetas: string[] }
 }) {
   const [open, setOpen] = useState(false)
   const [puntos, setPuntos] = useState<Decision[] | null>(null)
@@ -54,6 +81,19 @@ export function Decisions({ ticketId, ruta, counts }: {
       .finally(() => setBusy(null))
   }
 
+  // Undoing an answer, not a third way of giving one. An answer used to be final —
+  // and that was fine until two of them could contradict each other and leave the next
+  // phase with nothing to implement (real R-5, `P2` against `P3`). Same refresh as
+  // `answer`: the item's id changes both times, because its text does.
+  const reopen = (id: string) => {
+    setBusy(id)
+    setError("")
+    api.responderDecision(ticketId, { ruta, id, reabrir: true })
+      .then(load)
+      .catch(e => setError(e instanceof ApiError ? e.message : String(e)))
+      .finally(() => setBusy(null))
+  }
+
   const total = counts.decidir + counts.bloquea
 
   return (
@@ -74,6 +114,11 @@ export function Decisions({ ticketId, ruta, counts }: {
           </span>
         )}
         {total === 0 && <span>{t("decisions.allAnswered")}</span>}
+        {/* Which ones, by name. Without this the analysis's line and the plan's line
+            read identically, and a message elsewhere naming "P2" points at neither. */}
+        {!!counts.etiquetas.length && (
+          <span className="font-mono text-muted-foreground"> ({counts.etiquetas.join(" ")})</span>
+        )}
       </button>
 
       {open && (
@@ -87,14 +132,28 @@ export function Decisions({ ticketId, ruta, counts }: {
                      : p.tipo === "BLOQUEA" ? "border-destructive/40 bg-destructive/5"
                      : "border-warning/40 bg-warning/5"}`}>
               <div className="flex items-center gap-2">
+                {/* The item's own name, first and monospaced: every other document
+                    refers to it this way ("conflicto P2/P3" in `tasks.md`), and
+                    without it you can't tell which card the message means. */}
+                {p.etiqueta && (
+                  <span className="rounded border border-border bg-muted px-1 font-mono text-[11px] text-foreground">
+                    {p.etiqueta}
+                  </span>
+                )}
                 <span className={`font-semibold ${
                   p.tipo === "BLOQUEA" ? "text-destructive" : "text-warning-active"}`}>
                   {p.tipo === "BLOQUEA" ? t("decisions.blocksNextPhase") : t("decisions.decideWithProposal")}
                 </span>
                 {p.respondido && <span className="text-muted-foreground">· {t("decisions.answeredSuffix")}</span>}
+                {p.respondido && (
+                  <Button size="sm" variant="ghost" className="ml-auto h-5 text-xs"
+                          disabled={busy === p.id} onClick={() => reopen(p.id)}>
+                    {t("decisions.reopen")}
+                  </Button>
+                )}
               </div>
-              <p className="mt-1 font-medium text-foreground">{p.pregunta}</p>
-              {p.cuerpo && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{p.cuerpo}</p>}
+              <p className="mt-1 font-medium text-foreground">{md(p.pregunta)}</p>
+              {p.cuerpo && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{md(p.cuerpo)}</p>}
 
               {!p.respondido && (
                 <div className="mt-2 space-y-1.5">

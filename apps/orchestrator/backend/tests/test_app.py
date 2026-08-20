@@ -722,7 +722,8 @@ def test_a_phase_counts_the_decisions_it_left_open(client, monkeypatch, tmp_path
     _use_fake_claude(monkeypatch, stamp="ok — a.md")
     tid = client.post("/tickets", json={"ado_id": 50, "project": "Demo"}).json()["id"]
     client.post(f"/tickets/{tid}/run", json={})
-    assert _phase(client, tid, "analyze")["decisiones"] == {"decidir": 1, "bloquea": 1}
+    assert _phase(client, tid, "analyze")["decisiones"] == {"decidir": 1, "bloquea": 1,
+                                                           "ruta": "a.md", "etiquetas": []}
 
 
 def test_a_deliverable_without_decisions_says_nothing(client, monkeypatch, tmp_path):
@@ -3943,6 +3944,98 @@ def _puntos(client, tid, ruta):
     return client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta}).json()["puntos"]
 
 
+# Real analysis R-5 numbered its items (`**D2 · BLOQUEA**`); both the counter and the
+# panel matched nothing and the UI showed no boxes at all for a document that had them.
+NUMBERED_DOC = DECISIONS_DOC.replace("**BLOQUEA**", "**D2 · BLOQUEA**")                             .replace("**DECIDIR**", "**D1 · DECIDIR**")
+
+
+def test_a_fully_answered_file_still_reports_its_panel(client, monkeypatch, tmp_path):
+    """Zero open is not the same as no section. The panel is where an answer gets
+    CHANGED, so keying its existence on what's left open hid it exactly when R-5
+    needed it — `implement` stopped over two answers that contradicted each other and
+    the UI offered no way back to either."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    for punto in _puntos(client, tid, ruta):
+        client.post(f"/tickets/{tid}/decisiones",
+                    json={"ruta": ruta, "id": punto["id"], "respuesta": "va"})
+    fase = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert fase["decisiones"] == {"decidir": 0, "bloquea": 0, "ruta": ruta,
+                                  "etiquetas": []}
+
+
+def test_reabrir_undoes_an_answer_so_it_can_be_answered_again(client, monkeypatch, tmp_path):
+    """Two answers can contradict each other (real R-5: `P2` vs `P3` left task 5 with no
+    implementation that satisfies both). Without this the only way back was an editor."""
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    before = p.read_bytes()
+    decidir = _puntos(client, tid, ruta)[1]
+    client.post(f"/tickets/{tid}/decisiones",
+                json={"ruta": ruta, "id": decidir["id"], "aceptar_propuesta": True})
+    answered = next(x for x in _puntos(client, tid, ruta) if x["respondido"])
+    r = client.post(f"/tickets/{tid}/decisiones",
+                    json={"ruta": ruta, "id": answered["id"], "reabrir": True})
+    assert r.status_code == 200 and r.json()["respondido"] is False
+    # Byte for byte what it was: the splice put back exactly what `_write_answer` wrote.
+    assert p.read_bytes() == before
+    # And it counts as open again — which is what puts the phase gate back in front.
+    fase = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert fase["decisiones"] == {"decidir": 1, "bloquea": 1, "ruta": ruta,
+                                  "etiquetas": []}
+
+
+def test_reabrir_refuses_an_answer_the_app_did_not_write(client, monkeypatch, tmp_path):
+    """A human who ticked the box and wrote underneath in their own shape leaves bytes
+    this can't undo. Refusing beats guessing at which lines were theirs."""
+    doc = DECISIONS_DOC.replace("- [ ] **DECIDIR**", "- [x] **DECIDIR**") + "      lo hablamos ayer"
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path, doc=doc)
+    hecho = next(x for x in _puntos(client, tid, ruta) if x["respondido"])
+    r = client.post(f"/tickets/{tid}/decisiones",
+                    json={"ruta": ruta, "id": hecho["id"], "reabrir": True})
+    assert r.status_code == 409
+
+
+def test_reabrir_refuses_an_item_that_is_not_answered(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
+    abierto = _puntos(client, tid, ruta)[0]
+    r = client.post(f"/tickets/{tid}/decisiones",
+                    json={"ruta": ruta, "id": abierto["id"], "reabrir": True})
+    assert r.status_code == 409
+
+
+def test_decisiones_found_inside_a_declared_directory(client, monkeypatch, tmp_path):
+    """Phase 2 declares a DIRECTORY, and its decisions live in `design.md` inside it.
+    Before this, `declared_file_or_none` rejected the directory and the panel never
+    appeared — the only way to answer a plan's decision was an editor."""
+    change = tmp_path / "repo" / "openspec" / "changes" / "3359-x"
+    change.mkdir(parents=True)
+    (change / "design.md").write_bytes(DECISIONS_DOC.encode("utf-8"))
+    (change / "tasks.md").write_bytes(b"- [ ] 1 algo")
+    _use_fake_claude(monkeypatch, stamp="ok - openspec/changes/3359-x")
+    tid = client.post("/tickets", json={"ado_id": 3359, "project": "Demo"}).json()["id"]
+    client.post(f"/tickets/{tid}/run", json={})
+    fase = client.get(f"/tickets/{tid}").json()["fases"][0]
+    assert fase["decisiones"]["ruta"] == "openspec/changes/3359-x/design.md"
+    assert fase["decisiones"]["decidir"] == 1 and fase["decisiones"]["bloquea"] == 1
+    puntos = _puntos(client, tid, fase["decisiones"]["ruta"])
+    assert [p["tipo"] for p in puntos] == ["BLOQUEA", "DECIDIR"]
+
+
+def test_decisiones_tolerate_numbered_markers(client, monkeypatch, tmp_path):
+    tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path, doc=NUMBERED_DOC)
+    fase = client.get(f"/tickets/{tid}").json()["fases"][0]
+    # The numbered doc names them, and that name reaches the collapsed line: two
+    # phases whose lines read the same is what left R-5 unable to tell which held "P2".
+    assert fase["decisiones"] == {"decidir": 1, "bloquea": 1, "etiquetas": ["D2", "D1"],
+                                  "ruta": "docs/tickets/3359-analysis.md"}
+    bloquea, decidir = _puntos(client, tid, ruta)
+    assert bloquea["tipo"] == "BLOQUEA" and decidir["tipo"] == "DECIDIR"
+    assert bloquea["pregunta"].startswith("¿Este ticket")
+    assert client.post(f"/tickets/{tid}/decisiones",
+                       json={"ruta": ruta, "id": decidir["id"],
+                             "aceptar_propuesta": True}).status_code == 200
+    assert "- [x] **D1 · DECIDIR**" in p.read_text(encoding="utf-8")
+
+
 def test_decisiones_lists_parsed_items(client, monkeypatch, tmp_path):
     tid, ruta, p = _decisions_declared(client, monkeypatch, tmp_path)
     r = client.get(f"/tickets/{tid}/decisiones", params={"ruta": ruta})
@@ -4081,7 +4174,8 @@ def test_the_open_decisions_counter_counts_english_markers(client, monkeypatch, 
                                        doc=REAL_3359_DECISIONS_DOC_EN)
     fases = client.get(f"/tickets/{tid}").json()["fases"]
     fase = next(f for f in fases if f["fase"] == "analyze")
-    assert fase["decisiones"] == {"decidir": 1, "bloquea": 1}
+    assert fase["decisiones"] == {"decidir": 1, "bloquea": 1, "ruta": ruta,
+                                  "etiquetas": []}
 
 
 def test_decisiones_empty_list_when_the_file_has_no_decisions_section(client, monkeypatch, tmp_path):

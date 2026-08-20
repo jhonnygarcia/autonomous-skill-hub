@@ -49,7 +49,12 @@ export type Phase = {
   progreso?: { hechas: number; total: number } | null
   /** Unticked markers in the deliverable. Absent when there are none — absence is not
    *  zero, and a phase with nothing to decide must not paint a counter. */
-  decisiones?: { decidir: number; bloquea: number }
+  // `ruta` is the FILE the decisions live in, which is not the phase's declared
+  // path when the deliverable is a directory (an OpenSpec change: `design.md`).
+  // `etiquetas` names them without opening the panel ("D1 D2 …" / "P1 P2 P3"), which
+  // is what tells two identical-looking collapsed lines apart. Empty when the agent
+  // numbered nothing.
+  decisiones?: { decidir: number; bloquea: number; ruta: string; etiquetas: string[] }
   /** Whether this phase has a previous session to continue. Computed in the backend:
    *  it's the same condition that decides whether the resume applies or falls back to
    *  fresh, and a second copy here would drift from it. */
@@ -72,6 +77,9 @@ export type Artifact = { ruta: string; texto: string; bytes: number; truncado: b
 export type Decision = {
   id: string; tipo: "DECIDIR" | "BLOQUEA"; pregunta: string; cuerpo: string
   propuesta: string | null; respondido: boolean
+  /** "D1", "P2" — the handle the rest of the ticket refers to it by (`tasks.md`'s
+   *  own notes say "conflicto P2/P3"). `""` when the agent numbered nothing. */
+  etiqueta: string
 }
 export type TicketDetail = { ticket: Ticket; fases: Phase[]; runs: Run[]; log_tail: string }
 // The runner runs one at a time across ALL projects: this is what lets us explain
@@ -206,8 +214,10 @@ export const api = {
     fetch(`/api/tickets/${id}/decisiones?ruta=${encodeURIComponent(ruta)}`)
       .then(r => json<{ puntos: Decision[] }>(r)),
   /** Either `aceptar_propuesta: true` (the item's own proposal, verbatim) or
-   *  `respuesta` (the human's own text) — never both, the backend 400s if neither. */
-  responderDecision: (id: number, body: { ruta: string; id: string; aceptar_propuesta?: boolean; respuesta?: string }) =>
+   *  `respuesta` (the human's own text) — never both, the backend 400s if neither.
+   *  `reabrir: true` is neither: it undoes an answer so the item can be answered
+   *  again, and the other two fields are ignored. */
+  responderDecision: (id: number, body: { ruta: string; id: string; aceptar_propuesta?: boolean; respuesta?: string; reabrir?: boolean }) =>
     fetch(`/api/tickets/${id}/decisiones`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

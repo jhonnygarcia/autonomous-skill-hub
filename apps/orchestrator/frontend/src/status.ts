@@ -153,6 +153,25 @@ export function canRunPhase(
   if (!f.disponible) return translate("status.phaseNotAvailable")
   const m = activeRunReason(activeRun, ticketId)
   if (m) return m
+  // Decisions an EARLIER phase left open block this one. The skills' own rule is
+  // narrower — an unanswered `DECIDIR` lets the next phase proceed with the proposal
+  // unless the target repo sets `autonomy: supervised`, a file the orchestrator never
+  // reads — so this gate is deliberately stricter than the contract. What it costs is
+  // one click on a proposal you were going to accept anyway; what it prevents is the
+  // run R-5 burned on 2026-08-20, where `implement` launched, refused over three
+  // unanswered items, and left an error phase behind. Frontend-only on purpose:
+  // `POST /run` stays the door a human can still choose to walk through.
+  // The COUNTS, never the field's presence: `decisiones` is also sent with both at
+  // zero, to keep the panel reachable once everything is answered (that's where an
+  // answer gets changed). A phase with nothing open blocks nothing.
+  const owing = phases.slice(0, i)
+    .filter(p => (p.decisiones?.decidir ?? 0) + (p.decisiones?.bloquea ?? 0) > 0)
+  if (owing.length) {
+    const n = owing.reduce((s, p) => s + p.decisiones!.decidir + p.decisiones!.bloquea, 0)
+    return translate("status.pendingDecisions")
+      .replace("{list}", owing.map(p => phaseLabel(p.fase)).join(", "))
+      .replace("{n}", String(n))
+  }
   const options = (PHASE_NEEDS[f.fase] ?? [])
     .map(name => phases.find(p => p.fase === name && p.disponible))
     .filter((p): p is Phase => !!p)

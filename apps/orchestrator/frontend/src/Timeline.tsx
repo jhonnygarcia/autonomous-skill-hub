@@ -66,6 +66,12 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
   const [viewer, setViewer] = useState<Artifact | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<{ ruta: string; msg: string } | null>(null)
+  // WHICH phase's chip was clicked, not just which path. Two phases can declare the
+  // same file — `design` declares the change DIRECTORY and `implement` declares
+  // `tasks.md` inside it — and matching on the path alone opened the viewer under both
+  // rows at once (real R-5, 2026-08-20). The path is what gets fetched; the phase is
+  // what decides where it's drawn.
+  const [viewPhase, setViewPhase] = useState<string | null>(null)
   // Rendered by default — raw stays one click away, never hidden. Shared across every
   // chip like `instructions`: switching files keeps whatever view you were in, and a
   // fresh viewer always opens rendered, the more readable default.
@@ -98,10 +104,13 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
       .finally(() => setPreparing(false))
   }
 
-  const viewArtifact = (ruta: string) => {
-    if (viewer?.ruta === ruta) return setViewer(null)     // second click: close
+  const showing = (fase: string, ruta: string) => viewPhase === fase && viewer?.ruta === ruta
+
+  const viewArtifact = (fase: string, ruta: string) => {
+    if (showing(fase, ruta)) return setViewer(null)     // second click: close
     const id = ++requestId.current
-    setLoading(ruta); setError(null)
+    setLoading(`${fase}|${ruta}`); setError(null)
+    setViewPhase(fase)
     api.artifact(ticketId, ruta)
       .then(a => { if (id === requestId.current) setViewer(a) })
       .catch(e => { if (id === requestId.current) { setViewer(null); setError({ ruta, msg: String(e) }) } })
@@ -180,7 +189,6 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
           // The label is the RELATIVE name the backend sent (`specs/pagos/spec.md`),
           // not its basename: with two capabilities, two `spec.md` would be indistinguishable.
           : h.nombres.map(n => ({ ruta: `${h.ruta}/${n}`, etiqueta: n }))
-        const paths = items.map(it => it.ruta)
         const isLast = i === phases.length - 1
         const isRunning = f.estado === "corriendo"
         // A phase that declared a deliverable nobody can find must not read as success.
@@ -274,12 +282,12 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
 
               {/* Answerable in place — without this nobody reads the `Decisiones para
                   ti` sections: finding them meant opening an 8 KB document and
-                  hunting, answering them meant editing it by hand. `f.decisiones` only
-                  ever arrives alongside a single-FILE footprint (`open_decisions` in
-                  app.py resolves through `declared_file_or_none`, which rejects a
-                  directory), so `h.ruta` is always the right `ruta` here. */}
-              {f.decisiones && h && (
-                <Decisions ticketId={ticketId} ruta={h.ruta} counts={f.decisiones} />
+                  hunting, answering them meant editing it by hand. The `ruta` comes
+                  from `f.decisiones`, NOT from the footprint: a phase whose deliverable
+                  is a directory (Phase 2's OpenSpec change) keeps its decisions in one
+                  file inside it, and `declared_file_or_none` rejects the directory. */}
+              {f.decisiones && (
+                <Decisions ticketId={ticketId} ruta={f.decisiones.ruta} counts={f.decisiones} />
               )}
 
               {f.estado === "error" && f.motivo && (
@@ -328,13 +336,13 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {items.map(it => (
-                          <button key={it.ruta} onClick={() => viewArtifact(it.ruta)}
+                          <button key={it.ruta} onClick={() => viewArtifact(f.fase, it.ruta)}
                                   title={it.ruta}
-                                  aria-pressed={viewer?.ruta === it.ruta}
-                                  className={`${CHIP} ${viewer?.ruta === it.ruta
+                                  aria-pressed={showing(f.fase, it.ruta)}
+                                  className={`${CHIP} ${showing(f.fase, it.ruta)
                                     ? "border-ring bg-accent text-accent-foreground"
                                     : "border-border text-muted-foreground"}`}>
-                            {loading === it.ruta ? t("common.loading") : it.etiqueta}
+                            {loading === `${f.fase}|${it.ruta}` ? t("common.loading") : it.etiqueta}
                           </button>
                         ))}
                       </div>
@@ -408,14 +416,16 @@ export function Timeline({ phases, runs, activeRun, ticketId, onRun, onRestore, 
                 </div>
               )}
 
-              {/* The path travels along with the message: with analyze and design both
-                  showing a footprint at the same time, a 400 opening one phase's file
-                  shouldn't also render under the other. */}
-              {error && paths.includes(error.ruta) && (
+              {/* Both keyed on the phase whose chip was clicked, not on the path: two
+                  phases can declare the same file (`design` declares the change
+                  directory, `implement` declares `tasks.md` inside it), and matching on
+                  the path drew the viewer — and a failed open's message — under both
+                  rows at once. */}
+              {error && viewPhase === f.fase && (
                 <p className="pb-2 text-xs text-destructive">{error.msg}</p>
               )}
 
-              {viewer && paths.includes(viewer.ruta) && (
+              {viewer && viewPhase === f.fase && (
                 <div className="mb-3 overflow-hidden rounded-md border border-border">
                   <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/50 px-3 py-1.5 text-xs">
                     <span className="text-muted-foreground">{t("timeline.viewing")}</span>
