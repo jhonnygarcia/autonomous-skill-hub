@@ -89,7 +89,7 @@ And the open decisions:
 ## Decisiones para ti
 
 - [ ] **DECIDIR** — ¿el `trendId` lo expone el back o lo calcula el front?
-      Propuesta: el back, sigue el patrón de `Controllers/Trends.cs:88`.
+      Propuesta: **el back, sigue el patrón de `Controllers/Trends.cs:88`**.
       Si no respondes, sigo con la propuesta.
 ```
 
@@ -142,9 +142,9 @@ English: they are part of the document, not part of the contract.
 
 **What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
 markers and their section. In Spanish they read `## Decisiones para ti`,
-`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta: **<text>**`, and `Si no respondes, sigo con la
 propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
-`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+`Proposal: **<text>**`, and `If you don't answer, I proceed with the proposal.`. The
 orchestrator reads both.
 
 ## 5. Closing

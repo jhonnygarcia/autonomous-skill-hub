@@ -133,6 +133,13 @@ it), don't move them ahead or reorder them:
    and it's the only real backing a checked box ever gets. Not green, not
    committed, whatever the report said.
 
+   **In the foreground, always — never as a background task, however long the
+   command is.** There is no human here and the turn is the session: backgrounding
+   the check and waiting for a notification ends the run instead, with no stamp
+   and the task uncommitted. That is exactly how run 16 of R-5 lost 33 minutes
+   after finishing tasks 5, 6 and 7 (2026-08-20). A full test suite is meant to
+   be waited on.
+
    Green, plus a diff that matches the task, plus a review with nothing
    `critical` or `important`: **commit those specific paths** — never
    `git add -A` or `git add .` — with the message `<id> task N: <subject>`, and
@@ -272,9 +279,9 @@ English: they are part of the document, not part of the contract.
 
 **What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
 markers and their section. In Spanish they read `## Decisiones para ti`,
-`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta: **<text>**`, and `Si no respondes, sigo con la
 propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
-`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+`Proposal: **<text>**`, and `If you don't answer, I proceed with the proposal.`. The
 orchestrator reads both.
 
 ## Closing

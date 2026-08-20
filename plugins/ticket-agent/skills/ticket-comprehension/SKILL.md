@@ -106,7 +106,7 @@ is a task failure, not an acceptable variant.
 # Analysis of ticket <id>: <title>
 
 **Type/Status:** ... · **Assigned:** ... · **Iteration:** ...
-**Analyzed:** <date> by ticket-agent v0.12.1
+**Analyzed:** <date> by ticket-agent v0.12.3
 
 ## What it asks for
 (2-6 lines, faithful to the ticket, without over-interpreting)
@@ -156,7 +156,7 @@ was missing: "None")
 ## Decisiones para ti
 
 - [ ] **DECIDIR** — <the question>
-      Propuesta: <the proposal, with its file:line where one applies>
+      Propuesta: **<the proposal, with its file:line where one applies>**
       Si no respondes, sigo con la propuesta.
 
 - [ ] **BLOQUEA** — <the question>
@@ -181,7 +181,12 @@ and becomes a form to fill in. `DECIDIR` never blocks — but proceeding with th
 proposal **without leaving a trace** is worse than blocking, which is why the
 next phase has to write down that it did.
 
-The human answers by editing the file: ticking the box and writing underneath.
+The human answers by editing the file: ticking the box and writing underneath —
+or from the orchestrator's UI, which parses this section and offers an accept
+button per proposal. **The proposal's text goes in bold**, exactly as the
+template writes it: that bold is what the UI reads to know what accepting means,
+and a `Propuesta:` left unbolded silently loses the button.
+
 Same checkbox convention as `tasks.md`. Don't invent a second format.
 
 ## Output language
@@ -216,9 +221,9 @@ English: they are part of the document, not part of the contract.
 
 **What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
 markers and their section. In Spanish they read `## Decisiones para ti`,
-`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta: **<text>**`, and `Si no respondes, sigo con la
 propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
-`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+`Proposal: **<text>**`, and `If you don't answer, I proceed with the proposal.`. The
 orchestrator reads both.
 
 ## 4. Closing based on autonomy

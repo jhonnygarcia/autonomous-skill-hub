@@ -144,9 +144,9 @@ English: they are part of the document, not part of the contract.
 
 **What does get translated**, and is easy to forget: the `DECIDIR`/`BLOQUEA`
 markers and their section. In Spanish they read `## Decisiones para ti`,
-`**DECIDIR**`, `**BLOQUEA**`, `Propuesta:`, and `Si no respondes, sigo con la
+`**DECIDIR**`, `**BLOQUEA**`, `Propuesta: **<text>**`, and `Si no respondes, sigo con la
 propuesta.`; in English, `## Decisions for you`, `**DECIDE**`, `**BLOCKS**`,
-`Proposal:`, and `If you don't answer, I proceed with the proposal.`. The
+`Proposal: **<text>**`, and `If you don't answer, I proceed with the proposal.`. The
 orchestrator reads both.
 
 ## 5. Closing
