@@ -659,6 +659,32 @@ code path. Recorded in the journal like `restaurar` is, for the same reason: a f
 that changes with nobody saying so is what makes the next session unable to
 reconstruct what happened.
 
+**Four things the panel learned from one real ticket (R-5, 2026-08-20), all of them
+because a run stopped and the UI offered no way forward.** The deliverable of Phase 2
+is a DIRECTORY, and `declared_file_or_none` rejects one: `decision_rutas` resolves a
+declared directory to its markdown children, so the plan's own decisions are reachable
+at all, and `fases[].decisiones.ruta` carries the FILE (never the declared path) that
+the panel answers into. `open_decisions` reports a file whose items are **all
+answered** too, with both counts at zero — the panel is also where an answer gets
+changed, so keying its existence on what's left open hid it exactly when it was
+needed; whoever gates on this must read the counts, never the field's presence
+(`canRunPhase` does). `POST /decisiones {reabrir: true}` (`_reopen`) undoes an answer
+— only the bytes `_write_answer` itself wrote, recovered by `_pre_answer_core`, and it
+refuses an answer written by hand rather than approximating which lines were the
+human's. And both the summary (`etiquetas`) and each item (`etiqueta`) carry the
+label the agent numbered the item with — `D1`, `P2` — because every other document
+refers to them that way (`tasks.md` said "conflicto P2/P3") and two phases whose
+collapsed lines read identically leave the reader with no way to tell which file holds
+a `P`.
+
+**A phase whose predecessor left an open decision can't be launched from the UI**
+(`canRunPhase`, frontend only — `POST /run` stays a door a human can choose to walk
+through). This is deliberately stricter than the skills' own rule, where an unanswered
+`DECIDIR` lets the next phase proceed with the proposal unless the target repo sets
+`autonomy: supervised` — a file the orchestrator never reads. It costs one click on a
+proposal you were going to accept; it prevents the run R-5 burned launching `implement`
+into three unanswered items.
+
 **The engine, the model and the effort are chosen per phase**, from Settings in the UI
 (`Models.tsx` → `GET/PUT /modelos`, plus `GET /engines` for the selector's options).
 They live in the `phase_config` table and nowhere else: an empty model or effort means
@@ -756,6 +782,16 @@ fake that shared Claude's shape would pass while the runner mixed the two up.
   note it is *not* called `openspec`). An `--allowedTools` specifier like
   `Bash(npx ...:*)` has to match **literally** the start of the command or it gets
   denied — and even then it enables the Bash tool, it doesn't scope it to that command.
+  **On Windows the phase needs the PowerShell spelling too**, and a broad one:
+  `PHASE_ALLOWED_TOOLS["design"]` carries `PowerShell(npx:*)` because the agent
+  reaches for PowerShell first there and writes the package quoted
+  (`npx --yes '@fission-ai/openspec@latest' …`), which no unquoted package-specific
+  rule can prefix-match; Claude's PowerShell permission parser also splits the command
+  and wants every part covered. Verified on 2026-08-20 against the real binary: with
+  `PowerShell(npx:*)` the validation runs, with the package-specific spellings it was
+  denied twice and the plan closed `parcial` both times. On the machine this was built,
+  the runner's child gets a **Bash with no usable PATH** — `git`, `wc` and `npx` all
+  exit 127 — so PowerShell isn't a fallback there, it's the only path.
 - A new plugin: a folder under `plugins/<name>/` with `.claude-plugin/plugin.json`,
   skills under `skills/<name>/SKILL.md`, commands under `commands/*.md`, and a registry
   entry in `.claude-plugin/marketplace.json`.

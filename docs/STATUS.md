@@ -1305,6 +1305,71 @@ redescubra como bug:**
   en el mismo archivo es exactamente el tipo de cosa que diverge el día que
   uno de los dos lados crezca lógica que el otro no tiene.
 
+## Decimosexta sesion - 2026-08-20: el panel de decisiones se vuelve utilizable
+
+Sesion enteramente reactiva: un ticket real (`R-5`, una solicitud sin work item
+contra `ProvidenceTMSTenant`) recorrio las tres fases y cada tropiezo dejo un
+arreglo. Ninguno se penso en abstracto; todos salieron de una corrida que se
+quedo parada con la UI sin ofrecer salida.
+
+**Las decisiones no se veian, por tres motivos distintos.** El agente numera sus
+items (`**D2 · BLOQUEA**`) y las dos regex las buscaban desnudas
+(`**BLOQUEA**`), asi que no encontraban nada: sin contador y sin panel, con el
+documento diciendo que la decision estaba ahi. El entregable de la Fase 2 es un
+**directorio** y `declared_file_or_none` rechaza directorios, asi que las
+decisiones del plan (`design.md`) no eran alcanzables de ninguna forma —
+`implement` se nego por tres `P` que la UI nunca mostro. Y `open_decisions` solo
+reportaba las **abiertas**, asi que el panel desaparecia justo cuando todas
+estaban respondidas, que es cuando hace falta para **cambiar** una.
+
+**Una respuesta dejo de ser definitiva.** Hasta hoy `_write_answer` cambiaba el
+texto del item, con el el id, y toda puerta de vuelta daba 409 a proposito. Eso
+alcanzaba mientras una respuesta solo alimentaba la prosa de la fase siguiente;
+dejo de alcanzar cuando dos respuestas se contradijeron entre si (`P2` pedia no
+depender de `RateQuoteService`, `P3` mandaba "solo el rateo", y la tarea 5
+reutiliza 150 lineas que viven dentro de esa clase). `POST /decisiones
+{reabrir: true}` deshace **solo** lo que la app escribio, y se niega ante una
+respuesta escrita a mano en vez de adivinar que lineas eran del humano.
+
+**El bloqueo de fase es mas estricto que el contrato de las skills, a
+sabiendas.** Un `DECIDIR` sin responder deja seguir a la fase siguiente salvo
+`autonomy: supervised`, un archivo del repo destino que el orquestador no lee.
+Como no puede saberlo, la UI bloquea siempre — cuesta un clic en una propuesta
+que ibas a aceptar y evita la corrida que `implement` quemo para negarse.
+Frontend nada mas: `POST /run` sigue siendo una puerta que un humano puede
+cruzar.
+
+**`npx` no era el problema que parecia, dos veces.** La primera corrida de
+`design` cerro `parcial` diciendo que `npx` no era ejecutable; la segunda,
+despues de "arreglarlo", tambien. Leer el log entero mostro dos cosas
+independientes: en el hijo que lanza el runner **el Bash no tiene PATH**
+(`git`, `wc` y `npx` dan los tres exit 127), y la regla de PowerShell que se
+habia agregado no matcheaba porque el agente escribe el paquete entre comillas.
+Lo que funciona, verificado contra el binario real, es `PowerShell(npx:*)`. El
+PATH del Bash hijo sigue roto y queda anotado, no arreglado: es del entorno de
+esta maquina.
+
+**El `Check` no se corre en background.** La corrida 16 termino las tareas 5, 6
+y 7 con sus commits y despues lanzo `dotnet test` como tarea de fondo para
+esperar la notificacion. En `claude -p` el turno **es** la sesion: el proceso
+termino ahi, sin `HUELLA`, y se perdieron 33 minutos y 11 dolares con el trabajo
+hecho pero la corrida en rojo. `change-implementation` lo prohibe ahora en el
+paso 4.
+
+**Dos detalles de presentacion que no son cosmetica.** Las decisiones vienen de
+un `.md` y se mostraban con sus asteriscos y backticks a la vista; un render
+inline de 15 lineas (negrita, codigo, cursiva, un nivel de recursion) alcanza —
+un renderer de markdown son 50 KB para poner dos palabras en negrita. Y el visor
+de artefactos se identificaba solo por ruta, asi que `tasks.md` se abria a la vez
+bajo Plan y bajo Codigo: dos fases pueden declarar el mismo archivo cuando una
+declara el directorio que lo contiene.
+
+Plugin `ticket-agent` a **v0.12.3** (plantillas con `Propuesta:` en negrita —
+`PROPOSAL_RE` siempre la exigio y ninguna plantilla la escribia — y la regla del
+`Check` en primer plano). Se descubrio de paso que el plugin instalado seguia en
+**0.11.0**: los arreglos de skill de los ultimos dias no habian llegado a ninguna
+corrida.
+
 ## Immediate pending items
 
 - [ ] **A first real run of a vague request through the fan-out route.** Every check
