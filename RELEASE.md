@@ -41,7 +41,6 @@ it with `Ctrl+C`.
       backend/
         app.py               the whole server: API, runner, SQLite
         requirements.txt
-        hooks/               the hook that denies push/PR during implement
       frontend/dist/         the built UI — no Node needed to run it
       README.md              the app's own documentation
       INSTALL.md  USAGE.md   plugin setup and day-to-day use

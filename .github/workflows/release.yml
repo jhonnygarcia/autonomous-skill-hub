@@ -43,9 +43,12 @@ jobs:
           set -eu
           OUT=orchestrator
           mkdir -p "$OUT/backend" "$OUT/frontend"
+          # No `hooks/` since 2026-08-16: the push guard was removed (a hook is a
+          # Claude Code-only mechanism, and the runner is going engine-agnostic), but
+          # this line kept copying a directory that no longer exists — so every tag
+          # pushed since then failed here, and nobody found out until v0.12.3.
           cp -r apps/orchestrator/backend/app.py \
-                apps/orchestrator/backend/requirements.txt \
-                apps/orchestrator/backend/hooks "$OUT/backend/"
+                apps/orchestrator/backend/requirements.txt "$OUT/backend/"
           cp -r apps/orchestrator/frontend/dist "$OUT/frontend/dist"
           cp apps/orchestrator/run.cmd apps/orchestrator/run.sh "$OUT/"
           cp apps/orchestrator/README.md "$OUT/README.md"
